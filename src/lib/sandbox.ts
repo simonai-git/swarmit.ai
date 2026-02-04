@@ -1,182 +1,199 @@
-import { spawn, exec as execCallback } from 'child_process';
+/**
+ * Task Sandbox - Execution environment for AI agents
+ * 
+ * Two modes:
+ * 1. Docker (local dev) - Full container isolation
+ * 2. Subprocess (Railway) - Lightweight temp directory isolation
+ */
+
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 
-const execAsync = promisify(execCallback);
+const execAsync = promisify(exec);
 
-// Execution result from sandbox
 export interface ExecResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  timedOut: boolean;
 }
 
-// Sandbox configuration
 export interface SandboxConfig {
-  repo?: string;           // Git repository to clone
-  branch?: string;         // Branch to checkout (default: main)
-  taskId: string;          // Task ID for naming
-  timeout?: number;        // Execution timeout in ms (default: 300000 = 5min)
-  memoryLimit?: string;    // Docker memory limit (default: 2g)
-  cpuLimit?: string;       // Docker CPU limit (default: 1)
-  networkEnabled?: boolean; // Enable network access (default: true)
-  env?: Record<string, string>; // Environment variables
+  taskId: string;
+  repo?: string;
+  branch?: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
 }
 
-// Docker image for sandbox
-const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || 'node:20-alpine';
-
-// Base directory for sandbox workspaces (host)
-const SANDBOX_BASE = process.env.SANDBOX_BASE || '/tmp/swarmit-sandboxes';
+const DEFAULT_TIMEOUT_MS = 60000; // 1 minute
+const DEFAULT_MAX_OUTPUT = 1024 * 1024; // 1MB
 
 /**
- * TaskSandbox - Isolated Docker container for task execution
+ * Abstract sandbox interface
  */
-export class TaskSandbox {
-  public containerId: string = '';
-  public workdir: string;
-  public taskId: string;
-  
-  private config: SandboxConfig;
-  private isRunning: boolean = false;
-  private hostWorkdir: string;
+export abstract class TaskSandbox {
+  protected taskId: string;
+  protected workdir: string;
+  protected config: SandboxConfig;
 
   constructor(config: SandboxConfig) {
-    this.config = {
-      timeout: 300000,
-      memoryLimit: '2g',
-      cpuLimit: '1',
-      networkEnabled: true,
-      branch: 'main',
-      ...config,
-    };
     this.taskId = config.taskId;
-    this.hostWorkdir = path.join(SANDBOX_BASE, `task-${config.taskId}-${uuidv4().slice(0, 8)}`);
-    this.workdir = '/workspace';
+    this.workdir = '';
+    this.config = {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxOutputBytes: DEFAULT_MAX_OUTPUT,
+      ...config
+    };
+  }
+
+  abstract initialize(): Promise<void>;
+  abstract exec(command: string, cwd?: string): Promise<ExecResult>;
+  abstract readFile(filePath: string): Promise<string>;
+  abstract writeFile(filePath: string, content: string): Promise<void>;
+  abstract listFiles(dir?: string): Promise<string[]>;
+  abstract cleanup(): Promise<void>;
+
+  getWorkdir(): string {
+    return this.workdir;
   }
 
   /**
-   * Create and start the sandbox container
+   * Clone a git repository into the sandbox
+   */
+  async gitClone(repo: string, branch?: string): Promise<ExecResult> {
+    const branchArg = branch ? `-b ${branch}` : '';
+    return this.exec(`git clone ${branchArg} ${repo} .`);
+  }
+
+  /**
+   * Git commit changes
+   */
+  async gitCommit(message: string): Promise<ExecResult> {
+    await this.exec('git add -A');
+    return this.exec(`git commit -m "${message.replace(/"/g, '\\"')}"`);
+  }
+
+  /**
+   * Git push changes
+   */
+  async gitPush(remote = 'origin', branch = 'main'): Promise<ExecResult> {
+    return this.exec(`git push ${remote} ${branch}`);
+  }
+
+  /**
+   * Factory method to create appropriate sandbox based on environment
    */
   static async create(config: SandboxConfig): Promise<TaskSandbox> {
-    const sandbox = new TaskSandbox(config);
-    await sandbox.start();
+    const useDocker = process.env.SANDBOX_MODE === 'docker' || 
+                      (process.env.NODE_ENV === 'development' && await isDockerAvailable());
+    
+    const sandbox = useDocker 
+      ? new DockerSandbox(config)
+      : new SubprocessSandbox(config);
+    
+    await sandbox.initialize();
     return sandbox;
   }
+}
 
-  /**
-   * Start the sandbox container
-   */
-  async start(): Promise<void> {
-    // Create host workspace directory
-    await fs.mkdir(this.hostWorkdir, { recursive: true });
+/**
+ * Docker-based sandbox for local development
+ * Full container isolation with resource limits
+ */
+export class DockerSandbox extends TaskSandbox {
+  private containerId: string = '';
+  private imageName = 'node:20-slim';
 
-    // Build docker run command
-    const args = [
-      'run',
-      '-d', // Detached
-      '--name', `swarmit-${this.taskId.slice(0, 8)}-${Date.now()}`,
-      '--memory', this.config.memoryLimit!,
-      '--cpus', this.config.cpuLimit!,
-      '-v', `${this.hostWorkdir}:${this.workdir}`,
-      '-w', this.workdir,
-    ];
+  async initialize(): Promise<void> {
+    // Create a unique container name
+    const containerName = `swarmit-task-${this.taskId.slice(0, 8)}-${uuidv4().slice(0, 8)}`;
+    
+    // Start container with resource limits
+    const { stdout } = await execAsync(`
+      docker run -d \
+        --name ${containerName} \
+        --memory=512m \
+        --cpus=1 \
+        --network=bridge \
+        --workdir=/workspace \
+        -v /tmp:/tmp \
+        ${this.imageName} \
+        tail -f /dev/null
+    `);
+    
+    this.containerId = stdout.trim();
+    this.workdir = '/workspace';
 
-    // Network configuration
-    if (!this.config.networkEnabled) {
-      args.push('--network', 'none');
-    }
+    // Install git in container
+    await this.exec('apt-get update && apt-get install -y git');
 
-    // Environment variables
-    if (this.config.env) {
-      for (const [key, value] of Object.entries(this.config.env)) {
-        args.push('-e', `${key}=${value}`);
-      }
-    }
-
-    // Add common tools and keep container alive
-    args.push(SANDBOX_IMAGE, 'sh', '-c', 'apk add --no-cache git curl && tail -f /dev/null');
-
-    try {
-      const { stdout } = await execAsync(`docker ${args.join(' ')}`);
-      this.containerId = stdout.trim();
-      this.isRunning = true;
-      console.log(`[Sandbox] Started container ${this.containerId.slice(0, 12)} for task ${this.taskId}`);
-
-      // Clone repository if specified
-      if (this.config.repo) {
-        await this.gitClone(this.config.repo, this.config.branch);
-      }
-    } catch (error) {
-      throw new Error(`Failed to start sandbox: ${error}`);
+    // Clone repo if specified
+    if (this.config.repo) {
+      await this.gitClone(this.config.repo, this.config.branch);
     }
   }
 
-  /**
-   * Execute a command in the sandbox
-   */
-  async exec(command: string, options: { timeout?: number; cwd?: string } = {}): Promise<ExecResult> {
-    if (!this.isRunning) {
-      throw new Error('Sandbox is not running');
-    }
-
-    const timeout = options.timeout || this.config.timeout!;
-    const workdir = options.cwd || this.workdir;
-
-    return new Promise((resolve, reject) => {
-      const dockerExec = spawn('docker', [
-        'exec',
-        '-w', workdir,
-        this.containerId,
-        'sh', '-c', command,
-      ]);
+  async exec(command: string, cwd?: string): Promise<ExecResult> {
+    const workdir = cwd ? path.join(this.workdir, cwd) : this.workdir;
+    const timeoutMs = this.config.timeoutMs!;
+    
+    return new Promise((resolve) => {
+      const fullCommand = `docker exec -w ${workdir} ${this.containerId} sh -c "${command.replace(/"/g, '\\"')}"`;
+      
+      const child = spawn('sh', ['-c', fullCommand], {
+        timeout: timeoutMs
+      });
 
       let stdout = '';
       let stderr = '';
       let timedOut = false;
 
-      const timer = setTimeout(() => {
-        timedOut = true;
-        dockerExec.kill('SIGKILL');
-      }, timeout);
+      const maxBytes = this.config.maxOutputBytes!;
 
-      dockerExec.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      dockerExec.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      dockerExec.on('close', (code) => {
-        clearTimeout(timer);
-        if (timedOut) {
-          resolve({
-            stdout,
-            stderr: stderr + '\n[TIMEOUT] Command exceeded time limit',
-            exitCode: 124,
-          });
-        } else {
-          resolve({
-            stdout,
-            stderr,
-            exitCode: code ?? 0,
-          });
+      child.stdout?.on('data', (data) => {
+        if (stdout.length < maxBytes) {
+          stdout += data.toString().slice(0, maxBytes - stdout.length);
         }
       });
 
-      dockerExec.on('error', (error) => {
-        clearTimeout(timer);
-        reject(error);
+      child.stderr?.on('data', (data) => {
+        if (stderr.length < maxBytes) {
+          stderr += data.toString().slice(0, maxBytes - stderr.length);
+        }
+      });
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, timeoutMs);
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        resolve({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: code ?? (timedOut ? 124 : 1),
+          timedOut
+        });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          stdout: '',
+          stderr: err.message,
+          exitCode: 1,
+          timedOut: false
+        });
       });
     });
   }
 
-  /**
-   * Read a file from the sandbox
-   */
   async readFile(filePath: string): Promise<string> {
     const result = await this.exec(`cat "${filePath}"`);
     if (result.exitCode !== 0) {
@@ -185,200 +202,194 @@ export class TaskSandbox {
     return result.stdout;
   }
 
-  /**
-   * Write a file to the sandbox
-   */
   async writeFile(filePath: string, content: string): Promise<void> {
     // Create directory if needed
     const dir = path.dirname(filePath);
     await this.exec(`mkdir -p "${dir}"`);
-
-    // Write content using base64 to handle special characters
-    const base64Content = Buffer.from(content).toString('base64');
-    const result = await this.exec(`echo "${base64Content}" | base64 -d > "${filePath}"`);
+    
+    // Write content using heredoc
+    const escapedContent = content.replace(/'/g, "'\\''");
+    const result = await this.exec(`cat > "${filePath}" << 'SWARMIT_EOF'\n${escapedContent}\nSWARMIT_EOF`);
     
     if (result.exitCode !== 0) {
       throw new Error(`Failed to write file: ${result.stderr}`);
     }
   }
 
-  /**
-   * List files in a directory
-   */
-  async listFiles(dirPath: string, recursive: boolean = false): Promise<string[]> {
-    const cmd = recursive ? `find "${dirPath}" -type f` : `ls -1 "${dirPath}"`;
-    const result = await this.exec(cmd);
-    
+  async listFiles(dir?: string): Promise<string[]> {
+    const targetDir = dir ? path.join(this.workdir, dir) : this.workdir;
+    const result = await this.exec(`find "${targetDir}" -type f -name "*" | head -100`);
     if (result.exitCode !== 0) {
       return [];
     }
-    
-    return result.stdout.trim().split('\n').filter(Boolean);
+    return result.stdout.split('\n').filter(Boolean);
   }
 
-  /**
-   * Clone a git repository
-   */
-  async gitClone(repo: string, branch: string = 'main'): Promise<void> {
-    // Add GitHub token if available for private repos
-    const githubToken = process.env.GITHUB_TOKEN;
-    let cloneUrl = repo;
-    
-    if (githubToken && repo.includes('github.com')) {
-      cloneUrl = repo.replace('https://github.com/', `https://${githubToken}@github.com/`);
-    }
-
-    const result = await this.exec(`git clone --branch ${branch} --depth 1 ${cloneUrl} .`, {
-      timeout: 120000, // 2 minutes for clone
-    });
-
-    if (result.exitCode !== 0) {
-      throw new Error(`Failed to clone repository: ${result.stderr}`);
-    }
-
-    // Configure git
-    await this.exec('git config user.email "agent@swarmit.ai"');
-    await this.exec('git config user.name "SwarmIt Agent"');
-
-    console.log(`[Sandbox] Cloned ${repo} into sandbox`);
-  }
-
-  /**
-   * Commit changes
-   */
-  async gitCommit(message: string, files?: string[]): Promise<string> {
-    // Stage files
-    if (files && files.length > 0) {
-      const result = await this.exec(`git add ${files.map(f => `"${f}"`).join(' ')}`);
-      if (result.exitCode !== 0) {
-        throw new Error(`Failed to stage files: ${result.stderr}`);
-      }
-    } else {
-      await this.exec('git add -A');
-    }
-
-    // Commit
-    const result = await this.exec(`git commit -m "${message.replace(/"/g, '\\"')}"`);
-    if (result.exitCode !== 0) {
-      // Check if there's nothing to commit
-      if (result.stdout.includes('nothing to commit')) {
-        return 'nothing-to-commit';
-      }
-      throw new Error(`Failed to commit: ${result.stderr}`);
-    }
-
-    // Get commit SHA
-    const shaResult = await this.exec('git rev-parse HEAD');
-    return shaResult.stdout.trim();
-  }
-
-  /**
-   * Push changes to remote
-   */
-  async gitPush(branch?: string): Promise<void> {
-    const targetBranch = branch || 'main';
-    const result = await this.exec(`git push origin ${targetBranch}`, {
-      timeout: 60000, // 1 minute for push
-    });
-
-    if (result.exitCode !== 0) {
-      throw new Error(`Failed to push: ${result.stderr}`);
-    }
-
-    console.log(`[Sandbox] Pushed to ${targetBranch}`);
-  }
-
-  /**
-   * Install npm dependencies
-   */
-  async npmInstall(): Promise<ExecResult> {
-    return this.exec('npm install', { timeout: 180000 }); // 3 minutes
-  }
-
-  /**
-   * Run npm script
-   */
-  async npmRun(script: string): Promise<ExecResult> {
-    return this.exec(`npm run ${script}`);
-  }
-
-  /**
-   * Check if sandbox is running
-   */
-  async isAlive(): Promise<boolean> {
-    if (!this.containerId) return false;
-    
-    try {
-      const { stdout } = await execAsync(`docker inspect -f '{{.State.Running}}' ${this.containerId}`);
-      return stdout.trim() === 'true';
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Stop and remove the sandbox container
-   */
   async cleanup(): Promise<void> {
-    if (!this.containerId) return;
-
-    try {
-      // Stop container
-      await execAsync(`docker stop ${this.containerId}`).catch(() => {});
-      
-      // Remove container
-      await execAsync(`docker rm -f ${this.containerId}`).catch(() => {});
-      
-      // Remove host workspace
-      await fs.rm(this.hostWorkdir, { recursive: true, force: true }).catch(() => {});
-
-      this.isRunning = false;
-      console.log(`[Sandbox] Cleaned up container ${this.containerId.slice(0, 12)}`);
-    } catch (error) {
-      console.error(`[Sandbox] Cleanup error:`, error);
-    }
-  }
-
-  /**
-   * Get container logs
-   */
-  async getLogs(tail: number = 100): Promise<string> {
-    if (!this.containerId) return '';
-    
-    try {
-      const { stdout } = await execAsync(`docker logs --tail ${tail} ${this.containerId}`);
-      return stdout;
-    } catch {
-      return '';
+    if (this.containerId) {
+      try {
+        await execAsync(`docker rm -f ${this.containerId}`);
+      } catch (e) {
+        console.error('Failed to cleanup container:', e);
+      }
     }
   }
 }
 
 /**
- * Cleanup all orphaned sandbox containers
+ * Subprocess-based sandbox for Railway/production
+ * Lightweight temp directory isolation
  */
-export async function cleanupOrphanedSandboxes(): Promise<void> {
-  try {
-    // Find all swarmit containers
-    const { stdout } = await execAsync('docker ps -a --filter "name=swarmit-" --format "{{.ID}}"');
-    const containerIds = stdout.trim().split('\n').filter(Boolean);
+export class SubprocessSandbox extends TaskSandbox {
+  async initialize(): Promise<void> {
+    // Create temp directory for this task
+    const tmpBase = os.tmpdir();
+    this.workdir = path.join(tmpBase, `swarmit-${this.taskId.slice(0, 8)}-${uuidv4().slice(0, 8)}`);
+    
+    await fs.mkdir(this.workdir, { recursive: true });
 
-    for (const id of containerIds) {
-      await execAsync(`docker rm -f ${id}`).catch(() => {});
+    // Clone repo if specified
+    if (this.config.repo) {
+      await this.gitClone(this.config.repo, this.config.branch);
+    }
+  }
+
+  async exec(command: string, cwd?: string): Promise<ExecResult> {
+    const workdir = cwd ? path.join(this.workdir, cwd) : this.workdir;
+    const timeoutMs = this.config.timeoutMs!;
+    
+    return new Promise((resolve) => {
+      const child = spawn('sh', ['-c', command], {
+        cwd: workdir,
+        env: {
+          ...process.env,
+          // Restrict some capabilities
+          PATH: '/usr/local/bin:/usr/bin:/bin',
+        }
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const maxBytes = this.config.maxOutputBytes!;
+
+      child.stdout?.on('data', (data) => {
+        if (stdout.length < maxBytes) {
+          stdout += data.toString().slice(0, maxBytes - stdout.length);
+        }
+      });
+
+      child.stderr?.on('data', (data) => {
+        if (stderr.length < maxBytes) {
+          stderr += data.toString().slice(0, maxBytes - stderr.length);
+        }
+      });
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, timeoutMs);
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        resolve({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: code ?? (timedOut ? 124 : 1),
+          timedOut
+        });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          stdout: '',
+          stderr: err.message,
+          exitCode: 1,
+          timedOut: false
+        });
+      });
+    });
+  }
+
+  async readFile(filePath: string): Promise<string> {
+    const fullPath = path.isAbsolute(filePath) 
+      ? filePath 
+      : path.join(this.workdir, filePath);
+    
+    // Security: ensure path is within workdir
+    if (!fullPath.startsWith(this.workdir)) {
+      throw new Error('Path escape attempt detected');
+    }
+    
+    return fs.readFile(fullPath, 'utf-8');
+  }
+
+  async writeFile(filePath: string, content: string): Promise<void> {
+    const fullPath = path.isAbsolute(filePath) 
+      ? filePath 
+      : path.join(this.workdir, filePath);
+    
+    // Security: ensure path is within workdir
+    if (!fullPath.startsWith(this.workdir)) {
+      throw new Error('Path escape attempt detected');
+    }
+    
+    const dir = path.dirname(fullPath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(fullPath, content, 'utf-8');
+  }
+
+  async listFiles(dir?: string): Promise<string[]> {
+    const targetDir = dir ? path.join(this.workdir, dir) : this.workdir;
+    
+    // Security check
+    if (!targetDir.startsWith(this.workdir)) {
+      throw new Error('Path escape attempt detected');
     }
 
-    // Cleanup sandbox directories
-    await fs.rm(SANDBOX_BASE, { recursive: true, force: true }).catch(() => {});
-    await fs.mkdir(SANDBOX_BASE, { recursive: true }).catch(() => {});
+    const files: string[] = [];
+    
+    async function walk(currentDir: string, base: string) {
+      try {
+        const entries = await fs.readdir(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry.name);
+          const relativePath = path.relative(base, fullPath);
+          
+          if (entry.isDirectory()) {
+            // Skip node_modules and .git
+            if (entry.name !== 'node_modules' && entry.name !== '.git') {
+              await walk(fullPath, base);
+            }
+          } else {
+            files.push(relativePath);
+            if (files.length >= 100) return; // Limit results
+          }
+        }
+      } catch (e) {
+        // Ignore permission errors
+      }
+    }
 
-    console.log(`[Sandbox] Cleaned up ${containerIds.length} orphaned containers`);
-  } catch (error) {
-    console.error('[Sandbox] Orphan cleanup error:', error);
+    await walk(targetDir, this.workdir);
+    return files;
+  }
+
+  async cleanup(): Promise<void> {
+    if (this.workdir) {
+      try {
+        await fs.rm(this.workdir, { recursive: true, force: true });
+      } catch (e) {
+        console.error('Failed to cleanup sandbox directory:', e);
+      }
+    }
   }
 }
 
 /**
- * Check if Docker is available
+ * Check if Docker is available on this system
  */
 export async function isDockerAvailable(): Promise<boolean> {
   try {
@@ -388,3 +399,5 @@ export async function isDockerAvailable(): Promise<boolean> {
     return false;
   }
 }
+
+export default TaskSandbox;

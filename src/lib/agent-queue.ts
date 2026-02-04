@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS } from './claude';
-import { TaskSandbox, isDockerAvailable } from './sandbox';
+import { SandboxToolExecutor } from './sandbox-executor';
 
 // Agent job in the queue
 export interface AgentJob {
@@ -240,7 +240,7 @@ class AgentQueue {
 
   // Execute agent with sandbox
   private async executeAgent(job: AgentJob, run: AgentRun): Promise<void> {
-    let sandbox: TaskSandbox | null = null;
+    let executor: SandboxToolExecutor | null = null;
 
     try {
       // 1. Load task and project context from DB
@@ -269,44 +269,26 @@ class AgentQueue {
         },
       };
 
-      // 3. Check if Docker is available for sandbox
-      const dockerAvailable = await isDockerAvailable();
+      // 3. Create sandbox executor
+      console.log(`[Agent] Creating sandbox for task ${job.taskId}`);
       
-      if (dockerAvailable && project?.tech_stack) {
-        // Create sandbox for code-related tasks
-        console.log(`[Agent] Creating sandbox for task ${job.taskId}`);
-        
-        // Get repo URL from project or use default
-        const repoUrl = process.env.DEFAULT_REPO || 'https://github.com/simonai-git/swarmit.ai';
-        
-        sandbox = await TaskSandbox.create({
-          taskId: job.taskId,
-          repo: repoUrl,
-          branch: 'main',
-          env: {
-            NODE_ENV: 'development',
-            TASK_ID: job.taskId,
-          },
-        });
+      // Get repo URL from project or use default
+      const repoUrl = process.env.DEFAULT_REPO;
+      
+      executor = await SandboxToolExecutor.create({
+        taskId: job.taskId,
+        repo: repoUrl,
+        branch: 'main',
+        timeoutMs: 120000, // 2 minute timeout per command
+      });
 
-        run.transcript.push({
-          role: 'system',
-          content: `Sandbox created: ${sandbox.containerId.slice(0, 12)}`,
-          timestamp: new Date(),
-        });
-      }
+      run.transcript.push({
+        role: 'system',
+        content: `Sandbox created at ${executor.getWorkdir()}`,
+        timestamp: new Date(),
+      });
 
-      // 4. Create tool executor (sandbox or local)
-      const toolExecutor = sandbox ? {
-        execCommand: async (cmd: string, cwd?: string) => sandbox!.exec(cmd, { cwd }),
-        readFile: async (path: string) => sandbox!.readFile(path),
-        writeFile: async (path: string, content: string) => sandbox!.writeFile(path, content),
-        listFiles: async (path: string, recursive?: boolean) => sandbox!.listFiles(path, recursive),
-        gitCommit: async (msg: string, files?: string[]) => sandbox!.gitCommit(msg, files),
-        gitPush: async (branch?: string) => sandbox!.gitPush(branch),
-      } : createLocalExecutor();
-
-      // 5. Create task API
+      // 4. Create task API
       const taskApi = {
         updateTask: async (taskId: string, updates: Partial<Task>) => {
           await updateTask(taskId, updates);
@@ -321,10 +303,10 @@ class AgentQueue {
         },
       };
 
-      // 6. Run the agent
+      // 5. Run the agent
       console.log(`[Agent] Running ${job.agentType} agent for task ${job.taskId}`);
       
-      const result = await runAgent(context, toolExecutor, taskApi, {
+      const result = await runAgent(context, executor, taskApi, {
         maxIterations: 30,
         onToolUse: (tool, input) => {
           run.transcript.push({
@@ -342,17 +324,17 @@ class AgentQueue {
         },
       });
 
-      // 7. Update run metrics
+      // 6. Update run metrics
       run.inputTokens = result.inputTokens;
       run.outputTokens = result.outputTokens;
       run.costCents = calculateCost(result.inputTokens, result.outputTokens, 'claude-sonnet-4-20250514');
 
-      // 8. Update task if agent specified next status
+      // 7. Update task if agent specified next status
       if (result.success && result.nextStatus) {
         await updateTask(job.taskId, { status: result.nextStatus });
       }
 
-      // 9. Add completion comment
+      // 8. Add completion comment
       if (result.success) {
         await createComment({
           id: uuidv4(),
@@ -374,49 +356,11 @@ class AgentQueue {
 
     } finally {
       // Cleanup sandbox
-      if (sandbox) {
-        await sandbox.cleanup();
+      if (executor) {
+        await executor.cleanup();
       }
     }
   }
-}
-
-// Local executor for when Docker is not available
-function createLocalExecutor() {
-  const { exec } = require('child_process');
-  const { promisify } = require('util');
-  const fs = require('fs/promises');
-  const execAsync = promisify(exec);
-
-  return {
-    execCommand: async (cmd: string, cwd?: string) => {
-      try {
-        const { stdout, stderr } = await execAsync(cmd, { cwd: cwd || process.cwd() });
-        return { stdout, stderr, exitCode: 0 };
-      } catch (error: any) {
-        return { stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: error.code || 1 };
-      }
-    },
-    readFile: async (path: string) => fs.readFile(path, 'utf-8'),
-    writeFile: async (path: string, content: string) => fs.writeFile(path, content, 'utf-8'),
-    listFiles: async (dirPath: string, recursive?: boolean) => {
-      const { stdout } = await execAsync(recursive ? `find "${dirPath}" -type f` : `ls -1 "${dirPath}"`);
-      return stdout.trim().split('\n').filter(Boolean);
-    },
-    gitCommit: async (msg: string, files?: string[]) => {
-      if (files?.length) {
-        await execAsync(`git add ${files.join(' ')}`);
-      } else {
-        await execAsync('git add -A');
-      }
-      const { stdout } = await execAsync(`git commit -m "${msg}"`);
-      const { stdout: sha } = await execAsync('git rev-parse HEAD');
-      return sha.trim();
-    },
-    gitPush: async (branch?: string) => {
-      await execAsync(`git push origin ${branch || 'main'}`);
-    },
-  };
 }
 
 // Singleton queue instance
