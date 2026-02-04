@@ -227,6 +227,65 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_activity_task_id ON activity_log(task_id);
     `);
     
+    // Create agent_runs table for tracking LLM agent executions
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+        agent_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        cost_cents INTEGER DEFAULT 0,
+        error TEXT,
+        transcript JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_task_id ON agent_runs(task_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at ON agent_runs(started_at DESC);
+    `);
+    
+    // Create agent_configs table for customizable agent configurations
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        specialization TEXT NOT NULL,
+        system_prompt TEXT,
+        model TEXT DEFAULT 'claude-sonnet-4-20250514',
+        temperature FLOAT DEFAULT 0,
+        max_tokens INTEGER DEFAULT 8000,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // Add current_run_id to tasks for tracking active agent runs
+    await client.query(`
+      DO $$ 
+      BEGIN
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS current_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+    
+    // Create default agent configs if they don't exist
+    await client.query(`
+      INSERT INTO agent_configs (id, name, specialization, system_prompt)
+      VALUES 
+        ('config-developer', 'Developer', 'development', 'You are a senior software developer. Write clean, tested code and commit with descriptive messages.'),
+        ('config-qa', 'QA', 'testing', 'You are a QA engineer. Test implementations thoroughly and report any issues found.'),
+        ('config-reviewer', 'Reviewer', 'review', 'You are a code reviewer. Review changes for quality, correctness, and best practices.')
+      ON CONFLICT (name) DO NOTHING
+    `);
+    
     console.log('Database initialized');
   } finally {
     client.release();
