@@ -14,6 +14,7 @@ export interface AgentJob {
   startedAt?: Date;
   completedAt?: Date;
   error?: string;
+  retryCount: number; // Track retry attempts
 }
 
 // Active agent run
@@ -38,7 +39,61 @@ const CONFIG = {
   pollIntervalMs: 5000,
   maxRetries: 3,
   retryDelayMs: 10000,
+  dailyBudgetCents: parseInt(process.env.DAILY_BUDGET_CENTS || '1000'),
+  alertWebhookUrl: process.env.ALERT_WEBHOOK_URL,
 };
+
+// Alert types
+type AlertType = 'budget_warning' | 'budget_exceeded' | 'agent_failed' | 'agent_retry';
+
+// Send alert notification
+async function sendAlert(type: AlertType, message: string, metadata?: Record<string, unknown>): Promise<void> {
+  console.log(`[ALERT] ${type}: ${message}`, metadata);
+  
+  // Send to webhook if configured
+  if (CONFIG.alertWebhookUrl) {
+    try {
+      await fetch(CONFIG.alertWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          message,
+          metadata,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to send alert webhook:', error);
+    }
+  }
+}
+
+// Check if daily budget allows another run
+async function checkBudget(): Promise<{ allowed: boolean; remaining: number; spent: number }> {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(cost_cents), 0) as total 
+     FROM agent_runs 
+     WHERE started_at >= CURRENT_DATE`
+  );
+  const spent = parseInt(result.rows[0].total) || 0;
+  const remaining = CONFIG.dailyBudgetCents - spent;
+  
+  // Alert at 80% budget
+  if (remaining > 0 && remaining < CONFIG.dailyBudgetCents * 0.2) {
+    await sendAlert('budget_warning', `Daily budget 80% used: $${(spent / 100).toFixed(2)} of $${(CONFIG.dailyBudgetCents / 100).toFixed(2)}`, {
+      spent,
+      remaining,
+      limit: CONFIG.dailyBudgetCents,
+    });
+  }
+  
+  return {
+    allowed: remaining > 0,
+    remaining: Math.max(0, remaining),
+    spent,
+  };
+}
 
 // In-memory queue state (will be moved to DB later)
 class AgentQueue {
@@ -48,12 +103,13 @@ class AgentQueue {
   private processInterval: NodeJS.Timeout | null = null;
 
   // Add a job to the queue
-  async enqueue(job: Omit<AgentJob, 'id' | 'status' | 'createdAt'>): Promise<AgentJob> {
+  async enqueue(job: Omit<AgentJob, 'id' | 'status' | 'createdAt' | 'retryCount'>): Promise<AgentJob> {
     const newJob: AgentJob = {
       ...job,
       id: uuidv4(),
       status: 'pending',
       createdAt: new Date(),
+      retryCount: 0,
     };
 
     // Check for duplicate (same task, same agent type, pending/running)
@@ -187,6 +243,24 @@ class AgentQueue {
 
   // Run a single job
   private async runJob(job: AgentJob): Promise<void> {
+    // Check budget before running
+    const budget = await checkBudget();
+    if (!budget.allowed) {
+      job.status = 'failed';
+      job.error = 'Daily budget exceeded';
+      job.completedAt = new Date();
+      
+      await sendAlert('budget_exceeded', `Agent blocked: daily budget of $${(CONFIG.dailyBudgetCents / 100).toFixed(2)} exceeded`, {
+        jobId: job.id,
+        taskId: job.taskId,
+        spent: budget.spent,
+        limit: CONFIG.dailyBudgetCents,
+      });
+      
+      console.log(`Job ${job.id} blocked: daily budget exceeded ($${(budget.spent / 100).toFixed(2)} spent)`);
+      return;
+    }
+
     job.status = 'running';
     job.startedAt = new Date();
 
@@ -223,16 +297,55 @@ class AgentQueue {
       console.log(`Job ${job.id} completed successfully`);
 
     } catch (error) {
-      job.status = 'failed';
-      job.error = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       run.status = 'failed';
-      run.error = job.error;
+      run.error = errorMessage;
       run.completedAt = new Date();
 
-      console.error(`Job ${job.id} failed:`, job.error);
+      // Check if we should retry
+      if (job.retryCount < CONFIG.maxRetries) {
+        job.retryCount++;
+        job.status = 'pending'; // Reset to pending for retry
+        job.error = `Retry ${job.retryCount}/${CONFIG.maxRetries}: ${errorMessage}`;
+        
+        console.log(`Job ${job.id} failed, scheduling retry ${job.retryCount}/${CONFIG.maxRetries} in ${CONFIG.retryDelayMs}ms`);
+        
+        await sendAlert('agent_retry', `Agent retry scheduled (${job.retryCount}/${CONFIG.maxRetries})`, {
+          jobId: job.id,
+          taskId: job.taskId,
+          agentType: job.agentType,
+          error: errorMessage,
+          retryCount: job.retryCount,
+        });
+
+        // Delay before retry
+        await new Promise(resolve => setTimeout(resolve, CONFIG.retryDelayMs));
+      } else {
+        // Max retries exceeded
+        job.status = 'failed';
+        job.error = errorMessage;
+        job.completedAt = new Date();
+        
+        console.error(`Job ${job.id} failed after ${job.retryCount} retries:`, job.error);
+        
+        await sendAlert('agent_failed', `Agent failed after ${CONFIG.maxRetries} retries`, {
+          jobId: job.id,
+          taskId: job.taskId,
+          agentType: job.agentType,
+          error: errorMessage,
+          retryCount: job.retryCount,
+        });
+      }
     }
 
-    // Keep run in history for a while, then clean up
+    // Save run to database for persistence
+    try {
+      await saveAgentRun(run);
+    } catch (dbError) {
+      console.error('Failed to save agent run to database:', dbError);
+    }
+
+    // Keep run in memory for a while, then clean up
     setTimeout(() => {
       this.running.delete(run.id);
     }, 3600000); // Keep for 1 hour

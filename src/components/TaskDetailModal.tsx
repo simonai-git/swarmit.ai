@@ -23,6 +23,21 @@ interface Activity {
   created_at: string;
 }
 
+interface AgentRun {
+  id: string;
+  taskId: string;
+  agentType: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: string | null;
+  completedAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+  error?: string;
+  hasTranscript?: boolean;
+  transcript?: Array<{ role: string; content: string; timestamp: string }>;
+}
+
 interface TaskDetailModalProps {
   task: Task | null;
   isOpen: boolean;
@@ -99,7 +114,10 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   const [newComment, setNewComment] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs'>('details');
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<AgentRun | null>(null);
   // Defer overdue check to client-side only to avoid hydration mismatch
   // (server runs in UTC, client runs in user's local time)
   const [isOverdue, setIsOverdue] = useState(false);
@@ -116,6 +134,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
     if (task && isOpen) {
       fetchComments();
       fetchActivity();
+      fetchRuns();
     }
   }, [task, isOpen]);
 
@@ -155,6 +174,45 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
       setActivities(data);
     } catch (error) {
       console.error('Error fetching activity:', error);
+    }
+  };
+
+  const fetchRuns = async () => {
+    if (!task) return;
+    setLoadingRuns(true);
+    try {
+      const res = await fetch(`/api/runs?taskId=${task.id}`);
+      const data = await res.json();
+      setRuns(data.runs || []);
+    } catch (error) {
+      console.error('Error fetching runs:', error);
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
+
+  const fetchRunTranscript = async (runId: string) => {
+    try {
+      const res = await fetch(`/api/runs/${runId}`);
+      const data = await res.json();
+      setSelectedRun(data);
+    } catch (error) {
+      console.error('Error fetching run transcript:', error);
+    }
+  };
+
+  const cancelRun = async (runId: string) => {
+    try {
+      const res = await fetch(`/api/runs/${runId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      });
+      if (res.ok) {
+        fetchRuns(); // Refresh runs list
+      }
+    } catch (error) {
+      console.error('Error cancelling run:', error);
     }
   };
 
@@ -299,6 +357,15 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
           >
             <span>🤖</span>
             <span>Agent</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('runs')}
+            className={`px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 ${
+              activeTab === 'runs' ? 'text-white border-b-2 border-green-500' : 'text-white/50 hover:text-white/70'
+            }`}
+          >
+            <span>📊</span>
+            <span>Runs{runs.length > 0 ? ` (${runs.length})` : ''}</span>
           </button>
         </div>
 
@@ -606,7 +673,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                 ))
               )}
             </div>
-          ) : (
+          ) : activeTab === 'agent_context' ? (
             /* Agent Context Tab */
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-white/50 text-sm">
@@ -620,6 +687,128 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
               ) : (
                 <div className="text-white/40 text-sm text-center py-8 bg-black/20 rounded-xl">
                   No agent context set for this task
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Agent Runs Tab */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white/50 text-sm">
+                  <span>📊</span>
+                  <span>LLM agent execution history</span>
+                </div>
+                {runs.length > 0 && (
+                  <div className="text-xs text-white/40">
+                    Total: ${(runs.reduce((sum, r) => sum + r.costCents, 0) / 100).toFixed(2)}
+                  </div>
+                )}
+              </div>
+              
+              {loadingRuns ? (
+                <div className="text-white/40 text-sm text-center py-8">Loading runs...</div>
+              ) : runs.length === 0 ? (
+                <div className="text-white/40 text-sm text-center py-8 bg-black/20 rounded-xl">
+                  No agent runs recorded for this task
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {runs.map((run) => (
+                    <div key={run.id} className="bg-black/30 border border-white/10 rounded-xl overflow-hidden">
+                      {/* Run Header */}
+                      <div 
+                        className="p-3 sm:p-4 cursor-pointer hover:bg-white/5 transition-colors"
+                        onClick={() => {
+                          if (selectedRun?.id === run.id) {
+                            setSelectedRun(null);
+                          } else {
+                            fetchRunTranscript(run.id);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 sm:gap-3">
+                            <span className={`w-2 h-2 rounded-full ${
+                              run.status === 'completed' ? 'bg-emerald-500' :
+                              run.status === 'running' ? 'bg-blue-500 animate-pulse' :
+                              run.status === 'failed' ? 'bg-red-500' :
+                              run.status === 'cancelled' ? 'bg-amber-500' :
+                              'bg-gray-500'
+                            }`} />
+                            <span className="text-sm font-medium text-white/80">{run.agentType}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              run.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                              run.status === 'running' ? 'bg-blue-500/20 text-blue-400' :
+                              run.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                              run.status === 'cancelled' ? 'bg-amber-500/20 text-amber-400' :
+                              'bg-gray-500/20 text-gray-400'
+                            }`}>
+                              {run.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-white/40">
+                            <span>{run.inputTokens + run.outputTokens} tokens</span>
+                            <span className="text-emerald-400">${(run.costCents / 100).toFixed(3)}</span>
+                            <span className="text-white/20">{selectedRun?.id === run.id ? '▼' : '▶'}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-white/40">
+                          {run.startedAt && (
+                            <span>Started: {new Date(run.startedAt).toLocaleString()}</span>
+                          )}
+                          {run.completedAt && (
+                            <span>Duration: {Math.round((new Date(run.completedAt).getTime() - new Date(run.startedAt!).getTime()) / 1000)}s</span>
+                          )}
+                        </div>
+                        {run.error && (
+                          <div className="mt-2 text-xs text-red-400 bg-red-500/10 rounded px-2 py-1">
+                            Error: {run.error}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Expanded Transcript */}
+                      {selectedRun?.id === run.id && selectedRun.transcript && (
+                        <div className="border-t border-white/10 p-3 sm:p-4 bg-black/20">
+                          <div className="text-xs font-medium text-white/50 mb-3">Transcript</div>
+                          <div className="space-y-3 max-h-96 overflow-y-auto">
+                            {selectedRun.transcript.map((entry, i) => (
+                              <div key={i} className={`text-xs ${
+                                entry.role === 'assistant' ? 'pl-4 border-l-2 border-purple-500/50' :
+                                entry.role === 'tool' ? 'pl-4 border-l-2 border-amber-500/50 bg-amber-500/5 rounded' :
+                                'pl-4 border-l-2 border-blue-500/50'
+                              }`}>
+                                <div className="flex items-center gap-2 text-white/40 mb-1">
+                                  <span className="font-medium">{entry.role}</span>
+                                  <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                </div>
+                                <div className="text-white/70 whitespace-pre-wrap font-mono text-[11px]">
+                                  {entry.content.length > 1000 
+                                    ? entry.content.slice(0, 1000) + '...[truncated]' 
+                                    : entry.content}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Cancel button for running agents */}
+                      {run.status === 'running' && (
+                        <div className="border-t border-white/10 p-2 flex justify-end">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelRun(run.id);
+                            }}
+                            className="px-3 py-1 text-xs text-red-400 hover:bg-red-500/20 rounded transition-colors"
+                          >
+                            Cancel Run
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
