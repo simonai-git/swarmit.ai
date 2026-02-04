@@ -3,7 +3,7 @@ import "./globals.css";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "SwarmIt.AI",
+  title: "Swarm It",
   description: "AI Agentic Autonomous Project Factory",
 };
 

@@ -406,7 +406,7 @@ export default function KanbanBoard() {
           {/* Title */}
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold gradient-text truncate">
-              SwarmIt.AI
+              Swarm It
             </h1>
             <p className="text-white/50 text-xs sm:text-sm hidden md:block">
               AI Agentic Autonomous Project Factory
