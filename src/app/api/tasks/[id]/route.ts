@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTask, updateTask, deleteTask, logActivity, getProject } from '@/lib/db';
+import { getTask, updateTask, deleteTask, logActivity, getProject, Task } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
+import { onTaskStatusChanged, onTaskAssigned } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
 
 const API_KEY = process.env.SIMON_API_KEY;
@@ -94,6 +95,19 @@ export async function PATCH(
       event: isCompleted ? 'task.completed' : 'task.updated',
       task: task,
     });
+    
+    // Trigger lifecycle automation hooks
+    if (body.status && body.status !== oldTask.status) {
+      onTaskStatusChanged(task as Task, oldTask.status, body.status).catch(err => {
+        console.error('Status change lifecycle hook error:', err);
+      });
+    }
+    
+    if (body.assignee && body.assignee !== oldTask.assignee) {
+      onTaskAssigned(task as Task, oldTask.assignee, body.assignee).catch(err => {
+        console.error('Assignment lifecycle hook error:', err);
+      });
+    }
     
     return NextResponse.json(task);
   } catch (error) {

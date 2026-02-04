@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTasks, createTask } from '@/lib/db';
+import { getAllTasks, createTask, Task } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
+import { onTaskCreated, selectSpecialist } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function GET(request: NextRequest) {
@@ -30,12 +31,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    
+    // Auto-assign if no assignee specified
+    let assignee = body.assignee;
+    if (assignee === undefined || assignee === null) {
+      assignee = selectSpecialist({ title: body.title, description: body.description });
+    }
+    
     const task = await createTask({
       id: uuidv4(),
       title: body.title,
       description: body.description || null,
       status: body.status || 'todo',
-      assignee: body.assignee ?? null,  // Allow null/unassigned tasks
+      assignee,
       priority: body.priority || 'medium',
       due_date: body.due_date || null,
       project_id: body.project_id || null,
@@ -47,6 +55,11 @@ export async function POST(request: NextRequest) {
     await sendWebhook({
       event: 'task.created',
       task: task,
+    });
+    
+    // Trigger lifecycle automation (auto-spawn agents if enabled)
+    onTaskCreated(task as Task).catch(err => {
+      console.error('Lifecycle hook error:', err);
     });
     
     return NextResponse.json(task, { status: 201 });
