@@ -406,10 +406,10 @@ export default function KanbanBoard() {
           {/* Title */}
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold gradient-text truncate">
-              Simon Task Tracker
+              SwarmIt.AI
             </h1>
             <p className="text-white/50 text-xs sm:text-sm hidden md:block">
-              Drag tasks between columns to update their status
+              AI Agent Swarm Task Management
             </p>
           </div>
           

@@ -3,8 +3,8 @@ import "./globals.css";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "Simon Task Tracker",
-  description: "Kanban board for tracking Simon's tasks",
+  title: "SwarmIt.AI",
+  description: "AI Agent Swarm Task Management System",
 };
 
 export default function RootLayout({
