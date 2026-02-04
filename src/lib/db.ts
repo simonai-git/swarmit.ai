@@ -826,4 +826,305 @@ export async function deleteProjectFeedback(id: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
+// ==================== Agent Configs ====================
+
+export interface AgentConfig {
+  id: string;
+  name: string;
+  specialization: string;
+  system_prompt: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAgentConfigs(): Promise<AgentConfig[]> {
+  const result = await pool.query(
+    'SELECT * FROM agent_configs ORDER BY name'
+  );
+  return result.rows;
+}
+
+export async function getAgentConfig(id: string): Promise<AgentConfig | null> {
+  const result = await pool.query(
+    'SELECT * FROM agent_configs WHERE id = $1',
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getAgentConfigByName(name: string): Promise<AgentConfig | null> {
+  const result = await pool.query(
+    'SELECT * FROM agent_configs WHERE name = $1',
+    [name]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getAgentConfigBySpecialization(specialization: string): Promise<AgentConfig | null> {
+  const result = await pool.query(
+    'SELECT * FROM agent_configs WHERE specialization = $1 LIMIT 1',
+    [specialization]
+  );
+  return result.rows[0] || null;
+}
+
+export async function createAgentConfig(config: Omit<AgentConfig, 'id' | 'created_at' | 'updated_at'>): Promise<AgentConfig> {
+  const result = await pool.query(
+    `INSERT INTO agent_configs (name, specialization, system_prompt, model, temperature, max_tokens)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [
+      config.name,
+      config.specialization,
+      config.system_prompt,
+      config.model || 'claude-sonnet-4-20250514',
+      config.temperature || 0,
+      config.max_tokens || 8000
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function updateAgentConfig(id: string, updates: Partial<AgentConfig>): Promise<AgentConfig | null> {
+  const fields = Object.keys(updates).filter(k => 
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at'
+  );
+  if (fields.length === 0) return null;
+  
+  const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+  const values = fields.map(f => updates[f as keyof AgentConfig]);
+  
+  const result = await pool.query(
+    `UPDATE agent_configs SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1} RETURNING *`,
+    [...values, id]
+  );
+  
+  return result.rows[0] || null;
+}
+
+export async function deleteAgentConfig(id: string): Promise<boolean> {
+  const result = await pool.query('DELETE FROM agent_configs WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+// ==================== Agent Runs ====================
+
+export interface AgentRun {
+  id: string;
+  task_id: string;
+  agent_type: string;
+  agent_config_id?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  started_at?: string;
+  completed_at?: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_cents: number;
+  error?: string;
+  transcript: Array<{ role: string; content: string; timestamp: string }>;
+  created_at: string;
+}
+
+export async function createAgentRun(run: Omit<AgentRun, 'id' | 'created_at'>): Promise<AgentRun> {
+  const result = await pool.query(
+    `INSERT INTO agent_runs (task_id, agent_type, agent_config_id, status, started_at, 
+                            input_tokens, output_tokens, cost_cents, transcript)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING *`,
+    [
+      run.task_id,
+      run.agent_type,
+      run.agent_config_id || null,
+      run.status || 'pending',
+      run.started_at || null,
+      run.input_tokens || 0,
+      run.output_tokens || 0,
+      run.cost_cents || 0,
+      JSON.stringify(run.transcript || [])
+    ]
+  );
+  return {
+    ...result.rows[0],
+    transcript: result.rows[0].transcript || []
+  };
+}
+
+export async function getAgentRun(id: string): Promise<AgentRun | null> {
+  const result = await pool.query(
+    'SELECT * FROM agent_runs WHERE id = $1',
+    [id]
+  );
+  if (result.rows.length === 0) return null;
+  return {
+    ...result.rows[0],
+    transcript: result.rows[0].transcript || []
+  };
+}
+
+export async function getAgentRunsByTask(taskId: string): Promise<AgentRun[]> {
+  const result = await pool.query(
+    'SELECT * FROM agent_runs WHERE task_id = $1 ORDER BY created_at DESC',
+    [taskId]
+  );
+  return result.rows.map(row => ({
+    ...row,
+    transcript: row.transcript || []
+  }));
+}
+
+export async function getRecentAgentRuns(limit: number = 50): Promise<AgentRun[]> {
+  const result = await pool.query(
+    'SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT $1',
+    [limit]
+  );
+  return result.rows.map(row => ({
+    ...row,
+    transcript: row.transcript || []
+  }));
+}
+
+export async function updateAgentRun(id: string, updates: Partial<AgentRun>): Promise<AgentRun | null> {
+  const fields = Object.keys(updates).filter(k => 
+    k !== 'id' && k !== 'task_id' && k !== 'created_at'
+  );
+  if (fields.length === 0) return null;
+  
+  const setClause = fields.map((f, i) => {
+    if (f === 'transcript') return `${f} = $${i + 1}::jsonb`;
+    return `${f} = $${i + 1}`;
+  }).join(', ');
+  
+  const values = fields.map(f => {
+    const val = updates[f as keyof AgentRun];
+    if (f === 'transcript') return JSON.stringify(val);
+    return val;
+  });
+  
+  const result = await pool.query(
+    `UPDATE agent_runs SET ${setClause} WHERE id = $${fields.length + 1} RETURNING *`,
+    [...values, id]
+  );
+  
+  if (result.rows.length === 0) return null;
+  return {
+    ...result.rows[0],
+    transcript: result.rows[0].transcript || []
+  };
+}
+
+export async function completeAgentRun(
+  id: string, 
+  status: 'completed' | 'failed',
+  metrics: { inputTokens: number; outputTokens: number; costCents: number },
+  error?: string
+): Promise<AgentRun | null> {
+  const result = await pool.query(
+    `UPDATE agent_runs 
+     SET status = $1, completed_at = NOW(), input_tokens = $2, output_tokens = $3, cost_cents = $4, error = $5
+     WHERE id = $6
+     RETURNING *`,
+    [status, metrics.inputTokens, metrics.outputTokens, metrics.costCents, error || null, id]
+  );
+  
+  if (result.rows.length === 0) return null;
+  return {
+    ...result.rows[0],
+    transcript: result.rows[0].transcript || []
+  };
+}
+
+export async function appendToTranscript(
+  id: string, 
+  entry: { role: string; content: string; timestamp?: string }
+): Promise<void> {
+  const timestamp = entry.timestamp || new Date().toISOString();
+  await pool.query(
+    `UPDATE agent_runs 
+     SET transcript = transcript || $1::jsonb
+     WHERE id = $2`,
+    [JSON.stringify([{ ...entry, timestamp }]), id]
+  );
+}
+
+// ==================== Cost Tracking ====================
+
+export async function getTodayAgentCost(): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(cost_cents), 0) as total 
+     FROM agent_runs 
+     WHERE started_at >= CURRENT_DATE`
+  );
+  return parseInt(result.rows[0].total) || 0;
+}
+
+export async function getAgentCostByPeriod(startDate: Date, endDate: Date): Promise<{
+  total: number;
+  byAgent: Record<string, number>;
+  byDay: Array<{ date: string; total: number }>;
+}> {
+  const totalResult = await pool.query(
+    `SELECT COALESCE(SUM(cost_cents), 0) as total 
+     FROM agent_runs 
+     WHERE started_at >= $1 AND started_at < $2`,
+    [startDate, endDate]
+  );
+
+  const byAgentResult = await pool.query(
+    `SELECT agent_type, COALESCE(SUM(cost_cents), 0) as total 
+     FROM agent_runs 
+     WHERE started_at >= $1 AND started_at < $2
+     GROUP BY agent_type`,
+    [startDate, endDate]
+  );
+
+  const byDayResult = await pool.query(
+    `SELECT DATE(started_at) as date, COALESCE(SUM(cost_cents), 0) as total 
+     FROM agent_runs 
+     WHERE started_at >= $1 AND started_at < $2
+     GROUP BY DATE(started_at)
+     ORDER BY date`,
+    [startDate, endDate]
+  );
+
+  return {
+    total: parseInt(totalResult.rows[0].total) || 0,
+    byAgent: Object.fromEntries(
+      byAgentResult.rows.map(r => [r.agent_type, parseInt(r.total) || 0])
+    ),
+    byDay: byDayResult.rows.map(r => ({
+      date: r.date.toISOString().split('T')[0],
+      total: parseInt(r.total) || 0
+    }))
+  };
+}
+
+export async function getAgentRunStats(): Promise<{
+  totalRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  totalTokens: number;
+  totalCostCents: number;
+}> {
+  const result = await pool.query(`
+    SELECT 
+      COUNT(*) as total_runs,
+      COUNT(*) FILTER (WHERE status = 'completed') as completed_runs,
+      COUNT(*) FILTER (WHERE status = 'failed') as failed_runs,
+      COALESCE(SUM(input_tokens + output_tokens), 0) as total_tokens,
+      COALESCE(SUM(cost_cents), 0) as total_cost_cents
+    FROM agent_runs
+  `);
+  
+  return {
+    totalRuns: parseInt(result.rows[0].total_runs) || 0,
+    completedRuns: parseInt(result.rows[0].completed_runs) || 0,
+    failedRuns: parseInt(result.rows[0].failed_runs) || 0,
+    totalTokens: parseInt(result.rows[0].total_tokens) || 0,
+    totalCostCents: parseInt(result.rows[0].total_cost_cents) || 0
+  };
+}
+
 export default pool;
