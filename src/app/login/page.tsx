@@ -19,7 +19,7 @@ function LoginContent() {
       <div className="relative z-10 glass rounded-2xl p-8 max-w-md w-full mx-4 animate-fade-in">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold gradient-text mb-2">SwarmIt.AI</h1>
-          <p className="text-white/50">AI Agent Swarm Task Management</p>
+          <p className="text-white/50">AI Agentic Autonomous Project Factory</p>
         </div>
 
         {error && (

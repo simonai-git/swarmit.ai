@@ -4,7 +4,7 @@ import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "SwarmIt.AI",
-  description: "AI Agent Swarm Task Management System",
+  description: "AI Agentic Autonomous Project Factory",
 };
 
 export default function RootLayout({

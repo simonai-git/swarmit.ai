@@ -409,7 +409,7 @@ export default function KanbanBoard() {
               SwarmIt.AI
             </h1>
             <p className="text-white/50 text-xs sm:text-sm hidden md:block">
-              AI Agent Swarm Task Management
+              AI Agentic Autonomous Project Factory
             </p>
           </div>
           
