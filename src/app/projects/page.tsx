@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
+import UserMenu from '@/components/UserMenu';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -298,26 +299,7 @@ export default function ProjectsPage() {
             </p>
           </div>
           
-          {session?.user && (
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {session.user.image && (
-                <img src={session.user.image} alt="" className="w-6 h-6 sm:w-8 sm:h-8 rounded-full" />
-              )}
-              <a
-                href="/profile"
-                className="text-white/40 hover:text-white/70 text-xs transition-colors hidden sm:block"
-              >
-                Profile
-              </a>
-              <span className="text-white/20 hidden sm:block">|</span>
-              <button
-                onClick={() => signOut()}
-                className="text-white/40 hover:text-white/70 text-xs transition-colors hidden sm:block"
-              >
-                Sign out
-              </button>
-            </div>
-          )}
+          {session && <UserMenu session={session} />}
         </div>
         
         <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
