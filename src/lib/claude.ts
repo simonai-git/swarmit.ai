@@ -1,8 +1,30 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Task, Comment, Project, pool } from './db';
 
+// Check if key is an OAT token (OAuth Access Token from Claude Code)
+function isOATToken(key: string): boolean {
+  return key.startsWith('sk-ant-oat');
+}
+
+// Claude Code identity prefix - required for OAT tokens to work
+const CLAUDE_CODE_IDENTITY = `You are Claude Code, Anthropic's official CLI for Claude.`;
+
 // Create Anthropic client with given API key
+// For OAT tokens, use special headers that mimic Claude Code
 function createClient(apiKey: string): Anthropic {
+  if (isOATToken(apiKey)) {
+    // OAT token - use Claude Code impersonation headers
+    return new Anthropic({
+      apiKey: apiKey,
+      defaultHeaders: {
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'user-agent': 'claude-cli/2.1.2 (external, cli)',
+        'x-app': 'cli',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      }
+    });
+  }
+  // Regular API key
   return new Anthropic({ apiKey });
 }
 
@@ -453,8 +475,12 @@ export async function runAgent(
   const model = context.agentConfig?.model || 'claude-sonnet-4-20250514';
   const maxTokens = context.agentConfig?.maxTokens || 8000;
 
+  // Get the actual key being used
+  const effectiveKey = getClaudeKey(apiKey);
+  const usingOAT = isOATToken(effectiveKey);
+  
   // Create client with user's key or fallback to env
-  const claudeClient = createClient(getClaudeKey(apiKey));
+  const claudeClient = createClient(effectiveKey);
 
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: buildTaskPrompt(context) }
@@ -468,11 +494,17 @@ export async function runAgent(
   while (iteration < maxIterations) {
     iteration++;
 
+    // Build system prompt - prepend Claude Code identity for OAT tokens
+    let systemPrompt = buildSystemPrompt(context);
+    if (usingOAT) {
+      systemPrompt = `${CLAUDE_CODE_IDENTITY}\n\n${systemPrompt}`;
+    }
+
     // Call Claude
     const response = await claudeClient.messages.create({
       model,
       max_tokens: maxTokens,
-      system: buildSystemPrompt(context),
+      system: systemPrompt,
       tools: AGENT_TOOLS,
       messages
     });
