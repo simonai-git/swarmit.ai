@@ -24,6 +24,9 @@ export function useRealtimeUpdates({
   const maxReconnectAttempts = 10;
   const baseReconnectDelay = 1000;
   const [connectionState, setConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  
+  // Use ref to allow self-reference in reconnect logic
+  const connectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
     // Only run in browser environment
@@ -80,13 +83,18 @@ export function useRealtimeUpdates({
         
         reconnectTimeoutRef.current = setTimeout(() => {
           console.log(`🔄 Reconnecting (attempt ${reconnectAttempts.current})...`);
-          connect();
+          connectRef.current();
         }, delay);
       } else {
         console.error('Max reconnect attempts reached');
       }
     };
   }, [enabled, onTasksUpdate, onWatcherUpdate, onConnect, onDisconnect]);
+
+  // Keep ref updated for self-reference in reconnect
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -105,13 +113,17 @@ export function useRealtimeUpdates({
     // Only connect in browser environment
     if (typeof window === 'undefined') return;
     
-    if (enabled) {
-      connect();
-    } else {
-      disconnect();
-    }
+    // Use setTimeout to avoid synchronous setState in effect
+    const timeoutId = setTimeout(() => {
+      if (enabled) {
+        connect();
+      } else {
+        disconnect();
+      }
+    }, 0);
     
     return () => {
+      clearTimeout(timeoutId);
       disconnect();
     };
   }, [enabled, connect, disconnect]);

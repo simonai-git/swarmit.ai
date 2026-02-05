@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Task } from '@/lib/db';
@@ -52,14 +52,12 @@ function isDateOverdue(dueDateStr: string): boolean {
 const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActive = false, projectName }: TaskCardProps) {
   // Defer overdue check to client-side only to avoid hydration mismatch
   // (server runs in UTC, client runs in user's local time)
-  const [isOverdue, setIsOverdue] = useState(false);
-  
-  useEffect(() => {
+  // Use useMemo instead of useState+useEffect to avoid cascading renders
+  const isOverdue = useMemo(() => {
     if (task.due_date && task.status !== 'done') {
-      setIsOverdue(isDateOverdue(task.due_date));
-    } else {
-      setIsOverdue(false);
+      return isDateOverdue(task.due_date);
     }
+    return false;
   }, [task.due_date, task.status]);
 
   const {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { useSession, signOut } from 'next-auth/react';
+import Link from 'next/link';
 import {
   DndContext,
   DragEndEvent,
@@ -431,22 +432,22 @@ export default function KanbanBoard() {
             </button>
             
             {/* Projects Button */}
-            <a
+            <Link
               href="/projects"
               className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
             >
               <span className="text-base sm:text-lg">📁</span>
               <span className="hidden sm:inline">Projects</span>
-            </a>
+            </Link>
             
             {/* Agents Button */}
-            <a
+            <Link
               href="/agents"
               className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
             >
               <span className="text-base sm:text-lg">🤖</span>
               <span className="hidden sm:inline">Agents</span>
-            </a>
+            </Link>
           </div>
           
           <div className="flex items-center gap-2">

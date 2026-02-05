@@ -28,17 +28,12 @@ export default function Column({ id, title, icon, gradient, tasks, onEditTask, o
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   
-  // Reset visible count when tasks change significantly (new column, etc.)
-  useEffect(() => {
-    // Keep expanded if we have more tasks visible than initial
-    if (visibleCount > tasks.length) {
-      setVisibleCount(Math.max(INITIAL_VISIBLE, tasks.length));
-    }
-  }, [tasks.length, visibleCount]);
+  // Calculate the effective visible count (capped at tasks.length)
+  const effectiveVisibleCount = Math.min(visibleCount, Math.max(INITIAL_VISIBLE, tasks.length));
 
-  const visibleTasks = tasks.slice(0, visibleCount);
-  const hasMore = visibleCount < tasks.length;
-  const remainingCount = tasks.length - visibleCount;
+  const visibleTasks = tasks.slice(0, effectiveVisibleCount);
+  const hasMore = effectiveVisibleCount < tasks.length;
+  const remainingCount = tasks.length - effectiveVisibleCount;
 
   // Infinite scroll using Intersection Observer
   useEffect(() => {
