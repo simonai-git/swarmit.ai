@@ -154,7 +154,7 @@ export default function ApiKeysPage() {
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold text-white mb-6">API Keys & Authentication</h1>
 
-      {/* Claude API Key Section */}
+      {/* Claude Token Section */}
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -163,7 +163,7 @@ export default function ApiKeysPage() {
             </div>
             <div>
               <h2 className="text-lg font-medium text-white">Claude by Anthropic</h2>
-              <p className="text-sm text-gray-400">Connect your Claude API key for AI capabilities</p>
+              <p className="text-sm text-gray-400">Connect your Claude API key or OAuth token</p>
             </div>
           </div>
           
@@ -186,20 +186,20 @@ export default function ApiKeysPage() {
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity"
             >
               <Key className="w-4 h-4" />
-              Add API Key
+              Add Token
             </button>
           )}
         </div>
 
-        {/* Claude API Key Input */}
+        {/* Claude Token Input */}
         {showClaudeInput && !claudeConnection.connected && (
           <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                Claude API Key
+                Claude API Key or OAuth Token
               </label>
               <p className="text-xs text-gray-500 mb-3">
-                Get your API key from{' '}
+                <strong>API Key:</strong> Get from{' '}
                 <a
                   href="https://console.anthropic.com/settings/keys"
                   target="_blank"
@@ -209,12 +209,15 @@ export default function ApiKeysPage() {
                   Anthropic Console
                   <ExternalLink className="w-3 h-3 inline ml-1" />
                 </a>
+                {' '}(starts with <code className="text-orange-400">sk-ant-api</code>)
+                <br />
+                <strong>OAuth Token:</strong> From apps like OpenClaw (starts with <code className="text-orange-400">sk-ant-oat</code>)
               </p>
               <input
                 type="password"
                 value={claudeApiKey}
                 onChange={(e) => setClaudeApiKey(e.target.value)}
-                placeholder="sk-ant-api03-..."
+                placeholder="sk-ant-api03-... or sk-ant-oat01-..."
                 className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -266,7 +269,8 @@ export default function ApiKeysPage() {
         )}
 
         <p className="mt-4 text-sm text-gray-500">
-          Your API key is encrypted and securely stored. Agents will use this key for AI operations.
+          Your token is encrypted and securely stored. Agents will use this for AI operations.
+          OAuth tokens (OAT) from services like OpenClaw may have usage included in that service's billing.
         </p>
       </div>
 

@@ -68,9 +68,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 });
     }
 
-    // Validate key format
-    if (!apiKey.startsWith('sk-ant-')) {
-      return NextResponse.json({ error: 'Invalid Claude API key format' }, { status: 400 });
+    // Validate key format - accept both API keys (sk-ant-api*) and OAuth tokens (sk-ant-oat*)
+    if (!apiKey.startsWith('sk-ant-api') && !apiKey.startsWith('sk-ant-oat')) {
+      return NextResponse.json({ error: 'Invalid Claude token format. Must start with sk-ant-api or sk-ant-oat' }, { status: 400 });
     }
 
     // Test the API key by making a simple request
