@@ -42,6 +42,7 @@ export interface QueueJob {
   retryCount: number;
   maxRetries: number;
   workerId?: string;          // ID of worker processing this job
+  userEmail?: string;         // User email for Claude API key lookup
   metadata?: Record<string, unknown>;  // Additional data
 }
 

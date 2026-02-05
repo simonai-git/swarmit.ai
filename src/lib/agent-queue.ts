@@ -95,6 +95,7 @@ function queueJobToAgentJob(qj: QueueJob): AgentJob {
     completedAt: qj.completedAt ? new Date(qj.completedAt) : undefined,
     error: qj.error,
     retryCount: qj.retryCount,
+    userEmail: qj.userEmail,  // Include userEmail for Claude API key lookup
   };
 }
 
@@ -273,6 +274,7 @@ class AgentQueue {
             startedAt: job.startedAt?.toISOString(),
             retryCount: job.retryCount,
             maxRetries: CONFIG.maxRetries,
+            userEmail: job.userEmail,  // Include userEmail for Claude API key lookup
           };
 
           await this.executeJob(queueJob);
