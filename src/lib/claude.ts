@@ -2,17 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Task, Comment, Project, pool } from './db';
 
 // Create Anthropic client with given API key
-// OAT (OAuth Access Tokens) go through the Chutes.ai proxy
 function createClient(apiKey: string): Anthropic {
-  const isOAuthToken = apiKey.startsWith('sk-ant-oat');
-  
-  if (isOAuthToken) {
-    return new Anthropic({ 
-      apiKey,
-      baseURL: 'https://chutes.ai/app/api/proxy/anthropic'
-    });
-  }
-  
   return new Anthropic({ apiKey });
 }
 

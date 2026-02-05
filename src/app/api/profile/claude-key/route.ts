@@ -68,18 +68,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 });
     }
 
-    // Validate key format - accept both API keys (sk-ant-api*) and OAuth tokens (sk-ant-oat*)
-    if (!apiKey.startsWith('sk-ant-api') && !apiKey.startsWith('sk-ant-oat')) {
-      return NextResponse.json({ error: 'Invalid Claude token format. Must start with sk-ant-api or sk-ant-oat' }, { status: 400 });
+    // Validate key format - only accept direct API keys (sk-ant-api*)
+    // OAT tokens (sk-ant-oat*) from OAuth flows require proxy infrastructure we don't have
+    if (apiKey.startsWith('sk-ant-oat')) {
+      return NextResponse.json({ 
+        error: 'OAuth Access Tokens (OAT) are not supported. Please use a regular Claude API key from console.anthropic.com' 
+      }, { status: 400 });
+    }
+    
+    if (!apiKey.startsWith('sk-ant-api')) {
+      return NextResponse.json({ error: 'Invalid Claude API key format. Must start with sk-ant-api' }, { status: 400 });
     }
 
     // Test the API key by making a simple request
-    // OAT tokens (OAuth Access Tokens) go through Chutes.ai proxy
-    // Regular API keys go directly to Anthropic
-    const isOAuthToken = apiKey.startsWith('sk-ant-oat');
-    const apiEndpoint = isOAuthToken 
-      ? 'https://chutes.ai/app/api/proxy/anthropic/v1/messages'
-      : 'https://api.anthropic.com/v1/messages';
+    const apiEndpoint = 'https://api.anthropic.com/v1/messages';
     
     try {
       const testRes = await fetch(apiEndpoint, {
