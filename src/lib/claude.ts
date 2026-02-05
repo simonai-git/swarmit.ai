@@ -13,17 +13,34 @@ const CLAUDE_CODE_IDENTITY = `You are Claude Code, Anthropic's official CLI for 
 // For OAT tokens, use special headers that mimic Claude Code and Bearer auth
 function createClient(apiKey: string): Anthropic {
   if (isOATToken(apiKey)) {
-    // OAT token - use Bearer auth (authToken) + Claude Code impersonation headers
+    console.log('[Claude] Creating client with OAT token - using custom fetch with Claude Code headers');
+    
+    // For OAT tokens, we need to use a custom fetch that adds proper headers
+    // The SDK's authToken + defaultHeaders wasn't working correctly
+    const customFetch: typeof fetch = async (url, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${apiKey}`);
+      headers.set('anthropic-beta', 'claude-code-20250219,oauth-2025-04-20');
+      headers.set('user-agent', 'claude-cli/2.1.2 (external, cli)');
+      headers.set('x-app', 'cli');
+      headers.set('anthropic-dangerous-direct-browser-access', 'true');
+      // Remove x-api-key if present (SDK might add it)
+      headers.delete('x-api-key');
+      
+      console.log('[Claude] OAT fetch headers:', Object.fromEntries(headers.entries()));
+      
+      return fetch(url, {
+        ...init,
+        headers,
+      });
+    };
+    
     return new Anthropic({
-      authToken: apiKey, // Use authToken for Bearer auth, not apiKey
-      defaultHeaders: {
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
-        'user-agent': 'claude-cli/2.1.2 (external, cli)',
-        'x-app': 'cli',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      }
+      apiKey: 'dummy', // SDK requires some apiKey but we override with Bearer auth
+      fetch: customFetch,
     });
   }
+  console.log('[Claude] Creating client with regular API key');
   // Regular API key
   return new Anthropic({ apiKey });
 }
