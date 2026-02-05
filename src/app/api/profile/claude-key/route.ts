@@ -74,8 +74,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Test the API key by making a simple request
+    // OAT tokens (OAuth Access Tokens) go through Chutes.ai proxy
+    // Regular API keys go directly to Anthropic
+    const isOAuthToken = apiKey.startsWith('sk-ant-oat');
+    const apiEndpoint = isOAuthToken 
+      ? 'https://chutes.ai/app/api/proxy/anthropic/v1/messages'
+      : 'https://api.anthropic.com/v1/messages';
+    
     try {
-      const testRes = await fetch('https://api.anthropic.com/v1/messages', {
+      const testRes = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
