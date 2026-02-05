@@ -51,7 +51,12 @@ export async function getUserClaudeKey(userEmail: string): Promise<string | null
 // Fallback to env variable if no user key
 function getClaudeKey(userApiKey?: string): string {
   if (userApiKey) return userApiKey;
-  // No fallback - users must configure their own API key/OAT token
+  
+  // Fallback to environment variable
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  if (envKey) return envKey;
+  
+  // No key available
   throw new Error('No Claude API key configured. Please add your API key or OAuth token in Profile → Integrations.');
 }
 
