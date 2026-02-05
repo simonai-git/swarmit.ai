@@ -152,10 +152,10 @@ describe('claude utilities', () => {
       expect(completeTool).toBeDefined();
     });
 
-    it('all tools should have valid input schemas', () => {
+    it('all tools should have valid parameters', () => {
       for (const tool of AGENT_TOOLS) {
-        expect(tool.input_schema).toBeDefined();
-        expect(tool.input_schema.type).toBe('object');
+        expect(tool.parameters).toBeDefined();
+        expect(tool.parameters.type).toBe('object');
       }
     });
   });
@@ -190,22 +190,27 @@ describe('claude utilities', () => {
     };
 
     it('should return a string', () => {
-      const prompt = buildSystemPrompt(mockContext as any);
+      const prompt = buildSystemPrompt(mockContext as any, false);
       expect(typeof prompt).toBe('string');
       expect(prompt.length).toBeGreaterThan(0);
     });
 
     it('should handle missing project', () => {
       const contextNoProject = { ...mockContext, project: null };
-      const prompt = buildSystemPrompt(contextNoProject as any);
+      const prompt = buildSystemPrompt(contextNoProject as any, false);
       expect(prompt).toBeDefined();
       expect(typeof prompt).toBe('string');
     });
 
     it('should handle missing agent config', () => {
       const contextNoConfig = { ...mockContext, agentConfig: undefined };
-      const prompt = buildSystemPrompt(contextNoConfig as any);
+      const prompt = buildSystemPrompt(contextNoConfig as any, false);
       expect(prompt).toBeDefined();
+    });
+
+    it('should prepend Claude Code identity when using OAT', () => {
+      const prompt = buildSystemPrompt(mockContext as any, true);
+      expect(prompt).toContain('Claude Code');
     });
   });
 

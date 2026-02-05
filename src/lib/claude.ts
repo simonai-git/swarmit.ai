@@ -1,5 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { streamSimpleAnthropic } from '@mariozechner/pi-ai';
+import type { Model, Context, Message, UserMessage, TextContent, ToolCall } from '@mariozechner/pi-ai';
 import { Task, Comment, Project, pool } from './db';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyTool = any;
 
 // Check if key is an OAT token (OAuth Access Token from Claude Code)
 function isOATToken(key: string): boolean {
@@ -9,53 +13,25 @@ function isOATToken(key: string): boolean {
 // Claude Code identity - MUST be first in system prompt for OAT tokens
 const CLAUDE_CODE_IDENTITY = `You are Claude Code, Anthropic's official CLI for Claude.`;
 
-// Claude Code version for user-agent header
-const CLAUDE_CODE_VERSION = '2.1.2';
-
-// Create Anthropic client with given API key
-// For OAT tokens, use authToken (not apiKey) + Claude Code headers
-function createClient(apiKey: string): Anthropic {
-  const betaFeatures = [
-    'claude-code-20250219',
-    'oauth-2025-04-20',
-    'fine-grained-tool-streaming-2025-05-14',
-    'interleaved-thinking-2025-05-14',
-  ];
-
-  if (isOATToken(apiKey)) {
-    console.log('[Claude] Creating client with OAT token - using authToken + Claude Code headers');
-    
-    // For OAT tokens: use authToken (not apiKey), set apiKey to null
-    // This is exactly how pi-ai/OpenClaw does it
-    const defaultHeaders = {
-      'accept': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'anthropic-beta': betaFeatures.join(','),
-      'user-agent': `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`,
-      'x-app': 'cli',
-    };
-    
-    console.log('[Claude] OAT headers:', defaultHeaders);
-    
-    return new Anthropic({
-      apiKey: null as unknown as string, // Must be null for authToken to work
-      authToken: apiKey,                  // OAuth token goes here
-      defaultHeaders,
-      dangerouslyAllowBrowser: true,
-    });
-  }
-  
-  console.log('[Claude] Creating client with regular API key');
-  // Regular API key - simpler setup
-  return new Anthropic({ 
-    apiKey,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: {
-      'accept': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'anthropic-beta': 'fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
+// Create a pi-ai compatible model object
+function createModel(modelId: string): Model<'anthropic-messages'> {
+  return {
+    id: modelId,
+    name: modelId,
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    baseUrl: 'https://api.anthropic.com',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: {
+      input: 3,
+      output: 15,
+      cacheRead: 0.3,
+      cacheWrite: 3.75,
     },
-  });
+    contextWindow: 200000,
+    maxTokens: 64000,
+  };
 }
 
 // Get user's Claude API key from database (decrypted)
@@ -68,16 +44,12 @@ export async function getUserClaudeKey(userEmail: string): Promise<string | null
       [userEmail]
     );
     
-    console.log(`[Claude] Query result rows: ${result.rows.length}`);
-    
     if (result.rows.length === 0) {
       console.log(`[Claude] No user profile found for email: ${userEmail}`);
       return null;
     }
     
     const storedKey = result.rows[0].claude_api_key;
-    console.log(`[Claude] Stored key present: ${!!storedKey}, length: ${storedKey?.length || 0}`);
-    
     if (!storedKey) {
       console.log(`[Claude] No Claude API key stored for user: ${userEmail}`);
       return null;
@@ -85,7 +57,7 @@ export async function getUserClaudeKey(userEmail: string): Promise<string | null
     
     // Decrypt (base64 decode)
     const decoded = Buffer.from(storedKey, 'base64').toString('utf-8');
-    console.log(`[Claude] Decoded key length: ${decoded.length}, starts with: ${decoded.slice(0, 15)}...`);
+    console.log(`[Claude] Decoded key for ${userEmail}, starts with: ${decoded.slice(0, 15)}...`);
     return decoded;
   } catch (error) {
     console.error(`[Claude] Error fetching API key for ${userEmail}:`, error);
@@ -99,7 +71,9 @@ export async function getUserClaudeKey(userEmail: string): Promise<string | null
 function getClaudeKey(userApiKey?: string): string {
   if (userApiKey) return userApiKey;
   
-  // No key available - users must configure via Profile → Integrations
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  if (envKey) return envKey;
+  
   throw new Error('No Claude API key configured. Please add your API key or OAuth token in Profile → Integrations.');
 }
 
@@ -108,7 +82,7 @@ export interface AgentContext {
   task: Task;
   project?: Project | null;
   recentComments: Comment[];
-  agentMemory: string; // from agent_context field
+  agentMemory: string;
   agentConfig?: AgentConfig;
 }
 
@@ -135,274 +109,155 @@ export interface AgentResult {
   outputTokens: number;
 }
 
-// Tool definitions for Claude
-const AGENT_TOOLS: Anthropic.Tool[] = [
+// Tool definitions (use any to avoid typebox complexity)
+const AGENT_TOOLS: AnyTool[] = [
   {
     name: 'exec_command',
-    description: 'Execute a shell command in the sandboxed environment. Use for running builds, tests, git operations, etc.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Execute a shell command',
+    parameters: {
+      type: 'object',
       properties: {
-        command: {
-          type: 'string',
-          description: 'The shell command to execute'
-        },
-        workdir: {
-          type: 'string',
-          description: 'Working directory (optional, defaults to project root)'
-        }
+        command: { type: 'string', description: 'Shell command to execute' },
+        workdir: { type: 'string', description: 'Working directory' }
       },
       required: ['command']
     }
   },
   {
     name: 'read_file',
-    description: 'Read the contents of a file',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        path: {
-          type: 'string',
-          description: 'Path to the file to read'
-        }
-      },
+    description: 'Read file contents',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
       required: ['path']
     }
   },
   {
     name: 'write_file',
-    description: 'Write content to a file. Creates the file if it does not exist.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Write content to file',
+    parameters: {
+      type: 'object',
       properties: {
-        path: {
-          type: 'string',
-          description: 'Path to the file to write'
-        },
-        content: {
-          type: 'string',
-          description: 'Content to write to the file'
-        }
+        path: { type: 'string' },
+        content: { type: 'string' }
       },
       required: ['path', 'content']
     }
   },
   {
     name: 'list_files',
-    description: 'List files in a directory',
-    input_schema: {
-      type: 'object' as const,
+    description: 'List files in directory',
+    parameters: {
+      type: 'object',
       properties: {
-        path: {
-          type: 'string',
-          description: 'Directory path to list'
-        },
-        recursive: {
-          type: 'boolean',
-          description: 'Whether to list recursively (default: false)'
-        }
+        path: { type: 'string' },
+        recursive: { type: 'boolean' }
       },
       required: ['path']
     }
   },
   {
     name: 'git_commit',
-    description: 'Stage and commit changes with a message',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Commit changes',
+    parameters: {
+      type: 'object',
       properties: {
-        message: {
-          type: 'string',
-          description: 'Commit message'
-        },
-        files: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Files to stage (optional, defaults to all changes)'
-        }
+        message: { type: 'string' },
+        files: { type: 'array', items: { type: 'string' } }
       },
       required: ['message']
     }
   },
   {
     name: 'git_push',
-    description: 'Push commits to remote repository',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        branch: {
-          type: 'string',
-          description: 'Branch to push (default: current branch)'
-        }
-      },
+    description: 'Push commits',
+    parameters: {
+      type: 'object',
+      properties: { branch: { type: 'string' } },
       required: []
     }
   },
   {
     name: 'update_task',
-    description: 'Update the current task status or context',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Update task status',
+    parameters: {
+      type: 'object',
       properties: {
-        status: {
-          type: 'string',
-          enum: ['in_progress', 'testing', 'in_review', 'done'],
-          description: 'New task status'
-        },
-        agent_context: {
-          type: 'string',
-          description: 'Update the agent context/notes for this task'
-        }
+        status: { type: 'string', enum: ['in_progress', 'testing', 'in_review', 'done'] },
+        agent_context: { type: 'string' }
       },
       required: []
     }
   },
   {
     name: 'add_comment',
-    description: 'Add a comment to the current task',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        content: {
-          type: 'string',
-          description: 'Comment content'
-        }
-      },
+    description: 'Add comment to task',
+    parameters: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
       required: ['content']
     }
   },
   {
-    name: 'web_fetch',
-    description: 'Fetch content from a URL',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        url: {
-          type: 'string',
-          description: 'URL to fetch'
-        },
-        method: {
-          type: 'string',
-          enum: ['GET', 'POST', 'PUT', 'DELETE'],
-          description: 'HTTP method (default: GET)'
-        },
-        body: {
-          type: 'string',
-          description: 'Request body (for POST/PUT)'
-        }
-      },
-      required: ['url']
-    }
-  },
-  {
     name: 'task_complete',
-    description: 'Signal that the task work is complete. Call this when done.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Signal task completion',
+    parameters: {
+      type: 'object',
       properties: {
-        summary: {
-          type: 'string',
-          description: 'Summary of work completed'
-        },
-        files_changed: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'List of files that were modified'
-        },
-        next_status: {
-          type: 'string',
-          enum: ['testing', 'in_review', 'done'],
-          description: 'Status to move the task to'
-        }
+        summary: { type: 'string' },
+        files_changed: { type: 'array', items: { type: 'string' } },
+        next_status: { type: 'string', enum: ['testing', 'in_review', 'done'] }
       },
       required: ['summary', 'next_status']
     }
   }
 ];
 
-// Default agent prompts by type
+// Default agent prompts
 export const AGENT_PROMPTS = {
-  developer: `You are a senior software developer working on a task. Your job is to:
-- Analyze the task requirements carefully
-- Write clean, well-documented code
-- Make small, focused commits with descriptive messages
-- Test your changes work correctly
-- Move the task to 'testing' when implementation is complete
-
-Work methodically. Read existing code first to understand the codebase. Make incremental changes and verify they work.`,
-
-  qa: `You are a QA engineer testing an implementation. Your job is to:
-- Review the task requirements and acceptance criteria
-- Test the implementation thoroughly via API calls or manual verification
-- Check edge cases and error handling
-- If tests pass: move task to 'in_review'
-- If tests fail: add a detailed comment explaining the failure and move to 'in_progress'
-
-Be thorough but practical. Focus on critical functionality first.`,
-
-  reviewer: `You are a code reviewer. Your job is to:
-- Review the code changes for quality and correctness
-- Verify the implementation meets requirements
-- Check for security issues, performance problems, or bugs
-- If approved: move task to 'done'
-- If changes needed: add a comment with specific feedback and move to 'in_progress'
-
-Be constructive in feedback. Focus on significant issues, not style nitpicks.`
+  developer: `You are a senior software developer. Analyze requirements, write clean code, test changes, move task to 'testing' when done.`,
+  qa: `You are a QA engineer. Test implementations, check edge cases. If pass: move to 'in_review'. If fail: add comment and move to 'in_progress'.`,
+  reviewer: `You are a code reviewer. Check quality, security, bugs. If approved: move to 'done'. If changes needed: add comment and move to 'in_progress'.`
 };
 
-// Build the system prompt for an agent
-function buildSystemPrompt(context: AgentContext): string {
+// Build system prompt
+function buildSystemPrompt(context: AgentContext, usingOAT: boolean): string {
   const agentType = context.agentConfig?.name?.toLowerCase() || 'developer';
   const basePrompt = context.agentConfig?.systemPrompt || 
     AGENT_PROMPTS[agentType as keyof typeof AGENT_PROMPTS] || 
     AGENT_PROMPTS.developer;
 
-  return `${basePrompt}
+  const identityPrefix = usingOAT ? `${CLAUDE_CODE_IDENTITY}\n\n` : '';
+
+  return `${identityPrefix}${basePrompt}
 
 ## Current Task
 - **ID:** ${context.task.id}
 - **Title:** ${context.task.title}
 - **Status:** ${context.task.status}
-- **Priority:** ${context.task.priority}
 ${context.task.description ? `- **Description:** ${context.task.description}` : ''}
 
-${context.project ? `## Project Context
-- **Project:** ${context.project.title}
-- **Tech Stack:** ${context.project.tech_stack || 'Not specified'}
-` : ''}
+${context.agentMemory ? `## Previous Notes\n${context.agentMemory}\n` : ''}
 
-${context.agentMemory ? `## Your Previous Notes
-${context.agentMemory}
-` : ''}
-
-## Guidelines
-- Use the tools provided to complete your work
-- Make commits with clear, descriptive messages
-- Update the task context with your progress
-- Call task_complete when you're done`;
+Call task_complete when done.`;
 }
 
-// Build the initial task prompt
+// Build task prompt
 function buildTaskPrompt(context: AgentContext): string {
-  let prompt = `Please work on this task: "${context.task.title}"`;
-  
+  let prompt = `Work on: "${context.task.title}"`;
   if (context.task.description) {
-    prompt += `\n\nTask Description:\n${context.task.description}`;
+    prompt += `\n\nDescription: ${context.task.description}`;
   }
-
   if (context.recentComments.length > 0) {
-    prompt += '\n\nRecent Comments:';
-    for (const comment of context.recentComments.slice(-5)) {
-      prompt += `\n- ${comment.author}: ${comment.content}`;
+    prompt += '\n\nComments:';
+    for (const c of context.recentComments.slice(-3)) {
+      prompt += `\n- ${c.author}: ${c.content}`;
     }
   }
-
-  prompt += '\n\nPlease begin working on this task. Start by understanding the requirements and exploring the codebase if needed.';
-
   return prompt;
 }
 
-// Tool executor interface (implemented by sandbox)
+// Tool executor interface
 export interface ToolExecutor {
   execCommand(command: string, workdir?: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   readFile(path: string): Promise<string>;
@@ -418,7 +273,7 @@ export interface TaskAPI {
   addComment(taskId: string, author: string, content: string): Promise<void>;
 }
 
-// Execute a tool call
+// Execute tool
 async function executeTool(
   toolName: string,
   toolInput: Record<string, unknown>,
@@ -429,85 +284,46 @@ async function executeTool(
   try {
     switch (toolName) {
       case 'exec_command': {
-        const result = await executor.execCommand(
-          toolInput.command as string,
-          toolInput.workdir as string | undefined
-        );
-        return `Exit code: ${result.exitCode}\nStdout:\n${result.stdout}\nStderr:\n${result.stderr}`;
+        const r = await executor.execCommand(toolInput.command as string, toolInput.workdir as string);
+        return `Exit: ${r.exitCode}\n${r.stdout}\n${r.stderr}`;
       }
-
-      case 'read_file': {
-        const content = await executor.readFile(toolInput.path as string);
-        return content;
-      }
-
-      case 'write_file': {
+      case 'read_file':
+        return await executor.readFile(toolInput.path as string);
+      case 'write_file':
         await executor.writeFile(toolInput.path as string, toolInput.content as string);
-        return `File written: ${toolInput.path}`;
-      }
-
+        return `Written: ${toolInput.path}`;
       case 'list_files': {
-        const files = await executor.listFiles(
-          toolInput.path as string,
-          toolInput.recursive as boolean
-        );
+        const files = await executor.listFiles(toolInput.path as string, toolInput.recursive as boolean);
         return files.join('\n');
       }
-
       case 'git_commit': {
-        const sha = await executor.gitCommit(
-          toolInput.message as string,
-          toolInput.files as string[] | undefined
-        );
+        const sha = await executor.gitCommit(toolInput.message as string, toolInput.files as string[]);
         return `Committed: ${sha}`;
       }
-
-      case 'git_push': {
-        await executor.gitPush(toolInput.branch as string | undefined);
-        return 'Pushed successfully';
-      }
-
+      case 'git_push':
+        await executor.gitPush(toolInput.branch as string);
+        return 'Pushed';
       case 'update_task': {
         const updates: Partial<Task> = {};
         if (toolInput.status) updates.status = toolInput.status as Task['status'];
         if (toolInput.agent_context) updates.agent_context = toolInput.agent_context as string;
         await taskApi.updateTask(context.task.id, updates);
-        return `Task updated: ${JSON.stringify(updates)}`;
+        return `Updated: ${JSON.stringify(updates)}`;
       }
-
-      case 'add_comment': {
-        const author = context.agentConfig?.name || 'Agent';
-        await taskApi.addComment(context.task.id, author, toolInput.content as string);
-        return `Comment added by ${author}`;
-      }
-
-      case 'web_fetch': {
-        const response = await fetch(toolInput.url as string, {
-          method: (toolInput.method as string) || 'GET',
-          body: toolInput.body as string | undefined,
-        });
-        const text = await response.text();
-        return `Status: ${response.status}\n${text.slice(0, 5000)}`;
-      }
-
-      case 'task_complete': {
-        // This is handled specially in the main loop
-        return JSON.stringify({
-          summary: toolInput.summary,
-          files_changed: toolInput.files_changed,
-          next_status: toolInput.next_status
-        });
-      }
-
+      case 'add_comment':
+        await taskApi.addComment(context.task.id, context.agentConfig?.name || 'Agent', toolInput.content as string);
+        return 'Comment added';
+      case 'task_complete':
+        return JSON.stringify({ summary: toolInput.summary, files_changed: toolInput.files_changed, next_status: toolInput.next_status });
       default:
-        return `Unknown tool: ${toolName}`;
+        return `Unknown: ${toolName}`;
     }
-  } catch (error) {
-    return `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 
-// Main agent runner
+// Main agent runner using pi-ai
 export async function runAgent(
   context: AgentContext,
   executor: ToolExecutor,
@@ -516,22 +332,28 @@ export async function runAgent(
     maxIterations?: number;
     onToolUse?: (tool: string, input: unknown) => void;
     onMessage?: (content: string) => void;
-    apiKey?: string; // User's Claude API key (from database)
+    apiKey?: string;
   } = {}
 ): Promise<AgentResult> {
   const { maxIterations = 50, onToolUse, onMessage, apiKey } = options;
-  const model = context.agentConfig?.model || 'claude-sonnet-4-20250514';
+  const modelId = context.agentConfig?.model || 'claude-sonnet-4-20250514';
   const maxTokens = context.agentConfig?.maxTokens || 8000;
 
-  // Get the actual key being used
   const effectiveKey = getClaudeKey(apiKey);
   const usingOAT = isOATToken(effectiveKey);
   
-  // Create client with user's key or fallback to env
-  const claudeClient = createClient(effectiveKey);
-
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: buildTaskPrompt(context) }
+  console.log(`[Claude] Using pi-ai with ${usingOAT ? 'OAT token' : 'regular API key'}`);
+  
+  const model = createModel(modelId);
+  const systemPrompt = buildSystemPrompt(context, usingOAT);
+  
+  // Build messages in pi-ai format
+  const messages: Message[] = [
+    {
+      role: 'user',
+      content: buildTaskPrompt(context),
+      timestamp: Date.now()
+    } as UserMessage
   ];
 
   let totalInputTokens = 0;
@@ -542,133 +364,118 @@ export async function runAgent(
   while (iteration < maxIterations) {
     iteration++;
 
-    // Build system prompt - for OAT tokens, use array format with Claude Code identity first
-    const agentSystemPrompt = buildSystemPrompt(context);
-    
-    // For OAT tokens: system must be array with Claude Code identity as FIRST block
-    // This is exactly how pi-ai/OpenClaw structures it
-    const systemParam: string | Anthropic.TextBlockParam[] = usingOAT
-      ? [
-          {
-            type: 'text' as const,
-            text: CLAUDE_CODE_IDENTITY,
-            cache_control: { type: 'ephemeral' as const },
-          },
-          {
-            type: 'text' as const,
-            text: agentSystemPrompt,
-            cache_control: { type: 'ephemeral' as const },
-          },
-        ]
-      : agentSystemPrompt;
+    const streamContext: Context = {
+      systemPrompt,
+      messages,
+      tools: AGENT_TOOLS
+    };
 
-    // Call Claude
-    const response = await claudeClient.messages.create({
-      model,
-      max_tokens: maxTokens,
-      system: systemParam,
-      tools: AGENT_TOOLS,
-      messages
-    });
-
-    totalInputTokens += response.usage.input_tokens;
-    totalOutputTokens += response.usage.output_tokens;
-
-    // Process response content
-    const assistantContent: Anthropic.ContentBlock[] = [];
-    let taskCompleteResult: { summary: string; files_changed: string[]; next_status: string } | null = null;
-
-    for (const block of response.content) {
-      assistantContent.push(block);
-
-      if (block.type === 'text') {
-        onMessage?.(block.text);
-      }
-
-      if (block.type === 'tool_use') {
-        onToolUse?.(block.name, block.input);
-
-        // Execute the tool
-        const result = await executeTool(
-          block.name,
-          block.input as Record<string, unknown>,
-          context,
-          executor,
-          taskApi
-        );
-
-        // Check if this was task_complete
-        if (block.name === 'task_complete') {
-          try {
-            taskCompleteResult = JSON.parse(result);
-            filesChanged = taskCompleteResult?.files_changed || [];
-          } catch {
-            // Not valid JSON, continue
-          }
-        }
-
-        // Track file changes
-        if (block.name === 'write_file') {
-          const path = (block.input as { path: string }).path;
-          if (!filesChanged.includes(path)) {
-            filesChanged.push(path);
-          }
+    try {
+      const stream = streamSimpleAnthropic(model, streamContext, {
+        apiKey: effectiveKey,
+        maxTokens,
+      });
+      
+      let responseText = '';
+      const toolCalls: ToolCall[] = [];
+      let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+      let stopReason = 'stop';
+      
+      for await (const event of stream) {
+        if (event.type === 'text_delta') {
+          responseText += event.delta;
+          onMessage?.(event.delta);
+        } else if (event.type === 'toolcall_end') {
+          toolCalls.push(event.toolCall);
+          onToolUse?.(event.toolCall.name, event.toolCall.arguments);
+        } else if (event.type === 'done') {
+          stopReason = event.reason;
+          usage = event.message.usage;
+        } else if (event.type === 'error') {
+          throw new Error(event.error.errorMessage || 'Stream error');
         }
       }
-    }
 
-    // Add assistant message to history
-    messages.push({ role: 'assistant', content: assistantContent });
+      totalInputTokens += usage.input;
+      totalOutputTokens += usage.output;
 
-    // Check if task is complete
-    if (taskCompleteResult) {
+      // Build assistant message content
+      const assistantContent: (TextContent | ToolCall)[] = [];
+      if (responseText) {
+        assistantContent.push({ type: 'text', text: responseText });
+      }
+      assistantContent.push(...toolCalls);
+      
+      messages.push({
+        role: 'assistant',
+        content: assistantContent,
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        model: modelId,
+        usage,
+        stopReason: stopReason as 'stop' | 'toolUse',
+        timestamp: Date.now()
+      });
+
+      // Check for task_complete
+      let taskCompleteResult: { summary: string; files_changed: string[]; next_status: string } | null = null;
+      
+      if (toolCalls.length > 0) {
+        for (const tc of toolCalls) {
+          const result = await executeTool(tc.name, tc.arguments, context, executor, taskApi);
+          
+          messages.push({
+            role: 'toolResult',
+            toolCallId: tc.id,
+            toolName: tc.name,
+            content: [{ type: 'text', text: result }],
+            isError: false,
+            timestamp: Date.now()
+          });
+          
+          if (tc.name === 'task_complete') {
+            try { taskCompleteResult = JSON.parse(result); } catch {}
+          }
+          if (tc.name === 'write_file' && tc.arguments.path) {
+            filesChanged.push(tc.arguments.path as string);
+          }
+        }
+      }
+
+      if (taskCompleteResult) {
+        return {
+          success: true,
+          summary: taskCompleteResult.summary,
+          filesChanged: taskCompleteResult.files_changed || filesChanged,
+          nextStatus: taskCompleteResult.next_status as AgentResult['nextStatus'],
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens
+        };
+      }
+
+      if (stopReason === 'stop' && toolCalls.length === 0) {
+        return {
+          success: true,
+          summary: responseText || 'Task completed',
+          filesChanged,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens
+        };
+      }
+
+    } catch (error) {
+      console.error('[Claude] Error:', error);
       return {
-        success: true,
-        summary: taskCompleteResult.summary,
-        filesChanged: taskCompleteResult.files_changed || filesChanged,
-        nextStatus: taskCompleteResult.next_status as AgentResult['nextStatus'],
-        inputTokens: totalInputTokens,
-        outputTokens: totalOutputTokens
-      };
-    }
-
-    // If no tool calls and stop reason is end_turn, agent is done
-    if (response.stop_reason === 'end_turn' && !response.content.some(b => b.type === 'tool_use')) {
-      const textContent = response.content.find(b => b.type === 'text');
-      return {
-        success: true,
-        summary: textContent?.type === 'text' ? textContent.text : 'Task completed',
+        success: false,
+        summary: 'Error during execution',
         filesChanged,
+        error: error instanceof Error ? error.message : String(error),
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens
       };
-    }
-
-    // Add tool results for next iteration
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of response.content) {
-      if (block.type === 'tool_use') {
-        const result = await executeTool(
-          block.name,
-          block.input as Record<string, unknown>,
-          context,
-          executor,
-          taskApi
-        );
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: result
-        });
-      }
-    }
-
-    if (toolResults.length > 0) {
-      messages.push({ role: 'user', content: toolResults });
     }
   }
 
-  // Max iterations reached
   return {
     success: false,
     summary: 'Max iterations reached',
@@ -679,21 +486,16 @@ export async function runAgent(
   };
 }
 
-// Calculate cost in cents (approximate)
+// Calculate cost in cents
 export function calculateCost(inputTokens: number, outputTokens: number, model: string): number {
-  // Pricing per 1M tokens (as of 2024)
   const pricing: Record<string, { input: number; output: number }> = {
-    'claude-sonnet-4-20250514': { input: 300, output: 1500 }, // $3/$15 per 1M
+    'claude-sonnet-4-20250514': { input: 300, output: 1500 },
     'claude-3-5-sonnet-20241022': { input: 300, output: 1500 },
     'claude-3-opus-20240229': { input: 1500, output: 7500 },
     'claude-3-haiku-20240307': { input: 25, output: 125 },
   };
-
-  const modelPricing = pricing[model] || pricing['claude-sonnet-4-20250514'];
-  const inputCost = (inputTokens / 1_000_000) * modelPricing.input * 100; // Convert to cents
-  const outputCost = (outputTokens / 1_000_000) * modelPricing.output * 100;
-
-  return Math.ceil(inputCost + outputCost);
+  const p = pricing[model] || pricing['claude-sonnet-4-20250514'];
+  return Math.ceil((inputTokens / 1_000_000) * p.input * 100 + (outputTokens / 1_000_000) * p.output * 100);
 }
 
 export { AGENT_TOOLS, buildSystemPrompt, buildTaskPrompt };
