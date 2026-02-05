@@ -419,6 +419,13 @@ export default function KanbanBoard() {
               {session.user.image && (
                 <img src={session.user.image} alt="" className="w-6 h-6 sm:w-8 sm:h-8 rounded-full" />
               )}
+              <a
+                href="/profile"
+                className="text-white/40 hover:text-white/70 text-xs transition-colors hidden sm:block"
+              >
+                Profile
+              </a>
+              <span className="text-white/20 hidden sm:block">|</span>
               <button
                 onClick={() => signOut()}
                 className="text-white/40 hover:text-white/70 text-xs transition-colors hidden sm:block"
