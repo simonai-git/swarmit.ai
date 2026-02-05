@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // No special config needed for pg
+  // Instrumentation enabled by default in Next.js 13.2+
+  // src/instrumentation.ts will be auto-loaded
 };
 
 export default nextConfig;
