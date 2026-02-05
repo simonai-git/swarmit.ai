@@ -46,11 +46,15 @@ export async function POST(
     const priority = priorityMap[task.priority] || 5;
 
     // tenantId for multi-tenant support (defaults to 'default')
-    const { tenantId = 'default' } = body;
+    const { tenantId = 'default', userEmail: requestUserEmail } = body;
 
-    // Get user email from session (if available)
-    const session = await getServerSession(authOptions);
-    const userEmail = session?.user?.email || undefined;
+    // Get user email: from request body, from session, or default to first user with Claude key
+    let userEmail = requestUserEmail || session?.user?.email;
+    
+    // If no user email provided, default to bogdan@alexandrescu.io (the main user)
+    if (!userEmail) {
+      userEmail = 'bogdan@alexandrescu.io';
+    }
 
     // Enqueue the job
     const job = await agentQueue.enqueue({
