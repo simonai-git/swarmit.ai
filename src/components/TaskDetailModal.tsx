@@ -216,6 +216,34 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
     }
   };
 
+  const [triggeringRun, setTriggeringRun] = useState(false);
+  const [selectedAgentType, setSelectedAgentType] = useState<'developer' | 'qa' | 'reviewer'>('developer');
+
+  const triggerAgentRun = async () => {
+    if (!task) return;
+    setTriggeringRun(true);
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentType: selectedAgentType }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Agent run triggered:', data);
+        // Refresh runs list after a short delay
+        setTimeout(() => fetchRuns(), 1000);
+      } else {
+        const error = await res.json();
+        console.error('Failed to trigger agent run:', error);
+      }
+    } catch (error) {
+      console.error('Error triggering agent run:', error);
+    } finally {
+      setTriggeringRun(false);
+    }
+  };
+
   const handleAddComment = async () => {
     if (!task || !newComment.trim() || !session?.user?.email) return;
     setSubmittingComment(true);
@@ -693,16 +721,41 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
           ) : (
             /* Agent Runs Tab */
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2 text-white/50 text-sm">
                   <span>📊</span>
                   <span>LLM agent execution history</span>
                 </div>
-                {runs.length > 0 && (
-                  <div className="text-xs text-white/40">
-                    Total: ${(runs.reduce((sum, r) => sum + r.costCents, 0) / 100).toFixed(2)}
+                <div className="flex items-center gap-2">
+                  {runs.length > 0 && (
+                    <div className="text-xs text-white/40">
+                      Total: ${(runs.reduce((sum, r) => sum + r.costCents, 0) / 100).toFixed(2)}
+                    </div>
+                  )}
+                  {/* Run Agent Button */}
+                  <div className="flex items-center gap-1 bg-black/30 rounded-lg p-1">
+                    <select
+                      value={selectedAgentType}
+                      onChange={(e) => setSelectedAgentType(e.target.value as 'developer' | 'qa' | 'reviewer')}
+                      className="bg-transparent text-xs text-white/70 border-none focus:outline-none cursor-pointer"
+                    >
+                      <option value="developer" className="bg-slate-800">Developer</option>
+                      <option value="qa" className="bg-slate-800">QA</option>
+                      <option value="reviewer" className="bg-slate-800">Reviewer</option>
+                    </select>
+                    <button
+                      onClick={triggerAgentRun}
+                      disabled={triggeringRun || runs.some(r => r.status === 'running')}
+                      className={`px-3 py-1 text-xs rounded-md transition-all ${
+                        triggeringRun || runs.some(r => r.status === 'running')
+                          ? 'bg-white/10 text-white/30 cursor-not-allowed'
+                          : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                      }`}
+                    >
+                      {triggeringRun ? '⏳ Starting...' : runs.some(r => r.status === 'running') ? '🔄 Running' : '▶ Run Agent'}
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
               
               {loadingRuns ? (

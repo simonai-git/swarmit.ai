@@ -16,8 +16,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Verify API key
-  if (!verifyApiKey(request)) {
+  // Allow either API key OR authenticated session
+  const session = await getServerSession(authOptions);
+  if (!verifyApiKey(request) && !session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
