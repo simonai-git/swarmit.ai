@@ -68,23 +68,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 });
     }
 
-    // Validate key format - only accept direct API keys (sk-ant-api*)
-    // OAT tokens (sk-ant-oat*) from OAuth flows require proxy infrastructure we don't have
+    // Validate key format - only accept regular API keys (sk-ant-api*)
+    // OAT tokens (sk-ant-oat*) from claude setup-token are scoped specifically to Claude Code CLI
     if (apiKey.startsWith('sk-ant-oat')) {
       return NextResponse.json({ 
-        error: 'OAuth Access Tokens (OAT) are not supported. Please use a regular Claude API key from console.anthropic.com' 
+        error: 'OAuth tokens from Claude Code are scoped specifically to that application and cannot be used by SwarmIt.AI. Please use a regular Claude API key from console.anthropic.com' 
       }, { status: 400 });
     }
     
     if (!apiKey.startsWith('sk-ant-api')) {
       return NextResponse.json({ error: 'Invalid Claude API key format. Must start with sk-ant-api' }, { status: 400 });
     }
-
-    // Test the API key by making a simple request
-    const apiEndpoint = 'https://api.anthropic.com/v1/messages';
     
+    // Test the API key by making a simple request
     try {
-      const testRes = await fetch(apiEndpoint, {
+      const testRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
