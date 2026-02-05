@@ -100,6 +100,7 @@ function queueJobToAgentJob(qj: QueueJob): AgentJob {
 // Redis-backed Agent Queue with backward-compatible interface
 class AgentQueue {
   private redisQueue: RedisQueue | null = null;
+  private jobs: AgentJob[] = [];  // In-memory fallback storage
   private running: Map<string, AgentRun> = new Map();
   private isProcessing = false;
   private processInterval: NodeJS.Timeout | null = null;
@@ -140,7 +141,18 @@ class AgentQueue {
       return queueJobToAgentJob(qj);
     }
 
-    // Fallback to in-memory (legacy)
+    // Fallback to in-memory
+    // Check for duplicate
+    const existing = this.jobs.find(
+      j => j.taskId === job.taskId && 
+           j.agentType === job.agentType && 
+           ['pending', 'running'].includes(j.status)
+    );
+    if (existing) {
+      console.log(`[AgentQueue] Duplicate job exists for task ${job.taskId}`);
+      return existing;
+    }
+
     const newJob: AgentJob = {
       id: uuidv4(),
       taskId: job.taskId,
@@ -151,6 +163,7 @@ class AgentQueue {
       retryCount: 0,
     };
     
+    this.jobs.push(newJob);
     console.log(`[AgentQueue] Enqueued job ${newJob.id} for task ${job.taskId} (in-memory)`);
     this.startProcessing();
     return newJob;
@@ -177,13 +190,13 @@ class AgentQueue {
       };
     }
 
-    // Fallback to empty status
+    // In-memory status
     return {
-      pending: 0,
-      running: this.running.size,
-      completed: 0,
-      failed: 0,
-      jobs: [],
+      pending: this.jobs.filter(j => j.status === 'pending').length,
+      running: this.jobs.filter(j => j.status === 'running').length,
+      completed: this.jobs.filter(j => j.status === 'completed').length,
+      failed: this.jobs.filter(j => j.status === 'failed').length,
+      jobs: [...this.jobs],
       activeRuns: Array.from(this.running.values()),
     };
   }
@@ -221,9 +234,65 @@ class AgentQueue {
       });
     }
 
-    // Also run our own interval for monitoring
-    this.processInterval = setInterval(() => {
-      // Periodic monitoring/cleanup
+    // Process in-memory queue
+    this.processInterval = setInterval(async () => {
+      if (this.isProcessing) return;
+      if (this.useRedis) return; // Redis handles its own processing
+      
+      this.isProcessing = true;
+      try {
+        // Get running count
+        const runningCount = this.jobs.filter(j => j.status === 'running').length;
+        if (runningCount >= CONFIG.maxConcurrent) return;
+
+        // Get next pending job
+        const pendingJobs = this.jobs
+          .filter(j => j.status === 'pending')
+          .sort((a, b) => b.priority - a.priority);
+
+        if (pendingJobs.length === 0) return;
+
+        const job = pendingJobs[0];
+        job.status = 'running';
+        job.startedAt = new Date();
+
+        console.log(`[AgentQueue] Processing job ${job.id} for task ${job.taskId}`);
+
+        try {
+          // Convert to QueueJob format for executeJob
+          const queueJob: import('./redis-queue').QueueJob = {
+            id: job.id,
+            tenantId: 'default',
+            taskId: job.taskId,
+            agentType: job.agentType,
+            priority: job.priority,
+            status: 'running',
+            createdAt: job.createdAt.toISOString(),
+            startedAt: job.startedAt?.toISOString(),
+            retryCount: job.retryCount,
+            maxRetries: CONFIG.maxRetries,
+          };
+
+          await this.executeJob(queueJob);
+          job.status = 'completed';
+          job.completedAt = new Date();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          job.error = errorMsg;
+          
+          if (job.retryCount < CONFIG.maxRetries) {
+            job.retryCount++;
+            job.status = 'pending';
+            console.log(`[AgentQueue] Job ${job.id} failed, retry ${job.retryCount}/${CONFIG.maxRetries}`);
+          } else {
+            job.status = 'failed';
+            job.completedAt = new Date();
+            console.log(`[AgentQueue] Job ${job.id} failed permanently: ${errorMsg}`);
+          }
+        }
+      } finally {
+        this.isProcessing = false;
+      }
     }, CONFIG.pollIntervalMs);
   }
 
