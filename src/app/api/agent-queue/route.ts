@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { agentQueue, getTodaySpend, getSpendByPeriod } from '@/lib/agent-queue';
+import { agentQueue, getTodaySpend } from '@/lib/agent-queue';
 
 // Verify API key
 function verifyApiKey(request: NextRequest): boolean {
@@ -16,7 +16,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const status = agentQueue.getStatus();
+    // tenantId is optional - if not provided, returns global status
+    const { searchParams } = new URL(request.url);
+    const tenantId = searchParams.get('tenantId') || undefined;
+    
+    const status = await agentQueue.getStatus();
     
     // Get today's spend
     let todaySpend = 0;
@@ -56,8 +60,10 @@ export async function GET(request: NextRequest) {
       })),
       costs: {
         todaySpendCents: todaySpend,
-        dailyBudgetCents: 1000, // $10/day default
+        dailyBudgetCents: parseInt(process.env.DAILY_BUDGET_CENTS || '1000'),
       },
+      redis: !!process.env.REDIS_URL,
+      tenantId: tenantId || 'default',
     });
   } catch (error) {
     console.error('Error getting queue status:', error);

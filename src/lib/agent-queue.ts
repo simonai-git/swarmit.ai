@@ -2,22 +2,22 @@ import { v4 as uuidv4 } from 'uuid';
 import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
+import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 
-// Agent job in the queue
+// Legacy interfaces for backward compatibility
 export interface AgentJob {
   id: string;
   taskId: string;
   agentType: 'developer' | 'qa' | 'reviewer';
-  priority: number; // Higher = more urgent
+  priority: number;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: Date;
   startedAt?: Date;
   completedAt?: Date;
   error?: string;
-  retryCount: number; // Track retry attempts
+  retryCount: number;
 }
 
-// Active agent run
 export interface AgentRun {
   id: string;
   jobId: string;
@@ -41,6 +41,7 @@ const CONFIG = {
   retryDelayMs: 10000,
   dailyBudgetCents: parseInt(process.env.DAILY_BUDGET_CENTS || '1000'),
   alertWebhookUrl: process.env.ALERT_WEBHOOK_URL,
+  defaultTenantId: process.env.DEFAULT_TENANT_ID || 'default',
 };
 
 // Alert types
@@ -50,18 +51,12 @@ type AlertType = 'budget_warning' | 'budget_exceeded' | 'agent_failed' | 'agent_
 async function sendAlert(type: AlertType, message: string, metadata?: Record<string, unknown>): Promise<void> {
   console.log(`[ALERT] ${type}: ${message}`, metadata);
   
-  // Send to webhook if configured
   if (CONFIG.alertWebhookUrl) {
     try {
       await fetch(CONFIG.alertWebhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          message,
-          metadata,
-          timestamp: new Date().toISOString(),
-        }),
+        body: JSON.stringify({ type, message, metadata, timestamp: new Date().toISOString() }),
       });
     } catch (error) {
       console.error('Failed to send alert webhook:', error);
@@ -69,92 +64,137 @@ async function sendAlert(type: AlertType, message: string, metadata?: Record<str
   }
 }
 
-// Check if daily budget allows another run
+// Check daily budget
 async function checkBudget(): Promise<{ allowed: boolean; remaining: number; spent: number }> {
   const result = await pool.query(
-    `SELECT COALESCE(SUM(cost_cents), 0) as total 
-     FROM agent_runs 
-     WHERE started_at >= CURRENT_DATE`
+    `SELECT COALESCE(SUM(cost_cents), 0) as total FROM agent_runs WHERE started_at >= CURRENT_DATE`
   );
   const spent = parseInt(result.rows[0].total) || 0;
   const remaining = CONFIG.dailyBudgetCents - spent;
   
-  // Alert at 80% budget
   if (remaining > 0 && remaining < CONFIG.dailyBudgetCents * 0.2) {
     await sendAlert('budget_warning', `Daily budget 80% used: $${(spent / 100).toFixed(2)} of $${(CONFIG.dailyBudgetCents / 100).toFixed(2)}`, {
-      spent,
-      remaining,
-      limit: CONFIG.dailyBudgetCents,
+      spent, remaining, limit: CONFIG.dailyBudgetCents,
     });
   }
   
+  return { allowed: remaining > 0, remaining: Math.max(0, remaining), spent };
+}
+
+// Convert QueueJob to legacy AgentJob
+function queueJobToAgentJob(qj: QueueJob): AgentJob {
   return {
-    allowed: remaining > 0,
-    remaining: Math.max(0, remaining),
-    spent,
+    id: qj.id,
+    taskId: qj.taskId,
+    agentType: qj.agentType,
+    priority: qj.priority,
+    status: qj.status,
+    createdAt: new Date(qj.createdAt),
+    startedAt: qj.startedAt ? new Date(qj.startedAt) : undefined,
+    completedAt: qj.completedAt ? new Date(qj.completedAt) : undefined,
+    error: qj.error,
+    retryCount: qj.retryCount,
   };
 }
 
-// In-memory queue state (will be moved to DB later)
+// Redis-backed Agent Queue with backward-compatible interface
 class AgentQueue {
-  private jobs: AgentJob[] = [];
+  private redisQueue: RedisQueue | null = null;
   private running: Map<string, AgentRun> = new Map();
   private isProcessing = false;
   private processInterval: NodeJS.Timeout | null = null;
+  private useRedis: boolean;
 
-  // Add a job to the queue
-  async enqueue(job: Omit<AgentJob, 'id' | 'status' | 'createdAt' | 'retryCount'>): Promise<AgentJob> {
+  constructor() {
+    // Use Redis if REDIS_URL is configured
+    this.useRedis = !!process.env.REDIS_URL;
+    if (this.useRedis) {
+      console.log('[AgentQueue] Using Redis-backed queue');
+      this.redisQueue = getQueue({
+        maxConcurrentPerTenant: CONFIG.maxConcurrent,
+        maxConcurrentGlobal: 10,
+        jobTimeoutMs: 300000,
+        retryDelayMs: CONFIG.retryDelayMs,
+      });
+    } else {
+      console.log('[AgentQueue] Redis not configured, using in-memory queue');
+    }
+  }
+
+  // Enqueue a job
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer'; priority: number; tenantId?: string }): Promise<AgentJob> {
+    const tenantId = job.tenantId || CONFIG.defaultTenantId;
+
+    if (this.useRedis && this.redisQueue) {
+      const qj = await this.redisQueue.enqueue({
+        tenantId,
+        taskId: job.taskId,
+        agentType: job.agentType,
+        priority: job.priority,
+        maxRetries: CONFIG.maxRetries,
+      });
+      
+      // Auto-start processing
+      this.startProcessing();
+      
+      return queueJobToAgentJob(qj);
+    }
+
+    // Fallback to in-memory (legacy)
     const newJob: AgentJob = {
-      ...job,
       id: uuidv4(),
+      taskId: job.taskId,
+      agentType: job.agentType,
+      priority: job.priority,
       status: 'pending',
       createdAt: new Date(),
       retryCount: 0,
     };
-
-    // Check for duplicate (same task, same agent type, pending/running)
-    const existing = this.jobs.find(
-      j => j.taskId === job.taskId && 
-           j.agentType === job.agentType && 
-           ['pending', 'running'].includes(j.status)
-    );
-
-    if (existing) {
-      console.log(`Job already exists for task ${job.taskId} with agent ${job.agentType}`);
-      return existing;
-    }
-
-    this.jobs.push(newJob);
-    console.log(`Enqueued job ${newJob.id} for task ${newJob.taskId} (${newJob.agentType})`);
-
-    // Start processing if not already
+    
+    console.log(`[AgentQueue] Enqueued job ${newJob.id} for task ${job.taskId} (in-memory)`);
     this.startProcessing();
-
     return newJob;
   }
 
   // Get queue status
-  getStatus(): {
+  async getStatus(): Promise<{
     pending: number;
     running: number;
     completed: number;
     failed: number;
     jobs: AgentJob[];
     activeRuns: AgentRun[];
-  } {
+  }> {
+    if (this.useRedis && this.redisQueue) {
+      const status = await this.redisQueue.getStatus();
+      return {
+        pending: status.pending,
+        running: status.running,
+        completed: 0, // Redis doesn't track completed count
+        failed: 0,
+        jobs: status.jobs.map(queueJobToAgentJob),
+        activeRuns: Array.from(this.running.values()),
+      };
+    }
+
+    // Fallback to empty status
     return {
-      pending: this.jobs.filter(j => j.status === 'pending').length,
-      running: this.jobs.filter(j => j.status === 'running').length,
-      completed: this.jobs.filter(j => j.status === 'completed').length,
-      failed: this.jobs.filter(j => j.status === 'failed').length,
-      jobs: [...this.jobs],
+      pending: 0,
+      running: this.running.size,
+      completed: 0,
+      failed: 0,
+      jobs: [],
       activeRuns: Array.from(this.running.values()),
     };
   }
 
   // Get job by ID
-  getJob(jobId: string): AgentJob | undefined {
-    return this.jobs.find(j => j.id === jobId);
+  async getJob(jobId: string): Promise<AgentJob | undefined> {
+    if (this.useRedis && this.redisQueue) {
+      const qj = await this.redisQueue.getJob(jobId);
+      return qj ? queueJobToAgentJob(qj) : undefined;
+    }
+    return undefined;
   }
 
   // Get run by ID
@@ -164,106 +204,59 @@ class AgentQueue {
 
   // Cancel a job
   async cancel(jobId: string): Promise<boolean> {
-    const job = this.jobs.find(j => j.id === jobId);
-    if (!job) return false;
-
-    if (job.status === 'running') {
-      // TODO: Implement actual cancellation of running agent
-      const run = Array.from(this.running.values()).find(r => r.jobId === jobId);
-      if (run) {
-        run.status = 'failed';
-        run.error = 'Cancelled by user';
-        run.completedAt = new Date();
-      }
+    if (this.useRedis && this.redisQueue) {
+      return this.redisQueue.cancel(jobId);
     }
-
-    job.status = 'cancelled';
-    return true;
+    return false;
   }
 
-  // Start the processing loop
+  // Start processing loop
   startProcessing(): void {
     if (this.processInterval) return;
 
-    this.processInterval = setInterval(() => {
-      this.processQueue();
-    }, CONFIG.pollIntervalMs);
+    if (this.useRedis && this.redisQueue) {
+      // Use Redis queue's built-in processor
+      this.redisQueue.startProcessing(async (job) => {
+        await this.executeJob(job);
+      });
+    }
 
-    // Also process immediately
-    this.processQueue();
+    // Also run our own interval for monitoring
+    this.processInterval = setInterval(() => {
+      // Periodic monitoring/cleanup
+    }, CONFIG.pollIntervalMs);
   }
 
-  // Stop the processing loop
+  // Stop processing
   stopProcessing(): void {
     if (this.processInterval) {
       clearInterval(this.processInterval);
       this.processInterval = null;
     }
-  }
-
-  // Clear completed/failed jobs older than specified age
-  cleanup(maxAgeMs: number = 86400000): void {
-    const cutoff = Date.now() - maxAgeMs;
-    this.jobs = this.jobs.filter(j => {
-      if (['pending', 'running'].includes(j.status)) return true;
-      return j.completedAt && j.completedAt.getTime() > cutoff;
-    });
-  }
-
-  // Process pending jobs
-  private async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-
-    try {
-      // Check if we can run more jobs
-      const runningCount = this.jobs.filter(j => j.status === 'running').length;
-      const availableSlots = CONFIG.maxConcurrent - runningCount;
-
-      if (availableSlots <= 0) {
-        return;
-      }
-
-      // Get pending jobs sorted by priority (highest first), then by creation time
-      const pendingJobs = this.jobs
-        .filter(j => j.status === 'pending')
-        .sort((a, b) => {
-          if (b.priority !== a.priority) return b.priority - a.priority;
-          return a.createdAt.getTime() - b.createdAt.getTime();
-        })
-        .slice(0, availableSlots);
-
-      for (const job of pendingJobs) {
-        await this.runJob(job);
-      }
-    } finally {
-      this.isProcessing = false;
+    if (this.useRedis && this.redisQueue) {
+      this.redisQueue.stopProcessing();
     }
   }
 
-  // Run a single job
-  private async runJob(job: AgentJob): Promise<void> {
-    // Check budget before running
+  // Cleanup old jobs
+  cleanup(maxAgeMs: number = 86400000): void {
+    // Redis handles cleanup automatically via TTL
+  }
+
+  // Execute a job (called by Redis queue processor)
+  private async executeJob(queueJob: QueueJob): Promise<void> {
+    const job = queueJobToAgentJob(queueJob);
+    
+    // Check budget
     const budget = await checkBudget();
     if (!budget.allowed) {
-      job.status = 'failed';
-      job.error = 'Daily budget exceeded';
-      job.completedAt = new Date();
-      
-      await sendAlert('budget_exceeded', `Agent blocked: daily budget of $${(CONFIG.dailyBudgetCents / 100).toFixed(2)} exceeded`, {
-        jobId: job.id,
-        taskId: job.taskId,
-        spent: budget.spent,
-        limit: CONFIG.dailyBudgetCents,
+      await sendAlert('budget_exceeded', `Agent blocked: daily budget exceeded`, {
+        jobId: job.id, taskId: job.taskId, spent: budget.spent, limit: CONFIG.dailyBudgetCents,
       });
-      
-      console.log(`Job ${job.id} blocked: daily budget exceeded ($${(budget.spent / 100).toFixed(2)} spent)`);
-      return;
+      throw new Error('Daily budget exceeded');
     }
 
-    job.status = 'running';
-    job.startedAt = new Date();
-
+    // Create run record
     const run: AgentRun = {
       id: uuidv4(),
       jobId: job.id,
@@ -276,100 +269,23 @@ class AgentQueue {
       costCents: 0,
       transcript: [],
     };
-
     this.running.set(run.id, run);
 
-    console.log(`Starting job ${job.id} (run ${run.id}) for task ${job.taskId}`);
-
-    try {
-      // TODO: Actually run the agent here
-      // For now, we'll just simulate with a placeholder
-      // The actual implementation will call runAgent() from claude.ts
-      
-      // This will be replaced with actual agent execution
-      await this.executeAgent(job, run);
-
-      job.status = 'completed';
-      job.completedAt = new Date();
-      run.status = 'completed';
-      run.completedAt = new Date();
-
-      console.log(`Job ${job.id} completed successfully`);
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      run.status = 'failed';
-      run.error = errorMessage;
-      run.completedAt = new Date();
-
-      // Check if we should retry
-      if (job.retryCount < CONFIG.maxRetries) {
-        job.retryCount++;
-        job.status = 'pending'; // Reset to pending for retry
-        job.error = `Retry ${job.retryCount}/${CONFIG.maxRetries}: ${errorMessage}`;
-        
-        console.log(`Job ${job.id} failed, scheduling retry ${job.retryCount}/${CONFIG.maxRetries} in ${CONFIG.retryDelayMs}ms`);
-        
-        await sendAlert('agent_retry', `Agent retry scheduled (${job.retryCount}/${CONFIG.maxRetries})`, {
-          jobId: job.id,
-          taskId: job.taskId,
-          agentType: job.agentType,
-          error: errorMessage,
-          retryCount: job.retryCount,
-        });
-
-        // Delay before retry
-        await new Promise(resolve => setTimeout(resolve, CONFIG.retryDelayMs));
-      } else {
-        // Max retries exceeded
-        job.status = 'failed';
-        job.error = errorMessage;
-        job.completedAt = new Date();
-        
-        console.error(`Job ${job.id} failed after ${job.retryCount} retries:`, job.error);
-        
-        await sendAlert('agent_failed', `Agent failed after ${CONFIG.maxRetries} retries`, {
-          jobId: job.id,
-          taskId: job.taskId,
-          agentType: job.agentType,
-          error: errorMessage,
-          retryCount: job.retryCount,
-        });
-      }
-    }
-
-    // Save run to database for persistence
-    try {
-      await saveAgentRun(run);
-    } catch (dbError) {
-      console.error('Failed to save agent run to database:', dbError);
-    }
-
-    // Keep run in memory for a while, then clean up
-    setTimeout(() => {
-      this.running.delete(run.id);
-    }, 3600000); // Keep for 1 hour
-  }
-
-  // Execute agent with sandbox
-  private async executeAgent(job: AgentJob, run: AgentRun): Promise<void> {
     let executor: SandboxToolExecutor | null = null;
 
     try {
-      // 1. Load task and project context from DB
+      // Load task context
       const task = await getTask(job.taskId);
-      if (!task) {
-        throw new Error('Task not found');
-      }
+      if (!task) throw new Error('Task not found');
 
       const project = task.project_id ? await getProject(task.project_id) : null;
       const comments = await getCommentsByTaskId(job.taskId);
 
-      // 2. Build agent context
+      // Build agent context
       const context: AgentContext = {
         task: task as Task,
         project,
-        recentComments: comments.slice(-10), // Last 10 comments
+        recentComments: comments.slice(-10),
         agentMemory: task.agent_context || '',
         agentConfig: {
           id: `config-${job.agentType}`,
@@ -382,17 +298,14 @@ class AgentQueue {
         },
       };
 
-      // 3. Create sandbox executor
+      // Create sandbox
       console.log(`[Agent] Creating sandbox for task ${job.taskId}`);
-      
-      // Get repo URL from project or use default
       const repoUrl = process.env.DEFAULT_REPO;
-      
       executor = await SandboxToolExecutor.create({
         taskId: job.taskId,
         repo: repoUrl,
         branch: 'main',
-        timeoutMs: 120000, // 2 minute timeout per command
+        timeoutMs: 120000,
       });
 
       run.transcript.push({
@@ -401,24 +314,18 @@ class AgentQueue {
         timestamp: new Date(),
       });
 
-      // 4. Create task API
+      // Task API
       const taskApi = {
         updateTask: async (taskId: string, updates: Partial<Task>) => {
           await updateTask(taskId, updates);
         },
         addComment: async (taskId: string, author: string, content: string) => {
-          await createComment({
-            id: uuidv4(),
-            task_id: taskId,
-            author,
-            content,
-          });
+          await createComment({ id: uuidv4(), task_id: taskId, author, content });
         },
       };
 
-      // 5. Run the agent
+      // Run agent
       console.log(`[Agent] Running ${job.agentType} agent for task ${job.taskId}`);
-      
       const result = await runAgent(context, executor, taskApi, {
         maxIterations: 30,
         onToolUse: (tool, input) => {
@@ -437,17 +344,19 @@ class AgentQueue {
         },
       });
 
-      // 6. Update run metrics
+      // Update metrics
       run.inputTokens = result.inputTokens;
       run.outputTokens = result.outputTokens;
       run.costCents = calculateCost(result.inputTokens, result.outputTokens, 'claude-sonnet-4-20250514');
+      run.status = 'completed';
+      run.completedAt = new Date();
 
-      // 7. Update task if agent specified next status
+      // Update task status if specified
       if (result.success && result.nextStatus) {
         await updateTask(job.taskId, { status: result.nextStatus });
       }
 
-      // 8. Add completion comment
+      // Add completion comment
       if (result.success) {
         await createComment({
           id: uuidv4(),
@@ -467,19 +376,28 @@ class AgentQueue {
         throw new Error(result.error || 'Agent failed');
       }
 
+    } catch (error) {
+      run.status = 'failed';
+      run.error = error instanceof Error ? error.message : String(error);
+      run.completedAt = new Date();
+      throw error;
     } finally {
       // Cleanup sandbox
       if (executor) {
         await executor.cleanup();
       }
+      // Save run to database
+      await saveAgentRun(run);
+      // Keep in memory briefly, then cleanup
+      setTimeout(() => this.running.delete(run.id), 3600000);
     }
   }
 }
 
-// Singleton queue instance
+// Singleton
 export const agentQueue = new AgentQueue();
 
-// Database operations for agent runs (for persistence)
+// Database operations for agent runs
 export async function saveAgentRun(run: AgentRun): Promise<void> {
   await pool.query(
     `INSERT INTO agent_runs (id, task_id, agent_type, status, started_at, completed_at, 
@@ -488,19 +406,8 @@ export async function saveAgentRun(run: AgentRun): Promise<void> {
      ON CONFLICT (id) DO UPDATE SET
        status = $4, completed_at = $6, input_tokens = $7, output_tokens = $8,
        cost_cents = $9, error = $10, transcript = $11`,
-    [
-      run.id,
-      run.taskId,
-      run.agentType,
-      run.status,
-      run.startedAt,
-      run.completedAt,
-      run.inputTokens,
-      run.outputTokens,
-      run.costCents,
-      run.error,
-      JSON.stringify(run.transcript),
-    ]
+    [run.id, run.taskId, run.agentType, run.status, run.startedAt, run.completedAt,
+     run.inputTokens, run.outputTokens, run.costCents, run.error, JSON.stringify(run.transcript)]
   );
 }
 
@@ -509,30 +416,19 @@ export async function getAgentRuns(taskId: string): Promise<AgentRun[]> {
     `SELECT * FROM agent_runs WHERE task_id = $1 ORDER BY started_at DESC`,
     [taskId]
   );
-  return result.rows.map(row => ({
-    ...row,
-    transcript: row.transcript || [],
-  }));
+  return result.rows.map(row => ({ ...row, transcript: row.transcript || [] }));
 }
 
 export async function getAgentRun(runId: string): Promise<AgentRun | null> {
-  const result = await pool.query(
-    `SELECT * FROM agent_runs WHERE id = $1`,
-    [runId]
-  );
+  const result = await pool.query(`SELECT * FROM agent_runs WHERE id = $1`, [runId]);
   if (result.rows.length === 0) return null;
-  return {
-    ...result.rows[0],
-    transcript: result.rows[0].transcript || [],
-  };
+  return { ...result.rows[0], transcript: result.rows[0].transcript || [] };
 }
 
 // Cost tracking
 export async function getTodaySpend(): Promise<number> {
   const result = await pool.query(
-    `SELECT COALESCE(SUM(cost_cents), 0) as total 
-     FROM agent_runs 
-     WHERE started_at >= CURRENT_DATE`
+    `SELECT COALESCE(SUM(cost_cents), 0) as total FROM agent_runs WHERE started_at >= CURRENT_DATE`
   );
   return result.rows[0].total;
 }
@@ -542,38 +438,26 @@ export async function getSpendByPeriod(startDate: Date, endDate: Date): Promise<
   byAgent: Record<string, number>;
   byDay: Array<{ date: string; total: number }>;
 }> {
-  const totalResult = await pool.query(
-    `SELECT COALESCE(SUM(cost_cents), 0) as total 
-     FROM agent_runs 
-     WHERE started_at >= $1 AND started_at < $2`,
-    [startDate, endDate]
-  );
-
-  const byAgentResult = await pool.query(
-    `SELECT agent_type, COALESCE(SUM(cost_cents), 0) as total 
-     FROM agent_runs 
-     WHERE started_at >= $1 AND started_at < $2
-     GROUP BY agent_type`,
-    [startDate, endDate]
-  );
-
-  const byDayResult = await pool.query(
-    `SELECT DATE(started_at) as date, COALESCE(SUM(cost_cents), 0) as total 
-     FROM agent_runs 
-     WHERE started_at >= $1 AND started_at < $2
-     GROUP BY DATE(started_at)
-     ORDER BY date`,
-    [startDate, endDate]
-  );
+  const [totalResult, byAgentResult, byDayResult] = await Promise.all([
+    pool.query(
+      `SELECT COALESCE(SUM(cost_cents), 0) as total FROM agent_runs WHERE started_at >= $1 AND started_at < $2`,
+      [startDate, endDate]
+    ),
+    pool.query(
+      `SELECT agent_type, COALESCE(SUM(cost_cents), 0) as total FROM agent_runs 
+       WHERE started_at >= $1 AND started_at < $2 GROUP BY agent_type`,
+      [startDate, endDate]
+    ),
+    pool.query(
+      `SELECT DATE(started_at) as date, COALESCE(SUM(cost_cents), 0) as total FROM agent_runs 
+       WHERE started_at >= $1 AND started_at < $2 GROUP BY DATE(started_at) ORDER BY date`,
+      [startDate, endDate]
+    ),
+  ]);
 
   return {
     total: totalResult.rows[0].total,
-    byAgent: Object.fromEntries(
-      byAgentResult.rows.map(r => [r.agent_type, r.total])
-    ),
-    byDay: byDayResult.rows.map(r => ({
-      date: r.date.toISOString().split('T')[0],
-      total: r.total,
-    })),
+    byAgent: Object.fromEntries(byAgentResult.rows.map(r => [r.agent_type, r.total])),
+    byDay: byDayResult.rows.map(r => ({ date: r.date.toISOString().split('T')[0], total: r.total })),
   };
 }

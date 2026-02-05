@@ -42,11 +42,15 @@ export async function POST(
     const priorityMap = { high: 10, medium: 5, low: 1 };
     const priority = priorityMap[task.priority] || 5;
 
+    // tenantId for multi-tenant support (defaults to 'default')
+    const { tenantId = 'default' } = body;
+
     // Enqueue the job
     const job = await agentQueue.enqueue({
       taskId: id,
       agentType: agentType as 'developer' | 'qa' | 'reviewer',
       priority,
+      tenantId,
     });
 
     return NextResponse.json({
@@ -89,7 +93,7 @@ export async function GET(
     }
 
     // Get queue status for this task
-    const queueStatus = agentQueue.getStatus();
+    const queueStatus = await agentQueue.getStatus();
     const taskJobs = queueStatus.jobs.filter(j => j.taskId === id);
     const taskRuns = queueStatus.activeRuns.filter(r => r.taskId === id);
 

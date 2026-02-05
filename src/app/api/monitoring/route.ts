@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     `);
 
     // Get queue status
-    const queueStatus = agentQueue.getStatus();
+    const queueStatus = await agentQueue.getStatus();
 
     // Calculate health score (0-100)
     const successRate = todayStats.total_runs > 0 
