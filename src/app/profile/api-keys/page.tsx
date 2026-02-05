@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, ExternalLink, Sparkles } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, ExternalLink, Sparkles } from 'lucide-react';
 
 interface ApiKey {
   id: string;
@@ -13,7 +13,7 @@ interface ApiKey {
 
 interface ClaudeConnection {
   connected: boolean;
-  email?: string;
+  maskedKey?: string;
   connectedAt?: string;
 }
 
@@ -25,7 +25,11 @@ export default function ApiKeysPage() {
   const [newKeyName, setNewKeyName] = useState('');
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
+  
+  // Claude API key input state
+  const [showClaudeInput, setShowClaudeInput] = useState(false);
+  const [claudeApiKey, setClaudeApiKey] = useState('');
+  const [savingClaude, setSavingClaude] = useState(false);
 
   useEffect(() => {
     fetchKeys();
@@ -48,7 +52,7 @@ export default function ApiKeysPage() {
 
   const fetchClaudeConnection = async () => {
     try {
-      const res = await fetch('/api/profile/claude-oauth');
+      const res = await fetch('/api/profile/claude-key');
       if (res.ok) {
         const data = await res.json();
         setClaudeConnection(data);
@@ -99,16 +103,43 @@ export default function ApiKeysPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const initiateClaudeOAuth = () => {
-    // Redirect to Claude OAuth flow
-    window.location.href = '/api/auth/claude';
+  const saveClaudeKey = async () => {
+    if (!claudeApiKey.trim()) return;
+    
+    setSavingClaude(true);
+    try {
+      const res = await fetch('/api/profile/claude-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: claudeApiKey }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setClaudeConnection({
+          connected: true,
+          maskedKey: data.maskedKey,
+          connectedAt: new Date().toISOString(),
+        });
+        setClaudeApiKey('');
+        setShowClaudeInput(false);
+      } else {
+        const error = await res.json();
+        alert(error.message || 'Failed to save Claude API key');
+      }
+    } catch (error) {
+      console.error('Failed to save Claude key:', error);
+      alert('Failed to save Claude API key');
+    } finally {
+      setSavingClaude(false);
+    }
   };
 
   const disconnectClaude = async () => {
     if (!confirm('Are you sure you want to disconnect Claude?')) return;
     
     try {
-      const res = await fetch('/api/profile/claude-oauth', {
+      const res = await fetch('/api/profile/claude-key', {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -123,7 +154,7 @@ export default function ApiKeysPage() {
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold text-white mb-6">API Keys & Authentication</h1>
 
-      {/* Claude OAuth Section */}
+      {/* Claude API Key Section */}
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -132,7 +163,7 @@ export default function ApiKeysPage() {
             </div>
             <div>
               <h2 className="text-lg font-medium text-white">Claude by Anthropic</h2>
-              <p className="text-sm text-gray-400">Connect with Claude for AI capabilities</p>
+              <p className="text-sm text-gray-400">Connect your Claude API key for AI capabilities</p>
             </div>
           </div>
           
@@ -151,21 +182,76 @@ export default function ApiKeysPage() {
             </div>
           ) : (
             <button
-              onClick={initiateClaudeOAuth}
+              onClick={() => setShowClaudeInput(true)}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity"
             >
-              <ExternalLink className="w-4 h-4" />
-              Connect with Claude
+              <Key className="w-4 h-4" />
+              Add API Key
             </button>
           )}
         </div>
+
+        {/* Claude API Key Input */}
+        {showClaudeInput && !claudeConnection.connected && (
+          <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Claude API Key
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Get your API key from{' '}
+                <a
+                  href="https://console.anthropic.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:underline"
+                >
+                  Anthropic Console
+                  <ExternalLink className="w-3 h-3 inline ml-1" />
+                </a>
+              </p>
+              <input
+                type="password"
+                value={claudeApiKey}
+                onChange={(e) => setClaudeApiKey(e.target.value)}
+                placeholder="sk-ant-api03-..."
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={saveClaudeKey}
+                disabled={!claudeApiKey.trim() || savingClaude}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingClaude ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Saving...
+                  </>
+                ) : (
+                  <>Save Key</>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowClaudeInput(false);
+                  setClaudeApiKey('');
+                }}
+                className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {claudeConnection.connected && (
           <div className="mt-4 p-4 bg-gray-700/50 rounded-lg">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-gray-400">Connected Account:</span>
-                <p className="text-white">{claudeConnection.email}</p>
+                <span className="text-gray-400">API Key:</span>
+                <p className="text-white font-mono">{claudeConnection.maskedKey || 'sk-ant-***'}</p>
               </div>
               <div>
                 <span className="text-gray-400">Connected Since:</span>
@@ -180,8 +266,7 @@ export default function ApiKeysPage() {
         )}
 
         <p className="mt-4 text-sm text-gray-500">
-          OAuth with Claude enables secure, token-based authentication without storing API keys.
-          Your agents will automatically use your Claude account for AI operations.
+          Your API key is encrypted and securely stored. Agents will use this key for AI operations.
         </p>
       </div>
 
@@ -189,7 +274,7 @@ export default function ApiKeysPage() {
       <div className="bg-gray-800 rounded-lg border border-gray-700">
         <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-medium text-white">API Keys</h2>
+            <h2 className="text-lg font-medium text-white">Swarm It API Keys</h2>
             <p className="text-sm text-gray-400">Manage API keys for external integrations</p>
           </div>
           <button

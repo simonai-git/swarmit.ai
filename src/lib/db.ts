@@ -297,9 +297,23 @@ async function initDb() {
         location TEXT,
         bio TEXT,
         avatar_url TEXT,
+        claude_api_key TEXT,
+        claude_connected_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    
+    // Add Claude columns if they don't exist (migration)
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_profiles' AND column_name = 'claude_api_key') THEN
+          ALTER TABLE user_profiles ADD COLUMN claude_api_key TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_profiles' AND column_name = 'claude_connected_at') THEN
+          ALTER TABLE user_profiles ADD COLUMN claude_connected_at TIMESTAMPTZ;
+        END IF;
+      END $$;
     `);
     
     // User API keys table
