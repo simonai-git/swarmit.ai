@@ -286,6 +286,57 @@ async function initDb() {
       ON CONFLICT (name) DO NOTHING
     `);
     
+    // ==================== User Profile Tables ====================
+    
+    // User profiles table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        email TEXT PRIMARY KEY,
+        name TEXT,
+        company TEXT,
+        location TEXT,
+        bio TEXT,
+        avatar_url TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // User API keys table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_api_keys (
+        id TEXT PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL,
+        key_prefix TEXT NOT NULL,
+        last_used_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_api_keys_email ON user_api_keys(user_email);
+      CREATE INDEX IF NOT EXISTS idx_user_api_keys_hash ON user_api_keys(key_hash);
+    `);
+    
+    // User integrations table (Railway, Claude OAuth, etc.)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_integrations (
+        user_email TEXT PRIMARY KEY,
+        railway_token TEXT,
+        railway_projects TEXT,
+        railway_selected_project TEXT,
+        railway_connected_at TIMESTAMPTZ,
+        claude_token TEXT,
+        claude_email TEXT,
+        claude_connected_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    
     console.log('Database initialized');
   } finally {
     client.release();
