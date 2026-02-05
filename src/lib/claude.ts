@@ -3,46 +3,59 @@ import { Task, Comment, Project, pool } from './db';
 
 // Check if key is an OAT token (OAuth Access Token from Claude Code)
 function isOATToken(key: string): boolean {
-  return key.startsWith('sk-ant-oat');
+  return key.startsWith('sk-ant-oat') || key.includes('sk-ant-oat');
 }
 
-// Claude Code identity prefix - required for OAT tokens to work
+// Claude Code identity - MUST be first in system prompt for OAT tokens
 const CLAUDE_CODE_IDENTITY = `You are Claude Code, Anthropic's official CLI for Claude.`;
 
+// Claude Code version for user-agent header
+const CLAUDE_CODE_VERSION = '2.1.2';
+
 // Create Anthropic client with given API key
-// For OAT tokens, use special headers that mimic Claude Code and Bearer auth
+// For OAT tokens, use authToken (not apiKey) + Claude Code headers
 function createClient(apiKey: string): Anthropic {
+  const betaFeatures = [
+    'claude-code-20250219',
+    'oauth-2025-04-20',
+    'fine-grained-tool-streaming-2025-05-14',
+    'interleaved-thinking-2025-05-14',
+  ];
+
   if (isOATToken(apiKey)) {
-    console.log('[Claude] Creating client with OAT token - using custom fetch with Claude Code headers');
+    console.log('[Claude] Creating client with OAT token - using authToken + Claude Code headers');
     
-    // For OAT tokens, we need to use a custom fetch that adds proper headers
-    // The SDK's authToken + defaultHeaders wasn't working correctly
-    const customFetch: typeof fetch = async (url, init) => {
-      const headers = new Headers(init?.headers);
-      headers.set('Authorization', `Bearer ${apiKey}`);
-      headers.set('anthropic-beta', 'claude-code-20250219,oauth-2025-04-20');
-      headers.set('user-agent', 'claude-cli/2.1.2 (external, cli)');
-      headers.set('x-app', 'cli');
-      headers.set('anthropic-dangerous-direct-browser-access', 'true');
-      // Remove x-api-key if present (SDK might add it)
-      headers.delete('x-api-key');
-      
-      console.log('[Claude] OAT fetch headers:', Object.fromEntries(headers.entries()));
-      
-      return fetch(url, {
-        ...init,
-        headers,
-      });
+    // For OAT tokens: use authToken (not apiKey), set apiKey to null
+    // This is exactly how pi-ai/OpenClaw does it
+    const defaultHeaders = {
+      'accept': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'anthropic-beta': betaFeatures.join(','),
+      'user-agent': `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`,
+      'x-app': 'cli',
     };
     
+    console.log('[Claude] OAT headers:', defaultHeaders);
+    
     return new Anthropic({
-      apiKey: 'dummy', // SDK requires some apiKey but we override with Bearer auth
-      fetch: customFetch,
+      apiKey: null as unknown as string, // Must be null for authToken to work
+      authToken: apiKey,                  // OAuth token goes here
+      defaultHeaders,
+      dangerouslyAllowBrowser: true,
     });
   }
+  
   console.log('[Claude] Creating client with regular API key');
-  // Regular API key
-  return new Anthropic({ apiKey });
+  // Regular API key - simpler setup
+  return new Anthropic({ 
+    apiKey,
+    dangerouslyAllowBrowser: true,
+    defaultHeaders: {
+      'accept': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'anthropic-beta': 'fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
+    },
+  });
 }
 
 // Get user's Claude API key from database (decrypted)
@@ -529,17 +542,31 @@ export async function runAgent(
   while (iteration < maxIterations) {
     iteration++;
 
-    // Build system prompt - prepend Claude Code identity for OAT tokens
-    let systemPrompt = buildSystemPrompt(context);
-    if (usingOAT) {
-      systemPrompt = `${CLAUDE_CODE_IDENTITY}\n\n${systemPrompt}`;
-    }
+    // Build system prompt - for OAT tokens, use array format with Claude Code identity first
+    const agentSystemPrompt = buildSystemPrompt(context);
+    
+    // For OAT tokens: system must be array with Claude Code identity as FIRST block
+    // This is exactly how pi-ai/OpenClaw structures it
+    const systemParam: string | Anthropic.TextBlockParam[] = usingOAT
+      ? [
+          {
+            type: 'text' as const,
+            text: CLAUDE_CODE_IDENTITY,
+            cache_control: { type: 'ephemeral' as const },
+          },
+          {
+            type: 'text' as const,
+            text: agentSystemPrompt,
+            cache_control: { type: 'ephemeral' as const },
+          },
+        ]
+      : agentSystemPrompt;
 
     // Call Claude
     const response = await claudeClient.messages.create({
       model,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: systemParam,
       tools: AGENT_TOOLS,
       messages
     });
