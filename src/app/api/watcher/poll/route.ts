@@ -10,7 +10,7 @@ function verifyApiKey(request: NextRequest): boolean {
   const cronSecret = request.headers.get('x-cron-secret');
   const validCronSecret = process.env.CRON_SECRET;
   
-  return apiKey === validKey || (cronSecret && cronSecret === validCronSecret);
+  return apiKey === validKey || (!!cronSecret && cronSecret === validCronSecret);
 }
 
 // POST /api/watcher/poll - Process pending jobs and enqueue new tasks
