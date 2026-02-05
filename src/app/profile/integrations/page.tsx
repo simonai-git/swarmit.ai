@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ExternalLink, Check, X, RefreshCw, Plug, Train, Github, Cloud } from 'lucide-react';
+import { ExternalLink, Check, X, RefreshCw, Plug, Train, Github, Cloud, Sparkles, Key } from 'lucide-react';
 
 interface Integration {
   id: string;
@@ -21,6 +21,7 @@ interface RailwayProject {
 }
 
 export default function IntegrationsPage() {
+  // Railway state
   const [railwayConnected, setRailwayConnected] = useState(false);
   const [railwayProjects, setRailwayProjects] = useState<RailwayProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
@@ -29,8 +30,16 @@ export default function IntegrationsPage() {
   const [connecting, setConnecting] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Claude state
+  const [claudeConnected, setClaudeConnected] = useState(false);
+  const [claudeMaskedKey, setClaudeMaskedKey] = useState('');
+  const [claudeToken, setClaudeToken] = useState('');
+  const [showClaudeInput, setShowClaudeInput] = useState(false);
+  const [connectingClaude, setConnectingClaude] = useState(false);
+
   useEffect(() => {
     fetchIntegrations();
+    fetchClaudeConnection();
   }, []);
 
   const fetchIntegrations = async () => {
@@ -46,6 +55,64 @@ export default function IntegrationsPage() {
       console.error('Failed to fetch integrations:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchClaudeConnection = async () => {
+    try {
+      const res = await fetch('/api/profile/claude-key');
+      if (res.ok) {
+        const data = await res.json();
+        setClaudeConnected(data.connected || false);
+        setClaudeMaskedKey(data.maskedKey || '');
+      }
+    } catch (error) {
+      console.error('Failed to fetch Claude connection:', error);
+    }
+  };
+
+  const connectClaude = async () => {
+    if (!claudeToken.trim()) return;
+    
+    setConnectingClaude(true);
+    try {
+      const res = await fetch('/api/profile/claude-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: claudeToken }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setClaudeConnected(true);
+        setClaudeMaskedKey(data.maskedKey || '');
+        setShowClaudeInput(false);
+        setClaudeToken('');
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to connect Claude');
+      }
+    } catch (error) {
+      console.error('Failed to connect Claude:', error);
+      alert('Failed to connect Claude');
+    } finally {
+      setConnectingClaude(false);
+    }
+  };
+
+  const disconnectClaude = async () => {
+    if (!confirm('Are you sure you want to disconnect Claude?')) return;
+    
+    try {
+      const res = await fetch('/api/profile/claude-key', {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setClaudeConnected(false);
+        setClaudeMaskedKey('');
+      }
+    } catch (error) {
+      console.error('Failed to disconnect Claude:', error);
     }
   };
 
@@ -111,6 +178,20 @@ export default function IntegrationsPage() {
   };
 
   const integrations = [
+    {
+      id: 'claude',
+      name: 'Claude by Anthropic',
+      description: 'AI-powered agents for autonomous task execution',
+      icon: <Sparkles className="w-6 h-6" />,
+      color: 'from-orange-500 to-pink-500',
+      connected: claudeConnected,
+      features: [
+        'Autonomous task execution',
+        'Code generation and review',
+        'Natural language understanding',
+        'Multi-step reasoning',
+      ],
+    },
     {
       id: 'railway',
       name: 'Railway',
@@ -212,12 +293,22 @@ export default function IntegrationsPage() {
                         Disconnect
                       </button>
                     )}
+                    {integration.id === 'claude' && (
+                      <button
+                        onClick={disconnectClaude}
+                        className="text-sm text-red-400 hover:text-red-300"
+                      >
+                        Disconnect
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <button
                     onClick={() => {
                       if (integration.id === 'railway') {
                         setShowTokenInput(true);
+                      } else if (integration.id === 'claude') {
+                        setShowClaudeInput(true);
                       }
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -275,6 +366,75 @@ export default function IntegrationsPage() {
                     >
                       Cancel
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Claude Token Input */}
+            {integration.id === 'claude' && showClaudeInput && !claudeConnected && (
+              <div className="px-6 pb-6">
+                <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Claude API Key or OAuth Token
+                    </label>
+                    <p className="text-xs text-gray-500 mb-3">
+                      <strong>API Key:</strong> Get from{' '}
+                      <a
+                        href="https://console.anthropic.com/settings/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Anthropic Console
+                        <ExternalLink className="w-3 h-3 inline ml-1" />
+                      </a>
+                      {' '}(starts with <code className="text-orange-400">sk-ant-api</code>)
+                      <br />
+                      <strong>OAuth Token:</strong> From apps like OpenClaw (starts with <code className="text-orange-400">sk-ant-oat</code>)
+                    </p>
+                    <input
+                      type="password"
+                      value={claudeToken}
+                      onChange={(e) => setClaudeToken(e.target.value)}
+                      placeholder="sk-ant-api03-... or sk-ant-oat01-..."
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={connectClaude}
+                      disabled={!claudeToken.trim() || connectingClaude}
+                      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {connectingClaude && <RefreshCw className="w-4 h-4 animate-spin" />}
+                      {connectingClaude ? 'Connecting...' : 'Connect'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowClaudeInput(false);
+                        setClaudeToken('');
+                      }}
+                      className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Claude Connected Info */}
+            {integration.id === 'claude' && claudeConnected && (
+              <div className="px-6 pb-6">
+                <div className="p-4 bg-gray-700/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Key className="w-5 h-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-300">Token: <code className="text-orange-400">{claudeMaskedKey}</code></p>
+                      <p className="text-xs text-gray-500 mt-1">Your agents will use this token for AI operations</p>
+                    </div>
                   </div>
                 </div>
               </div>
