@@ -401,7 +401,7 @@ export default function KanbanBoard() {
   return (
     <div className="p-3 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
       {/* Header */}
-      <div className="glass rounded-2xl p-4 sm:p-6 mb-4 sm:mb-8 animate-fade-in">
+      <div className="glass rounded-2xl p-4 sm:p-6 mb-4 sm:mb-8 animate-fade-in relative z-50">
         {/* Row 1: Title left, User info right */}
         <div className="flex items-center justify-between gap-3">
           {/* Title */}
