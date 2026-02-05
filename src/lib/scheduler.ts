@@ -1,6 +1,19 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { getAllTasks, Task } from './db';
+import { getAllTasks, Task, pool } from './db';
 import { agentQueue } from './agent-queue';
+
+// Get the automation user email (first user with a Claude API key configured)
+async function getAutomationUserEmail(): Promise<string | undefined> {
+  try {
+    const result = await pool.query(
+      'SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL LIMIT 1'
+    );
+    return result.rows[0]?.email;
+  } catch (error) {
+    console.error('[Scheduler] Failed to get automation user:', error);
+    return undefined;
+  }
+}
 
 // Track if scheduler is already running (singleton)
 let isSchedulerRunning = false;
@@ -47,6 +60,14 @@ async function schedulerTick(): Promise<void> {
   console.log(`[Scheduler] Tick at ${timestamp}`);
 
   try {
+    // Get the automation user (for Claude API key)
+    const automationUserEmail = await getAutomationUserEmail();
+    if (!automationUserEmail) {
+      console.log('[Scheduler] No user with Claude API key configured. Skipping tick.');
+      return;
+    }
+    console.log(`[Scheduler] Using automation user: ${automationUserEmail}`);
+
     // Get all tasks
     const allTasks = await getAllTasks();
     
@@ -102,6 +123,7 @@ async function schedulerTick(): Promise<void> {
           agentType,
           priority,
           tenantId: 'default',
+          userEmail: automationUserEmail,
         });
 
         recentlyEnqueued.add(task.id);
