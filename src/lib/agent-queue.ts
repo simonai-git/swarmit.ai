@@ -318,14 +318,14 @@ class AgentQueue {
   private async executeJob(queueJob: QueueJob): Promise<void> {
     const job = queueJobToAgentJob(queueJob);
     
-    // Check budget
-    const budget = await checkBudget();
-    if (!budget.allowed) {
-      await sendAlert('budget_exceeded', `Agent blocked: daily budget exceeded`, {
-        jobId: job.id, taskId: job.taskId, spent: budget.spent, limit: CONFIG.dailyBudgetCents,
-      });
-      throw new Error('Daily budget exceeded');
-    }
+    // Budget check disabled - no daily limit enforced
+    // const budget = await checkBudget();
+    // if (!budget.allowed) {
+    //   await sendAlert('budget_exceeded', `Agent blocked: daily budget exceeded`, {
+    //     jobId: job.id, taskId: job.taskId, spent: budget.spent, limit: CONFIG.dailyBudgetCents,
+    //   });
+    //   throw new Error('Daily budget exceeded');
+    // }
 
     // Create run record
     const run: AgentRun = {
