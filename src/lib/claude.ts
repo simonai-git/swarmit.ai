@@ -10,12 +10,12 @@ function isOATToken(key: string): boolean {
 const CLAUDE_CODE_IDENTITY = `You are Claude Code, Anthropic's official CLI for Claude.`;
 
 // Create Anthropic client with given API key
-// For OAT tokens, use special headers that mimic Claude Code
+// For OAT tokens, use special headers that mimic Claude Code and Bearer auth
 function createClient(apiKey: string): Anthropic {
   if (isOATToken(apiKey)) {
-    // OAT token - use Claude Code impersonation headers
+    // OAT token - use Bearer auth (authToken) + Claude Code impersonation headers
     return new Anthropic({
-      apiKey: apiKey,
+      authToken: apiKey, // Use authToken for Bearer auth, not apiKey
       defaultHeaders: {
         'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
         'user-agent': 'claude-cli/2.1.2 (external, cli)',

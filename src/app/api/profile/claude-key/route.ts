@@ -82,20 +82,23 @@ export async function POST(req: NextRequest) {
     }
     
     // Test the API key by making a simple request
-    // For OAT tokens, use Claude Code headers (stealth mode)
+    // For OAT tokens, use Claude Code headers + Bearer auth (stealth mode)
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       };
 
-      // OAT tokens need special headers to work (Claude Code impersonation)
+      // OAT tokens need Bearer auth + special headers (Claude Code impersonation)
       if (isOAT) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
         headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
         headers['user-agent'] = 'claude-cli/2.1.2 (external, cli)';
         headers['x-app'] = 'cli';
         headers['anthropic-dangerous-direct-browser-access'] = 'true';
+      } else {
+        // Regular API key uses x-api-key header
+        headers['x-api-key'] = apiKey;
       }
 
       const testRes = await fetch('https://api.anthropic.com/v1/messages', {
