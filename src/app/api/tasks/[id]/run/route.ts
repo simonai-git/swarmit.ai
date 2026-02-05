@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { getTask } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
@@ -45,12 +47,17 @@ export async function POST(
     // tenantId for multi-tenant support (defaults to 'default')
     const { tenantId = 'default' } = body;
 
+    // Get user email from session (if available)
+    const session = await getServerSession(authOptions);
+    const userEmail = session?.user?.email || undefined;
+
     // Enqueue the job
     const job = await agentQueue.enqueue({
       taskId: id,
       agentType: agentType as 'developer' | 'qa' | 'reviewer',
       priority,
       tenantId,
+      userEmail, // Pass user email to fetch their Claude API key
     });
 
     return NextResponse.json({

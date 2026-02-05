@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task } from './db';
-import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS } from './claude';
+import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 
@@ -16,6 +16,7 @@ export interface AgentJob {
   completedAt?: Date;
   error?: string;
   retryCount: number;
+  userEmail?: string; // User email to fetch their Claude API key
 }
 
 export interface AgentRun {
@@ -123,7 +124,7 @@ class AgentQueue {
   }
 
   // Enqueue a job
-  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer'; priority: number; tenantId?: string }): Promise<AgentJob> {
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
     if (this.useRedis && this.redisQueue) {
@@ -161,6 +162,7 @@ class AgentQueue {
       status: 'pending',
       createdAt: new Date(),
       retryCount: 0,
+      userEmail: job.userEmail,
     };
     
     this.jobs.push(newJob);
@@ -393,10 +395,18 @@ class AgentQueue {
         },
       };
 
+      // Get user's Claude API key if available
+      let userApiKey: string | undefined;
+      if (job.userEmail) {
+        userApiKey = await getUserClaudeKey(job.userEmail) || undefined;
+        console.log(`[Agent] Using ${userApiKey ? 'user' : 'env'} API key for task ${job.taskId}`);
+      }
+
       // Run agent
       console.log(`[Agent] Running ${job.agentType} agent for task ${job.taskId}`);
       const result = await runAgent(context, executor, taskApi, {
         maxIterations: 30,
+        apiKey: userApiKey, // Pass user's API key
         onToolUse: (tool, input) => {
           run.transcript.push({
             role: 'tool',

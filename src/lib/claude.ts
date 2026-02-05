@@ -1,10 +1,37 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Task, Comment, Project } from './db';
+import { Task, Comment, Project, pool } from './db';
 
-// Initialize Anthropic client
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Create Anthropic client with given API key
+function createClient(apiKey: string): Anthropic {
+  return new Anthropic({ apiKey });
+}
+
+// Get user's Claude API key from database (decrypted)
+export async function getUserClaudeKey(userEmail: string): Promise<string | null> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      'SELECT claude_api_key FROM user_profiles WHERE email = $1',
+      [userEmail]
+    );
+    
+    if (result.rows.length === 0 || !result.rows[0].claude_api_key) {
+      return null;
+    }
+    
+    // Decrypt (base64 decode)
+    return Buffer.from(result.rows[0].claude_api_key, 'base64').toString('utf-8');
+  } finally {
+    client.release();
+  }
+}
+
+// Fallback to env variable if no user key
+function getClaudeKey(userApiKey?: string): string {
+  if (userApiKey) return userApiKey;
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+  throw new Error('No Claude API key available. Please configure one in Profile → Integrations.');
+}
 
 // Agent context passed to Claude
 export interface AgentContext {
@@ -419,11 +446,15 @@ export async function runAgent(
     maxIterations?: number;
     onToolUse?: (tool: string, input: unknown) => void;
     onMessage?: (content: string) => void;
+    apiKey?: string; // User's Claude API key (from database)
   } = {}
 ): Promise<AgentResult> {
-  const { maxIterations = 50, onToolUse, onMessage } = options;
+  const { maxIterations = 50, onToolUse, onMessage, apiKey } = options;
   const model = context.agentConfig?.model || 'claude-sonnet-4-20250514';
   const maxTokens = context.agentConfig?.maxTokens || 8000;
+
+  // Create client with user's key or fallback to env
+  const claudeClient = createClient(getClaudeKey(apiKey));
 
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: buildTaskPrompt(context) }
@@ -438,7 +469,7 @@ export async function runAgent(
     iteration++;
 
     // Call Claude
-    const response = await client.messages.create({
+    const response = await claudeClient.messages.create({
       model,
       max_tokens: maxTokens,
       system: buildSystemPrompt(context),
