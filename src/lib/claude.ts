@@ -30,6 +30,7 @@ function createClient(apiKey: string): Anthropic {
 
 // Get user's Claude API key from database (decrypted)
 export async function getUserClaudeKey(userEmail: string): Promise<string | null> {
+  console.log(`[Claude] Looking up API key for user: ${userEmail}`);
   const client = await pool.connect();
   try {
     const result = await client.query(
@@ -37,12 +38,28 @@ export async function getUserClaudeKey(userEmail: string): Promise<string | null
       [userEmail]
     );
     
-    if (result.rows.length === 0 || !result.rows[0].claude_api_key) {
+    console.log(`[Claude] Query result rows: ${result.rows.length}`);
+    
+    if (result.rows.length === 0) {
+      console.log(`[Claude] No user profile found for email: ${userEmail}`);
+      return null;
+    }
+    
+    const storedKey = result.rows[0].claude_api_key;
+    console.log(`[Claude] Stored key present: ${!!storedKey}, length: ${storedKey?.length || 0}`);
+    
+    if (!storedKey) {
+      console.log(`[Claude] No Claude API key stored for user: ${userEmail}`);
       return null;
     }
     
     // Decrypt (base64 decode)
-    return Buffer.from(result.rows[0].claude_api_key, 'base64').toString('utf-8');
+    const decoded = Buffer.from(storedKey, 'base64').toString('utf-8');
+    console.log(`[Claude] Decoded key length: ${decoded.length}, starts with: ${decoded.slice(0, 15)}...`);
+    return decoded;
+  } catch (error) {
+    console.error(`[Claude] Error fetching API key for ${userEmail}:`, error);
+    return null;
   } finally {
     client.release();
   }
