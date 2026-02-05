@@ -19,7 +19,8 @@ export async function middleware(request: NextRequest) {
     '/api/sandbox',
     '/api/runs',
     '/api/costs',
-    '/api/settings'
+    '/api/settings',
+    '/api/scheduler'
   ];
   
   if (apiKeyRoutes.some(route => pathname.startsWith(route))) {
