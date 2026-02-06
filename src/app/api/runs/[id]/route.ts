@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgentRun } from '@/lib/agent-queue';
+import { agentQueue } from '@/lib/agent-queue';
 import pool from '@/lib/db';
 
 // Verify API key
@@ -22,7 +22,7 @@ export async function GET(
     const { id } = await params;
 
     // Try in-memory first (for active runs)
-    let run = getAgentRun(id);
+    const run = agentQueue.getRun(id);
     let dbRun = null;
 
     // If not in memory, check database
