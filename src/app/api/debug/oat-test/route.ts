@@ -33,15 +33,16 @@ export async function GET(request: NextRequest) {
     result.isOAT = isOAT;
     result.keyPrefix = userKey.slice(0, 20);
 
-    // Step 3: Simple model
-    const model = {
+    // Step 3: Simple model (use any to avoid type issues)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const model: any = {
       id: 'claude-sonnet-4-20250514',
       name: 'claude-sonnet-4-20250514',
-      api: 'anthropic-messages' as const,
-      provider: 'anthropic' as const,
+      api: 'anthropic-messages',
+      provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       reasoning: true,
-      input: ['text', 'image'] as const,
+      input: ['text', 'image'],
       cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
       contextWindow: 200000,
       maxTokens: 64000,
@@ -49,9 +50,10 @@ export async function GET(request: NextRequest) {
     (result.steps as string[]).push('Created model');
 
     // Step 4: Call API
-    const context = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const context: any = {
       systemPrompt: 'You are a helpful assistant.',
-      messages: [{ role: 'user' as const, content: 'Say "OK"', timestamp: Date.now() }],
+      messages: [{ role: 'user', content: 'Say "OK"', timestamp: Date.now() }],
       tools: [],
     };
     (result.steps as string[]).push('Calling API...');
