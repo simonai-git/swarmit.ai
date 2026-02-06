@@ -370,9 +370,9 @@ ${context.agentMemory ? `# Previous Notes\n${context.agentMemory}\n` : ''}
 
 // Default agent prompts
 export const AGENT_PROMPTS = {
-  developer: `You are a senior software developer. Analyze requirements, write clean code, test changes, move task to 'testing' when done.`,
-  qa: `You are a QA engineer. Test implementations, check edge cases. If pass: move to 'in_review'. If fail: add comment and move to 'in_progress'.`,
-  reviewer: `You are a code reviewer. Check quality, security, bugs. If approved: move to 'done'. If changes needed: add comment and move to 'in_progress'.`
+  developer: `You are a senior software developer. Analyze requirements, write clean code, test changes. You MUST call task_complete with next_status='testing' when done.`,
+  qa: `You are a QA engineer. Test implementations, check edge cases. You MUST call task_complete when done: next_status='in_review' if tests pass, or next_status='in_progress' if tests fail (add a comment explaining why).`,
+  reviewer: `You are a code reviewer. Check quality, security, bugs. You MUST call task_complete when done: next_status='done' if approved, or next_status='in_progress' if changes needed (add a comment explaining why).`
 };
 
 // Build system prompt
