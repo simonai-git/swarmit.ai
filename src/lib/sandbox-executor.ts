@@ -87,6 +87,49 @@ export class SandboxToolExecutor implements ToolExecutor {
   }
 
   /**
+   * Search file contents using grep
+   */
+  async search(pattern: string, path?: string, mode: 'content' | 'files_with_matches' | 'count' = 'content'): Promise<string> {
+    this.ensureInitialized();
+    const dir = path || '.';
+    const flag = mode === 'files_with_matches' ? 'l' : mode === 'count' ? 'c' : 'n';
+    const result = await this.sandbox.exec(
+      `grep -r${flag} "${pattern.replace(/"/g, '\\"')}" "${dir}" 2>/dev/null | head -100`
+    );
+    return result.stdout || 'No matches found';
+  }
+
+  /**
+   * Edit a file with precise string replacement
+   */
+  async editFile(filePath: string, oldString: string, newString: string): Promise<string> {
+    this.ensureInitialized();
+    const content = await this.sandbox.readFile(filePath);
+    if (!content.includes(oldString)) {
+      throw new Error(`old_string not found in ${filePath}`);
+    }
+    const updated = content.replace(oldString, newString);
+    await this.sandbox.writeFile(filePath, updated);
+    return `Edited: ${filePath}`;
+  }
+
+  /**
+   * Find files matching a glob pattern
+   */
+  async glob(pattern: string, path?: string): Promise<string[]> {
+    this.ensureInitialized();
+    const dir = path || '.';
+    const files = await this.sandbox.listFiles(dir);
+    const regex = new RegExp(
+      pattern.replace(/\*\*/g, '___DOUBLESTAR___')
+        .replace(/\*/g, '[^/]*')
+        .replace(/___DOUBLESTAR___/g, '.*')
+        .replace(/\?/g, '.')
+    );
+    return files.filter(f => regex.test(f));
+  }
+
+  /**
    * Get the sandbox working directory
    */
   getWorkdir(): string {
