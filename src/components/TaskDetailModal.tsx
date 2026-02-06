@@ -391,7 +391,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   return (
     <div className="fixed inset-0 modal-backdrop flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
       <div 
-        className="bg-[#1e1e2f]/95 backdrop-blur-xl border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl shadow-black/50 w-full sm:max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden animate-slide-up flex flex-col"
+        className="bg-[#1e1e2f]/95 backdrop-blur-xl border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl shadow-black/50 w-full sm:max-w-[63rem] max-h-[95vh] sm:max-h-[90vh] overflow-hidden animate-slide-up flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
