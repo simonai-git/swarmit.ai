@@ -284,6 +284,22 @@ async function executeTool(
 ): Promise<string> {
   try {
     switch (toolName) {
+      // Claude Code compatible tools (OAT requires these names)
+      case 'bash': {
+        const r = await executor.execCommand(toolInput.command as string, undefined);
+        return `Exit: ${r.exitCode}\n${r.stdout}\n${r.stderr}`;
+      }
+      case 'read':
+        return await executor.readFile(toolInput.file_path as string);
+      case 'write':
+        await executor.writeFile(toolInput.file_path as string, toolInput.content as string);
+        return `Written: ${toolInput.file_path}`;
+      case 'glob': {
+        // Use pattern as a directory path for listing
+        const files = await executor.listFiles(toolInput.pattern as string, true);
+        return files.join('\n');
+      }
+      // Legacy tool names (for backward compatibility)
       case 'exec_command': {
         const r = await executor.execCommand(toolInput.command as string, toolInput.workdir as string);
         return `Exit: ${r.exitCode}\n${r.stdout}\n${r.stderr}`;
@@ -297,6 +313,7 @@ async function executeTool(
         const files = await executor.listFiles(toolInput.path as string, toolInput.recursive as boolean);
         return files.join('\n');
       }
+      // Custom task tools
       case 'git_commit': {
         const sha = await executor.gitCommit(toolInput.message as string, toolInput.files as string[]);
         return `Committed: ${sha}`;
