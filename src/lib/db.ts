@@ -351,6 +351,23 @@ async function initDb() {
       )
     `);
     
+    // Create task_dependencies table for task dependency tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS task_dependencies (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        depends_on_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(task_id, depends_on_id),
+        CHECK(task_id != depends_on_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);
+      CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_id ON task_dependencies(depends_on_id);
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -1190,6 +1207,144 @@ export async function getAgentRunStats(): Promise<{
     totalTokens: parseInt(result.rows[0].total_tokens) || 0,
     totalCostCents: parseInt(result.rows[0].total_cost_cents) || 0
   };
+}
+
+// ==================== Task Dependencies ====================
+
+export interface TaskDependency {
+  id: string;
+  task_id: string;
+  depends_on_id: string;
+  created_at: string;
+}
+
+export interface TaskDependencyWithTitle extends TaskDependency {
+  title: string;
+  status: string;
+}
+
+export async function getTaskDependencies(taskId: string): Promise<TaskDependencyWithTitle[]> {
+  const result = await pool.query(
+    `SELECT td.*, t.title, t.status
+     FROM task_dependencies td
+     JOIN tasks t ON t.id = td.depends_on_id
+     WHERE td.task_id = $1
+     ORDER BY td.created_at ASC`,
+    [taskId]
+  );
+  return result.rows;
+}
+
+export async function getTaskDependents(taskId: string): Promise<TaskDependencyWithTitle[]> {
+  const result = await pool.query(
+    `SELECT td.*, t.title, t.status
+     FROM task_dependencies td
+     JOIN tasks t ON t.id = td.task_id
+     WHERE td.depends_on_id = $1
+     ORDER BY td.created_at ASC`,
+    [taskId]
+  );
+  return result.rows;
+}
+
+// Cycle detection using DFS
+async function wouldCreateCycle(taskId: string, dependsOnId: string): Promise<boolean> {
+  // Check if adding taskId -> dependsOnId would create a cycle
+  // A cycle exists if dependsOnId already transitively depends on taskId
+  const visited = new Set<string>();
+  const stack = [taskId];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current === dependsOnId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    // Get all tasks that depend on current (i.e., current is a dependency of others)
+    const result = await pool.query(
+      `SELECT task_id FROM task_dependencies WHERE depends_on_id = $1`,
+      [current]
+    );
+    for (const row of result.rows) {
+      stack.push(row.task_id);
+    }
+  }
+  return false;
+}
+
+export async function addTaskDependency(taskId: string, dependsOnId: string): Promise<TaskDependency> {
+  // Check for cycle
+  const cycleDetected = await wouldCreateCycle(taskId, dependsOnId);
+  if (cycleDetected) {
+    throw new Error('Adding this dependency would create a circular dependency');
+  }
+
+  const id = `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(
+    `INSERT INTO task_dependencies (id, task_id, depends_on_id)
+     VALUES ($1, $2, $3)
+     RETURNING *`,
+    [id, taskId, dependsOnId]
+  );
+
+  // Recalculate blocked status for the dependent task
+  await recalculateBlockedStatus(taskId);
+
+  return result.rows[0];
+}
+
+export async function removeTaskDependency(taskId: string, dependsOnId: string): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM task_dependencies WHERE task_id = $1 AND depends_on_id = $2`,
+    [taskId, dependsOnId]
+  );
+
+  // Recalculate blocked status
+  await recalculateBlockedStatus(taskId);
+
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function recalculateBlockedStatus(taskId: string): Promise<void> {
+  // Get all incomplete dependencies for this task
+  const result = await pool.query(
+    `SELECT t.title FROM task_dependencies td
+     JOIN tasks t ON t.id = td.depends_on_id
+     WHERE td.task_id = $1 AND t.status != 'done'`,
+    [taskId]
+  );
+
+  if (result.rows.length > 0) {
+    const blockers = result.rows.map(r => r.title).join(', ');
+    await pool.query(
+      `UPDATE tasks SET is_blocked = TRUE, blocked_reason = $1, updated_at = NOW() WHERE id = $2`,
+      [`Waiting on: ${blockers}`, taskId]
+    );
+  } else {
+    // Check if task was auto-blocked by dependencies (not manually blocked)
+    const task = await getTask(taskId);
+    if (task?.blocked_reason?.startsWith('Waiting on:')) {
+      await pool.query(
+        `UPDATE tasks SET is_blocked = FALSE, blocked_reason = NULL, updated_at = NOW() WHERE id = $1`,
+        [taskId]
+      );
+    }
+  }
+}
+
+export async function getTaskDependencyCount(taskId: string): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*) as count FROM task_dependencies WHERE task_id = $1`,
+    [taskId]
+  );
+  return parseInt(result.rows[0].count) || 0;
+}
+
+export async function getAllTaskDependencyCounts(): Promise<Record<string, number>> {
+  const result = await pool.query(
+    `SELECT task_id, COUNT(*) as count FROM task_dependencies GROUP BY task_id`
+  );
+  return Object.fromEntries(result.rows.map(r => [r.task_id, parseInt(r.count)]));
 }
 
 export default pool;

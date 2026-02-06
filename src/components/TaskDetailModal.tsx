@@ -106,6 +106,14 @@ interface Agent {
   emoji?: string;
 }
 
+interface DependencyItem {
+  id: string;
+  task_id: string;
+  depends_on_id: string;
+  title: string;
+  status: string;
+}
+
 function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive = false, projectName }: TaskDetailModalProps) {
   const { data: session } = useSession();
   const [comments, setComments] = useState<Comment[]>([]);
@@ -115,6 +123,11 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs'>('details');
+  const [dependencies, setDependencies] = useState<DependencyItem[]>([]);
+  const [dependents, setDependents] = useState<DependencyItem[]>([]);
+  const [depSearchQuery, setDepSearchQuery] = useState('');
+  const [depSearchResults, setDepSearchResults] = useState<Array<{ id: string; title: string; status: string }>>([]);
+  const [allTasks, setAllTasks] = useState<Array<{ id: string; title: string; status: string }>>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState<AgentRun | null>(null);
@@ -135,6 +148,8 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
       fetchComments();
       fetchActivity();
       fetchRuns();
+      fetchDependencies();
+      fetchAllTasks();
     }
   }, [task, isOpen]);
 
@@ -151,6 +166,91 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
     };
     fetchAgents();
   }, []);
+
+  const fetchDependencies = async () => {
+    if (!task) return;
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/dependencies`);
+      const data = await res.json();
+      setDependencies(data.dependencies || []);
+      setDependents(data.dependents || []);
+    } catch (error) {
+      console.error('Error fetching dependencies:', error);
+    }
+  };
+
+  const fetchAllTasks = async () => {
+    try {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      setAllTasks(data.map((t: { id: string; title: string; status: string }) => ({ id: t.id, title: t.title, status: t.status })));
+    } catch (error) {
+      console.error('Error fetching tasks for search:', error);
+    }
+  };
+
+  const handleAddDependency = async (dependsOnId: string) => {
+    if (!task) return;
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/dependencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depends_on_id: dependsOnId }),
+      });
+      if (res.ok) {
+        setDepSearchQuery('');
+        setDepSearchResults([]);
+        fetchDependencies();
+        // Refresh task to get updated blocked status
+        const taskRes = await fetch(`/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        if (taskRes.ok) {
+          const updated = await taskRes.json();
+          onUpdate(updated);
+        }
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to add dependency');
+      }
+    } catch (error) {
+      console.error('Error adding dependency:', error);
+    }
+  };
+
+  const handleRemoveDependency = async (dependsOnId: string) => {
+    if (!task) return;
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/dependencies?depends_on_id=${dependsOnId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        fetchDependencies();
+        // Refresh task to get updated blocked status
+        const taskRes = await fetch(`/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        if (taskRes.ok) {
+          const updated = await taskRes.json();
+          onUpdate(updated);
+        }
+      }
+    } catch (error) {
+      console.error('Error removing dependency:', error);
+    }
+  };
+
+  // Filter search results based on query
+  useEffect(() => {
+    if (!depSearchQuery.trim() || !task) {
+      setDepSearchResults([]);
+      return;
+    }
+    const query = depSearchQuery.toLowerCase();
+    const existingDepIds = new Set(dependencies.map(d => d.depends_on_id));
+    const filtered = allTasks.filter(t =>
+      t.id !== task.id &&
+      !existingDepIds.has(t.id) &&
+      (t.title.toLowerCase().includes(query) || t.id.toLowerCase().includes(query))
+    ).slice(0, 5);
+    setDepSearchResults(filtered);
+  }, [depSearchQuery, allTasks, dependencies, task]);
 
   const fetchComments = async () => {
     if (!task) return;
@@ -448,6 +548,82 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                     rows={2}
                     className="w-full mt-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-red-500/10 border border-red-500/30 rounded-xl text-white placeholder-white/40 focus:border-red-500/50 resize-none text-sm"
                   />
+                )}
+              </div>
+
+              {/* Dependencies */}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-white/70 mb-2 sm:mb-3">
+                  Dependencies ({dependencies.length})
+                </label>
+
+                {/* Current dependencies */}
+                {dependencies.length > 0 && (
+                  <div className="space-y-1.5 mb-3">
+                    {dependencies.map((dep) => (
+                      <div key={dep.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-black/20 rounded-lg">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dep.status === 'done' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          <span className="text-xs sm:text-sm text-white/80 truncate">{dep.title}</span>
+                          <span className="text-[10px] text-white/40 flex-shrink-0">#{dep.depends_on_id.slice(0, 8)}</span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveDependency(dep.depends_on_id)}
+                          className="p-1 rounded hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors flex-shrink-0"
+                          title="Remove dependency"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add dependency search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={depSearchQuery}
+                    onChange={(e) => setDepSearchQuery(e.target.value)}
+                    placeholder="Search tasks to add as dependency..."
+                    className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-xl text-white placeholder-white/40 text-xs sm:text-sm focus:outline-none focus:border-blue-500/50"
+                  />
+                  {depSearchResults.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-[#1e1e2f] border border-white/10 rounded-xl shadow-lg overflow-hidden">
+                      {depSearchResults.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => handleAddDependency(t.id)}
+                          className="w-full text-left px-3 py-2 hover:bg-white/10 text-xs sm:text-sm text-white/80 flex items-center gap-2 transition-colors"
+                        >
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${t.status === 'done' ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                          <span className="truncate">{t.title}</span>
+                          <span className="text-[10px] text-white/40 ml-auto flex-shrink-0">#{t.id.slice(0, 8)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Dependents (read-only) */}
+                {dependents.length > 0 && (
+                  <div className="mt-3">
+                    <label className="block text-[10px] sm:text-xs font-medium text-white/50 mb-1.5">
+                      Blocked by this task ({dependents.length})
+                    </label>
+                    <div className="space-y-1">
+                      {dependents.map((dep) => (
+                        <div key={dep.id} className="flex items-center gap-2 px-3 py-1.5 bg-black/10 rounded-lg">
+                          <svg className="w-3 h-3 text-white/30 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                          </svg>
+                          <span className="text-xs text-white/60 truncate">{dep.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
 

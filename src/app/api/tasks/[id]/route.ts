@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTask, updateTask, deleteTask, logActivity, getProject, Task } from '@/lib/db';
+import { getTask, updateTask, deleteTask, logActivity, getProject, Task, getTaskDependents, recalculateBlockedStatus } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
 import { onTaskStatusChanged, onTaskAssigned } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
@@ -89,6 +89,14 @@ export async function PATCH(
       }
     }
     
+    // When a task is marked done, recalculate blocked status for all dependents
+    if (body.status === 'done') {
+      const dependents = await getTaskDependents(id);
+      for (const dep of dependents) {
+        await recalculateBlockedStatus(dep.task_id);
+      }
+    }
+
     // Send webhook for ALL task updates so Simon stays in sync
     const isCompleted = body.status === 'done';
     await sendWebhook({

@@ -20,9 +20,10 @@ interface ColumnProps {
   onViewTask: (task: Task) => void;
   activeTaskIds?: string[];
   projectNames?: Map<string, string>;
+  dependencyCounts?: Record<string, number>;
 }
 
-export default function Column({ id, title, icon, gradient, tasks, onEditTask, onDeleteTask, onViewTask, activeTaskIds = [], projectNames }: ColumnProps) {
+export default function Column({ id, title, icon, gradient, tasks, onEditTask, onDeleteTask, onViewTask, activeTaskIds = [], projectNames, dependencyCounts = {} }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +96,7 @@ export default function Column({ id, title, icon, gradient, tasks, onEditTask, o
                 onView={onViewTask}
                 isActive={activeTaskIds.includes(task.id)}
                 projectName={(task.project_id && projectNames?.get(task.project_id)) || "General Task"}
+                dependencyCount={dependencyCounts[task.id] || 0}
               />
             </div>
           ))}

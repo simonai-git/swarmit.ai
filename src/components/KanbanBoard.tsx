@@ -145,6 +145,7 @@ export default function KanbanBoard() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskTitle: string }>({ isOpen: false, taskId: null, taskTitle: '' });
   const [isDeleting, setIsDeleting] = useState(false);
+  const [dependencyCounts, setDependencyCounts] = useState<Record<string, number>>({});
   const { data: session } = useSession();
 
   // Filter tasks based on search query (matches title, project name, or task ID)
@@ -215,7 +216,20 @@ export default function KanbanBoard() {
     fetchTasks();
     fetchWatcherConfig();
     fetchProjects();
+    fetchDependencyCounts();
   }, []);
+
+  const fetchDependencyCounts = async () => {
+    try {
+      const res = await fetch('/api/tasks/dependency-counts');
+      if (res.ok) {
+        const data = await res.json();
+        setDependencyCounts(data);
+      }
+    } catch (error) {
+      console.error('Error fetching dependency counts:', error);
+    }
+  };
 
   const fetchProjects = async () => {
     try {
@@ -578,6 +592,7 @@ export default function KanbanBoard() {
                 onViewTask={openDetailModal}
                 activeTaskIds={watcherConfig?.active_task_ids ? JSON.parse(watcherConfig.active_task_ids) : []}
                 projectNames={projects}
+                dependencyCounts={dependencyCounts}
               />
             </div>
           ))}
