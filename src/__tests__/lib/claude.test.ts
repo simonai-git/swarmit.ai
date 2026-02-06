@@ -13,6 +13,10 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimpleAnthropic: vi.fn(),
+}));
+
 import { calculateCost, AGENT_PROMPTS, buildSystemPrompt, buildTaskPrompt, getUserClaudeKey, AGENT_TOOLS } from '@/lib/claude';
 
 describe('claude utilities', () => {
