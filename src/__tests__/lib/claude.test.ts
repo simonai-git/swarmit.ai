@@ -111,25 +111,25 @@ describe('claude utilities', () => {
   });
 
   describe('AGENT_TOOLS', () => {
-    it('should have exec_command tool', () => {
-      const execTool = AGENT_TOOLS.find(t => t.name === 'exec_command');
-      expect(execTool).toBeDefined();
-      expect(execTool?.description).toContain('shell');
+    it('should have bash tool', () => {
+      const bashTool = AGENT_TOOLS.find(t => t.name === 'bash');
+      expect(bashTool).toBeDefined();
+      expect(bashTool?.description).toContain('shell');
     });
 
-    it('should have read_file tool', () => {
-      const readTool = AGENT_TOOLS.find(t => t.name === 'read_file');
+    it('should have read tool', () => {
+      const readTool = AGENT_TOOLS.find(t => t.name === 'read');
       expect(readTool).toBeDefined();
     });
 
-    it('should have write_file tool', () => {
-      const writeTool = AGENT_TOOLS.find(t => t.name === 'write_file');
+    it('should have write tool', () => {
+      const writeTool = AGENT_TOOLS.find(t => t.name === 'write');
       expect(writeTool).toBeDefined();
     });
 
-    it('should have list_files tool', () => {
-      const listTool = AGENT_TOOLS.find(t => t.name === 'list_files');
-      expect(listTool).toBeDefined();
+    it('should have glob tool', () => {
+      const globTool = AGENT_TOOLS.find(t => t.name === 'glob');
+      expect(globTool).toBeDefined();
     });
 
     it('should have git_commit tool', () => {
