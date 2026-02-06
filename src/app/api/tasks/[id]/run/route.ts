@@ -45,16 +45,17 @@ export async function POST(
     const priorityMap = { high: 10, medium: 5, low: 1 };
     const priority = priorityMap[task.priority] || 5;
 
-    // tenantId for multi-tenant support (defaults to 'default')
-    const { tenantId = 'default', userEmail: requestUserEmail } = body;
-
-    // Get user email: from request body, from session, or look up automation user
-    let userEmail = requestUserEmail || session?.user?.email;
+    // Get user email: from request body, from session, from task owner, or look up automation user
+    const { userEmail: requestUserEmail } = body;
+    let userEmail = requestUserEmail || session?.user?.email || task.user_email;
 
     // If no user email provided, look up the automation user dynamically
     if (!userEmail) {
       userEmail = await getAutomationUserEmail();
     }
+
+    // tenantId for multi-tenant support (scoped to user)
+    const tenantId = userEmail || 'default';
 
     // Enqueue the job
     const job = await agentQueue.enqueue({
@@ -62,7 +63,7 @@ export async function POST(
       agentType: agentType as 'developer' | 'qa' | 'reviewer',
       priority,
       tenantId,
-      userEmail, // Pass user email to fetch their Claude API key
+      userEmail,
     });
 
     return NextResponse.json({

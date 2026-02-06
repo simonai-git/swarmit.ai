@@ -368,6 +368,23 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_id ON task_dependencies(depends_on_id);
     `);
 
+    // Add user_email column for multi-tenant task ownership
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_email TEXT;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_email ON tasks(user_email);
+    `);
+    // Backfill existing tasks with first API key holder
+    await client.query(`
+      UPDATE tasks SET user_email = (
+        SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL LIMIT 1
+      ) WHERE user_email IS NULL;
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -393,6 +410,7 @@ export interface Task {
   blocked_reason: string | null;
   agent_context: string | null;
   project_id: string | null;
+  user_email: string | null;
   worked_by: string; // JSON array of contributors who worked on this task
   created_at: string;
   updated_at: string;
@@ -401,11 +419,11 @@ export interface Task {
 export async function getAllTasks(): Promise<Task[]> {
   // Exclude agent_context from list view for performance (can be very large)
   const result = await pool.query(`
-    SELECT id, title, description, status, assignee, priority, due_date, 
+    SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, COALESCE(worked_by, '[]') as worked_by,
+           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
-    FROM tasks 
+    FROM tasks
     ORDER BY updated_at DESC
   `);
   return result.rows;
@@ -418,6 +436,7 @@ export interface SearchFilters {
   priority?: string;
   project_id?: string;
   is_blocked?: string;
+  user_email?: string;
 }
 
 export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
@@ -470,12 +489,18 @@ export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
     conditions.push(`(is_blocked = FALSE OR is_blocked IS NULL)`);
   }
 
+  if (filters.user_email) {
+    conditions.push(`user_email = $${paramIndex}`);
+    values.push(filters.user_email);
+    paramIndex++;
+  }
+
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const result = await pool.query(`
     SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, COALESCE(worked_by, '[]') as worked_by,
+           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
     FROM tasks
     ${whereClause}
@@ -496,8 +521,8 @@ export async function getTasksByStatus(status: string): Promise<Task[]> {
 
 export async function createTask(task: Partial<Task> & { id: string; title: string }): Promise<Task> {
   const result = await pool.query(
-    `INSERT INTO tasks (id, title, description, status, assignee, priority, due_date, estimated_hours, time_spent, progress, is_blocked, blocked_reason, agent_context, project_id, feedback_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    `INSERT INTO tasks (id, title, description, status, assignee, priority, due_date, estimated_hours, time_spent, progress, is_blocked, blocked_reason, agent_context, project_id, feedback_id, user_email)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
       task.id,
@@ -514,7 +539,8 @@ export async function createTask(task: Partial<Task> & { id: string; title: stri
       task.blocked_reason || null,
       task.agent_context || null,
       task.project_id || null,
-      task.feedback_id || null
+      task.feedback_id || null,
+      task.user_email || null
     ]
   );
   return result.rows[0];
@@ -1431,6 +1457,28 @@ export async function getAutomationUserEmail(): Promise<string | undefined> {
     console.error('[DB] Failed to get automation user:', error);
     return undefined;
   }
+}
+
+// Get all users with Claude API keys (for multi-tenant scheduler)
+export async function getUsersWithApiKeys(): Promise<Array<{ email: string }>> {
+  const result = await pool.query(
+    'SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL'
+  );
+  return result.rows;
+}
+
+// Get tasks owned by a specific user
+export async function getTasksByUserEmail(userEmail: string): Promise<Task[]> {
+  const result = await pool.query(`
+    SELECT id, title, description, status, assignee, priority, due_date,
+           estimated_hours, time_spent, progress, is_blocked, blocked_reason,
+           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
+           CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
+    FROM tasks
+    WHERE user_email = $1
+    ORDER BY updated_at DESC
+  `, [userEmail]);
+  return result.rows;
 }
 
 export default pool;

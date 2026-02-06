@@ -1,13 +1,17 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { getAllTasks, Task, getAutomationUserEmail } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask } from './db';
 import { agentQueue } from './agent-queue';
 
 // Track if scheduler is already running (singleton)
 let isSchedulerRunning = false;
 let scheduledTask: ScheduledTask | null = null;
 
-// Track tasks we've already enqueued this cycle to prevent duplicates
-const recentlyEnqueued = new Set<string>();
+// Track tasks we've already enqueued this cycle, per user
+const recentlyEnqueued = new Map<string, Set<string>>();
+
+// Stuck-task detection: skip tasks with too many completed runs in a window
+const MAX_RECENT_RUNS = 3;
+const STUCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
  * Determine agent type based on task status
@@ -40,88 +44,113 @@ function getPriorityValue(priority: string): number {
 }
 
 /**
- * Main scheduler tick - check for tasks that need processing
+ * Process tasks for a single user
+ */
+async function processUserTasks(userEmail: string): Promise<void> {
+  // Get tasks owned by this user
+  const allTasks = await getTasksByUserEmail(userEmail);
+
+  // Get current queue status scoped to this user's tenant
+  const queueStatus = await agentQueue.getStatus(userEmail);
+  const queuedTaskIds = new Set(
+    queueStatus.jobs
+      .filter(j => ['pending', 'running'].includes(j.status))
+      .map(j => j.taskId)
+  );
+  const activeTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
+
+  // Get or create per-user recently enqueued set
+  if (!recentlyEnqueued.has(userEmail)) {
+    recentlyEnqueued.set(userEmail, new Set<string>());
+  }
+  const userRecentlyEnqueued = recentlyEnqueued.get(userEmail)!;
+
+  // Filter to tasks that need agent work
+  const tasksNeedingWork: Task[] = [];
+  for (const task of allTasks) {
+    if (task.status === 'done') continue;
+    if (!task.assignee) continue;
+    if (queuedTaskIds.has(task.id)) {
+      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} already queued for ${userEmail}, skipping`);
+      continue;
+    }
+    if (activeTaskIds.has(task.id)) {
+      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} has active agent for ${userEmail}, skipping`);
+      continue;
+    }
+    if (userRecentlyEnqueued.has(task.id)) continue;
+    if (!['todo', 'in_progress', 'testing', 'in_review'].includes(task.status)) continue;
+
+    // Skip stuck tasks: too many completed runs in the last 30 minutes
+    const recentRuns = await getAgentRunsByTask(task.id);
+    const recentCompletedRuns = recentRuns.filter(r =>
+      r.status === 'completed' &&
+      new Date(r.created_at).getTime() > Date.now() - STUCK_WINDOW_MS
+    );
+    if (recentCompletedRuns.length >= MAX_RECENT_RUNS) {
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck: ${recentCompletedRuns.length} runs in 30min, skipping`);
+      continue;
+    }
+
+    tasksNeedingWork.push(task);
+  }
+
+  console.log(`[Scheduler] Found ${tasksNeedingWork.length} tasks needing work for ${userEmail}`);
+
+  // Enqueue tasks (limit to prevent flooding)
+  const maxToEnqueue = 5;
+  const tasksToEnqueue = tasksNeedingWork.slice(0, maxToEnqueue);
+
+  for (const task of tasksToEnqueue) {
+    try {
+      const agentType = getAgentTypeForStatus(task.status);
+      const priority = getPriorityValue(task.priority);
+
+      console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent [${userEmail}]`);
+
+      await agentQueue.enqueue({
+        taskId: task.id,
+        agentType,
+        priority,
+        tenantId: userEmail,
+        userEmail,
+      });
+
+      userRecentlyEnqueued.add(task.id);
+
+      // Clear from recently enqueued after 60 seconds
+      setTimeout(() => {
+        userRecentlyEnqueued.delete(task.id);
+      }, 60000);
+
+    } catch (error) {
+      console.error(`[Scheduler] Failed to enqueue task ${task.id} for ${userEmail}:`, error);
+    }
+  }
+}
+
+/**
+ * Main scheduler tick - check for tasks that need processing across all users
  */
 async function schedulerTick(): Promise<void> {
   const timestamp = new Date().toISOString();
   console.log(`[Scheduler] Tick at ${timestamp}`);
 
   try {
-    // Get the automation user (for Claude API key)
-    const automationUserEmail = await getAutomationUserEmail();
-    if (!automationUserEmail) {
-      console.log('[Scheduler] No user with Claude API key configured. Skipping tick.');
+    // Get all users with Claude API keys
+    const users = await getUsersWithApiKeys();
+    if (users.length === 0) {
+      console.log('[Scheduler] No users with Claude API key configured. Skipping tick.');
       return;
     }
-    console.log(`[Scheduler] Using automation user: ${automationUserEmail}`);
+    console.log(`[Scheduler] Processing ${users.length} user(s)`);
 
-    // Get all tasks
-    const allTasks = await getAllTasks();
-    
-    // Get current queue status to see what's already queued/active
-    const queueStatus = await agentQueue.getStatus();
-    const queuedTaskIds = new Set(queueStatus.jobs.map(j => j.taskId));
-    const activeTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
-
-    // Filter to tasks that need agent work
-    const tasksNeedingWork = allTasks.filter((task: Task) => {
-      // Skip done tasks
-      if (task.status === 'done') return false;
-      
-      // Skip tasks without assignee
-      if (!task.assignee) return false;
-      
-      // Skip tasks already queued
-      if (queuedTaskIds.has(task.id)) {
-        console.log(`[Scheduler] Task ${task.id.slice(0, 8)} already queued, skipping`);
-        return false;
-      }
-      
-      // Skip tasks with active agent runs
-      if (activeTaskIds.has(task.id)) {
-        console.log(`[Scheduler] Task ${task.id.slice(0, 8)} has active agent, skipping`);
-        return false;
-      }
-
-      // Skip recently enqueued (within last cycle)
-      if (recentlyEnqueued.has(task.id)) {
-        return false;
-      }
-      
-      // Process these statuses
-      return ['todo', 'in_progress', 'testing', 'in_review'].includes(task.status);
-    });
-
-    console.log(`[Scheduler] Found ${tasksNeedingWork.length} tasks needing work`);
-
-    // Enqueue tasks (limit to prevent flooding)
-    const maxToEnqueue = 5;
-    const tasksToEnqueue = tasksNeedingWork.slice(0, maxToEnqueue);
-
-    for (const task of tasksToEnqueue) {
+    // Process each user's tasks independently
+    for (const user of users) {
       try {
-        const agentType = getAgentTypeForStatus(task.status);
-        const priority = getPriorityValue(task.priority);
-
-        console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent`);
-        
-        await agentQueue.enqueue({
-          taskId: task.id,
-          agentType,
-          priority,
-          tenantId: 'default',
-          userEmail: automationUserEmail,
-        });
-
-        recentlyEnqueued.add(task.id);
-
-        // Clear from recently enqueued after 60 seconds
-        setTimeout(() => {
-          recentlyEnqueued.delete(task.id);
-        }, 60000);
-
+        await processUserTasks(user.email);
       } catch (error) {
-        console.error(`[Scheduler] Failed to enqueue task ${task.id}:`, error);
+        console.error(`[Scheduler] Error processing tasks for ${user.email}:`, error);
       }
     }
 
@@ -145,7 +174,7 @@ export function startScheduler(): void {
   }
 
   console.log('[Scheduler] Starting internal task scheduler...');
-  
+
   // Run immediately on start
   schedulerTick().catch(console.error);
 
@@ -179,9 +208,13 @@ export function getSchedulerStatus(): {
   isRunning: boolean;
   recentlyEnqueuedCount: number;
 } {
+  let total = 0;
+  for (const set of recentlyEnqueued.values()) {
+    total += set.size;
+  }
   return {
     isRunning: isSchedulerRunning,
-    recentlyEnqueuedCount: recentlyEnqueued.size,
+    recentlyEnqueuedCount: total,
   };
 }
 

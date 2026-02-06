@@ -9,6 +9,7 @@ interface UseRealtimeUpdatesOptions {
   onConnect?: () => void;
   onDisconnect?: () => void;
   enabled?: boolean;
+  userEmail?: string;
 }
 
 export function useRealtimeUpdates({
@@ -17,6 +18,7 @@ export function useRealtimeUpdates({
   onConnect,
   onDisconnect,
   enabled = true,
+  userEmail,
 }: UseRealtimeUpdatesOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -39,7 +41,8 @@ export function useRealtimeUpdates({
       eventSourceRef.current.close();
     }
     
-    const eventSource = new EventSource('/api/events');
+    const sseUrl = userEmail ? `/api/events?user=${encodeURIComponent(userEmail)}` : '/api/events';
+    const eventSource = new EventSource(sseUrl);
     eventSourceRef.current = eventSource;
     
     eventSource.addEventListener('connected', () => {
@@ -89,7 +92,7 @@ export function useRealtimeUpdates({
         console.error('Max reconnect attempts reached');
       }
     };
-  }, [enabled, onTasksUpdate, onWatcherUpdate, onConnect, onDisconnect]);
+  }, [enabled, userEmail, onTasksUpdate, onWatcherUpdate, onConnect, onDisconnect]);
 
   // Keep ref updated for self-reference in reconnect
   useEffect(() => {

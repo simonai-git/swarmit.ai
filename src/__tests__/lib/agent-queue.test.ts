@@ -19,7 +19,7 @@ vi.mock('@/lib/db', () => ({
   createComment: vi.fn(),
 }));
 
-import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun } from '@/lib/agent-queue';
+import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun, getDefaultNextStatus, agentQueue } from '@/lib/agent-queue';
 
 vi.mock('@/lib/claude', () => ({
   runAgent: vi.fn(),
@@ -273,6 +273,145 @@ describe('agent-queue', () => {
         expect.stringContaining('INSERT INTO agent_runs'),
         expect.arrayContaining([expect.stringContaining('"role":"user"')])
       );
+    });
+  });
+
+  describe('cleanup', () => {
+    it('removes completed jobs older than maxAgeMs', async () => {
+      // Enqueue a job — it will be pending in the in-memory queue
+      const job = await agentQueue.enqueue({
+        taskId: 'cleanup-task-1',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Manually mutate the job to simulate completion 2 hours ago
+      const status = await agentQueue.getStatus();
+      const internalJob = status.jobs.find(j => j.id === job.id);
+      if (internalJob) {
+        internalJob.status = 'completed';
+        internalJob.completedAt = new Date(Date.now() - 2 * 3600000);
+      }
+
+      // Cleanup with 1 hour max age
+      agentQueue.cleanup(3600000);
+
+      const afterStatus = await agentQueue.getStatus();
+      expect(afterStatus.jobs.find(j => j.id === job.id)).toBeUndefined();
+    });
+
+    it('keeps recent completed jobs within maxAgeMs', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'cleanup-task-2',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Simulate completion 10 minutes ago
+      const status = await agentQueue.getStatus();
+      const internalJob = status.jobs.find(j => j.id === job.id);
+      if (internalJob) {
+        internalJob.status = 'completed';
+        internalJob.completedAt = new Date(Date.now() - 10 * 60000);
+      }
+
+      // Cleanup with 1 hour max age — job should survive
+      agentQueue.cleanup(3600000);
+
+      const afterStatus = await agentQueue.getStatus();
+      expect(afterStatus.jobs.find(j => j.id === job.id)).toBeDefined();
+    });
+
+    it('keeps pending and running jobs regardless of age', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'cleanup-task-3',
+        agentType: 'qa',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Job is pending — cleanup should not remove it
+      agentQueue.cleanup(0); // maxAge = 0 would remove all completed, but not pending
+
+      const afterStatus = await agentQueue.getStatus();
+      expect(afterStatus.jobs.find(j => j.id === job.id)).toBeDefined();
+    });
+  });
+
+  describe('getStatus with tenantId filtering', () => {
+    it('returns all jobs when no tenantId provided', async () => {
+      await agentQueue.enqueue({ taskId: 'task-a', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'task-b', agentType: 'qa', priority: 5, tenantId: 'bob@test.com' });
+
+      const status = await agentQueue.getStatus();
+      const taskIds = status.jobs.map(j => j.taskId);
+      expect(taskIds).toContain('task-a');
+      expect(taskIds).toContain('task-b');
+    });
+
+    it('filters jobs by tenantId when provided', async () => {
+      await agentQueue.enqueue({ taskId: 'task-a', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'task-b', agentType: 'qa', priority: 5, tenantId: 'bob@test.com' });
+
+      const aliceStatus = await agentQueue.getStatus('alice@test.com');
+      const aliceTaskIds = aliceStatus.jobs.map(j => j.taskId);
+      expect(aliceTaskIds).toContain('task-a');
+      expect(aliceTaskIds).not.toContain('task-b');
+
+      const bobStatus = await agentQueue.getStatus('bob@test.com');
+      const bobTaskIds = bobStatus.jobs.map(j => j.taskId);
+      expect(bobTaskIds).toContain('task-b');
+      expect(bobTaskIds).not.toContain('task-a');
+    });
+
+    it('stores tenantId on in-memory jobs', async () => {
+      const job = await agentQueue.enqueue({ taskId: 'task-t', agentType: 'developer', priority: 5, tenantId: 'tenant@test.com' });
+      expect(job.tenantId).toBe('tenant@test.com');
+    });
+
+    it('returns correct counts per tenant', async () => {
+      await agentQueue.enqueue({ taskId: 'task-a1', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'task-a2', agentType: 'qa', priority: 5, tenantId: 'alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'task-b1', agentType: 'developer', priority: 5, tenantId: 'bob@test.com' });
+
+      const aliceStatus = await agentQueue.getStatus('alice@test.com');
+      expect(aliceStatus.pending).toBe(2);
+
+      const bobStatus = await agentQueue.getStatus('bob@test.com');
+      expect(bobStatus.pending).toBe(1);
+    });
+  });
+
+  describe('getDefaultNextStatus', () => {
+    it('qa agent in testing → in_review', () => {
+      expect(getDefaultNextStatus('qa', 'testing')).toBe('in_review');
+    });
+
+    it('reviewer agent in in_review → done', () => {
+      expect(getDefaultNextStatus('reviewer', 'in_review')).toBe('done');
+    });
+
+    it('developer agent in todo → testing', () => {
+      expect(getDefaultNextStatus('developer', 'todo')).toBe('testing');
+    });
+
+    it('developer agent in in_progress → testing', () => {
+      expect(getDefaultNextStatus('developer', 'in_progress')).toBe('testing');
+    });
+
+    it('returns null for unrecognized combination', () => {
+      expect(getDefaultNextStatus('qa', 'in_progress')).toBeNull();
+      expect(getDefaultNextStatus('developer', 'testing')).toBeNull();
+      expect(getDefaultNextStatus('reviewer', 'todo')).toBeNull();
+      expect(getDefaultNextStatus('unknown', 'testing')).toBeNull();
+    });
+
+    it('returns null for done status', () => {
+      expect(getDefaultNextStatus('developer', 'done')).toBeNull();
+      expect(getDefaultNextStatus('qa', 'done')).toBeNull();
+      expect(getDefaultNextStatus('reviewer', 'done')).toBeNull();
     });
   });
 });

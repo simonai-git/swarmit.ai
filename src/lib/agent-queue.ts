@@ -16,6 +16,7 @@ export interface AgentJob {
   completedAt?: Date;
   error?: string;
   retryCount: number;
+  tenantId?: string; // Tenant/user scope for multi-tenancy
   userEmail?: string; // User email to fetch their Claude API key
 }
 
@@ -95,7 +96,8 @@ function queueJobToAgentJob(qj: QueueJob): AgentJob {
     completedAt: qj.completedAt ? new Date(qj.completedAt) : undefined,
     error: qj.error,
     retryCount: qj.retryCount,
-    userEmail: qj.userEmail,  // Include userEmail for Claude API key lookup
+    tenantId: qj.tenantId,
+    userEmail: qj.userEmail,
   };
 }
 
@@ -164,6 +166,7 @@ class AgentQueue {
       status: 'pending',
       createdAt: new Date(),
       retryCount: 0,
+      tenantId: job.tenantId || CONFIG.defaultTenantId,
       userEmail: job.userEmail,
     };
     
@@ -173,8 +176,8 @@ class AgentQueue {
     return newJob;
   }
 
-  // Get queue status
-  async getStatus(): Promise<{
+  // Get queue status, optionally filtered by tenantId
+  async getStatus(tenantId?: string): Promise<{
     pending: number;
     running: number;
     completed: number;
@@ -183,7 +186,7 @@ class AgentQueue {
     activeRuns: AgentRun[];
   }> {
     if (this.useRedis && this.redisQueue) {
-      const status = await this.redisQueue.getStatus();
+      const status = await this.redisQueue.getStatus(tenantId);
       return {
         pending: status.pending,
         running: status.running,
@@ -194,13 +197,17 @@ class AgentQueue {
       };
     }
 
-    // In-memory status
+    // In-memory status, optionally filtered by tenantId
+    const filteredJobs = tenantId
+      ? this.jobs.filter(j => j.tenantId === tenantId)
+      : this.jobs;
+
     return {
-      pending: this.jobs.filter(j => j.status === 'pending').length,
-      running: this.jobs.filter(j => j.status === 'running').length,
-      completed: this.jobs.filter(j => j.status === 'completed').length,
-      failed: this.jobs.filter(j => j.status === 'failed').length,
-      jobs: [...this.jobs],
+      pending: filteredJobs.filter(j => j.status === 'pending').length,
+      running: filteredJobs.filter(j => j.status === 'running').length,
+      completed: filteredJobs.filter(j => j.status === 'completed').length,
+      failed: filteredJobs.filter(j => j.status === 'failed').length,
+      jobs: [...filteredJobs],
       activeRuns: Array.from(this.running.values()),
     };
   }
@@ -240,9 +247,12 @@ class AgentQueue {
 
     // Process in-memory queue
     this.processInterval = setInterval(async () => {
+      // Cleanup old completed/failed jobs every poll cycle
+      this.cleanup();
+
       if (this.isProcessing) return;
       if (this.useRedis) return; // Redis handles its own processing
-      
+
       this.isProcessing = true;
       try {
         // Get running count
@@ -266,7 +276,7 @@ class AgentQueue {
           // Convert to QueueJob format for executeJob
           const queueJob: import('./redis-queue').QueueJob = {
             id: job.id,
-            tenantId: 'default',
+            tenantId: job.tenantId || CONFIG.defaultTenantId,
             taskId: job.taskId,
             agentType: job.agentType,
             priority: job.priority,
@@ -312,9 +322,23 @@ class AgentQueue {
     }
   }
 
-  // Cleanup old jobs
-  cleanup(maxAgeMs: number = 86400000): void {
-    // Redis handles cleanup automatically via TTL
+  // Cleanup old completed/failed jobs from in-memory storage
+  cleanup(maxAgeMs: number = 3600000): void {
+    if (this.useRedis) return; // Redis handles cleanup automatically via TTL
+
+    const cutoff = Date.now() - maxAgeMs;
+    const before = this.jobs.length;
+    this.jobs = this.jobs.filter(j => {
+      if (['completed', 'failed'].includes(j.status)) {
+        const completedTime = j.completedAt?.getTime() ?? 0;
+        return completedTime > cutoff;
+      }
+      return true; // keep pending/running
+    });
+    const removed = before - this.jobs.length;
+    if (removed > 0) {
+      console.log(`[AgentQueue] Cleaned up ${removed} old jobs`);
+    }
   }
 
   // Execute a job (called by Redis queue processor)
@@ -543,4 +567,23 @@ export async function getSpendByPeriod(startDate: Date, endDate: Date): Promise<
     byAgent: Object.fromEntries(byAgentResult.rows.map(r => [r.agent_type, r.total])),
     byDay: byDayResult.rows.map(r => ({ date: r.date.toISOString().split('T')[0], total: r.total })),
   };
+}
+
+/**
+ * Determine the default next status after an agent completes its work.
+ * Returns null if the combination is unrecognized (no auto-transition).
+ */
+export function getDefaultNextStatus(agentType: string, currentStatus: string): string | null {
+  if (currentStatus === 'done') return null;
+
+  if (agentType === 'developer' && (currentStatus === 'todo' || currentStatus === 'in_progress')) {
+    return 'testing';
+  }
+  if (agentType === 'qa' && currentStatus === 'testing') {
+    return 'in_review';
+  }
+  if (agentType === 'reviewer' && currentStatus === 'in_review') {
+    return 'done';
+  }
+  return null;
 }

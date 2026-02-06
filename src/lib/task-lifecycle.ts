@@ -1,4 +1,4 @@
-import { Task, getTask, updateTask } from './db';
+import { Task, updateTask } from './db';
 import { agentQueue } from './agent-queue';
 
 // Automation settings (can be configured via API)
@@ -83,25 +83,28 @@ const PRIORITY_MAP: Record<string, number> = {
 };
 
 // Hook: Called when a task is created
-export async function onTaskCreated(task: Task): Promise<void> {
+export async function onTaskCreated(task: Task, userEmail?: string): Promise<void> {
   if (!settings.enabled) return;
-  
+
   console.log(`[Lifecycle] Task created: ${task.id} - ${task.title}`);
-  
+
   // Auto-assign if no assignee
   if (settings.autoAssign && !task.assignee) {
     const assignee = selectSpecialist(task);
     await updateTask(task.id, { assignee });
     console.log(`[Lifecycle] Auto-assigned to ${assignee}`);
   }
-  
+
   // Auto-spawn developer agent for new tasks
   if (settings.autoSpawnOnCreate && task.status === 'todo') {
     const priority = PRIORITY_MAP[task.priority] || 5;
+    const effectiveUserEmail = userEmail || task.user_email || undefined;
     await agentQueue.enqueue({
       taskId: task.id,
       agentType: 'developer',
       priority,
+      tenantId: effectiveUserEmail,
+      userEmail: effectiveUserEmail,
     });
     console.log(`[Lifecycle] Enqueued developer agent for task ${task.id}`);
   }
@@ -109,32 +112,38 @@ export async function onTaskCreated(task: Task): Promise<void> {
 
 // Hook: Called when a task status changes
 export async function onTaskStatusChanged(
-  task: Task, 
-  oldStatus: string, 
-  newStatus: string
+  task: Task,
+  oldStatus: string,
+  newStatus: string,
+  userEmail?: string
 ): Promise<void> {
   if (!settings.enabled) return;
-  
+
   console.log(`[Lifecycle] Task ${task.id} status: ${oldStatus} → ${newStatus}`);
-  
+
   const priority = PRIORITY_MAP[task.priority] || 5;
-  
+  const effectiveUserEmail = userEmail || task.user_email || undefined;
+
   // Spawn QA when moved to testing
   if (settings.autoSpawnOnTesting && newStatus === 'testing') {
     await agentQueue.enqueue({
       taskId: task.id,
       agentType: 'qa',
       priority,
+      tenantId: effectiveUserEmail,
+      userEmail: effectiveUserEmail,
     });
     console.log(`[Lifecycle] Enqueued QA agent for task ${task.id}`);
   }
-  
+
   // Spawn reviewer when moved to in_review
   if (settings.autoSpawnOnReview && newStatus === 'in_review') {
     await agentQueue.enqueue({
       taskId: task.id,
       agentType: 'reviewer',
       priority,
+      tenantId: effectiveUserEmail,
+      userEmail: effectiveUserEmail,
     });
     console.log(`[Lifecycle] Enqueued reviewer agent for task ${task.id}`);
   }
@@ -161,23 +170,27 @@ export async function onFeedbackCreated(feedback: {
 export async function onTaskAssigned(
   task: Task,
   oldAssignee: string | null,
-  newAssignee: string
+  newAssignee: string,
+  userEmail?: string
 ): Promise<void> {
   if (!settings.enabled) return;
-  
+
   console.log(`[Lifecycle] Task ${task.id} assigned: ${oldAssignee || 'unassigned'} → ${newAssignee}`);
-  
+
   // If task is in progress and assigned to a new agent, spawn that agent
   if (task.status === 'in_progress') {
-    const agentType = newAssignee === 'Riley' ? 'qa' 
-      : newAssignee === 'Simon' ? 'reviewer' 
+    const agentType = newAssignee === 'Riley' ? 'qa'
+      : newAssignee === 'Simon' ? 'reviewer'
       : 'developer';
-    
+
     const priority = PRIORITY_MAP[task.priority] || 5;
+    const effectiveUserEmail = userEmail || task.user_email || undefined;
     await agentQueue.enqueue({
       taskId: task.id,
       agentType,
       priority,
+      tenantId: effectiveUserEmail,
+      userEmail: effectiveUserEmail,
     });
     console.log(`[Lifecycle] Enqueued ${agentType} agent for reassigned task ${task.id}`);
   }
