@@ -10,6 +10,20 @@ export async function register() {
       // Start the internal task scheduler
       startScheduler();
 
+      // Register graceful shutdown handlers for SIGTERM (Railway deploy) and SIGINT (Ctrl+C)
+      const shutdown = async (signal: string) => {
+        console.log(`[Instrumentation] ${signal} received, flushing logs...`);
+        try {
+          const { stopSchedulerAsync } = await import('./lib/scheduler');
+          await stopSchedulerAsync();
+        } catch (err) {
+          console.error('[Instrumentation] Error during shutdown:', err);
+        }
+        process.exit(0);
+      };
+      process.on('SIGTERM', () => shutdown('SIGTERM'));
+      process.on('SIGINT', () => shutdown('SIGINT'));
+
       console.log('[Instrumentation] Server-side services initialized');
     } catch (error) {
       console.error('[Instrumentation] Failed to start scheduler:', error);

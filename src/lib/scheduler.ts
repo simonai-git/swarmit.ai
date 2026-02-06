@@ -253,6 +253,20 @@ export function stopScheduler(): void {
 }
 
 /**
+ * Stop the scheduler and await final log flush (for graceful shutdown)
+ */
+export async function stopSchedulerAsync(): Promise<void> {
+  if (scheduledTask) {
+    scheduledTask.stop();
+    scheduledTask = null;
+  }
+  await taskLogBuffer.stopAsync();
+  isSchedulerRunning = false;
+  recentlyEnqueued.clear();
+  console.log('[Scheduler] Scheduler stopped (async)');
+}
+
+/**
  * Get scheduler status
  */
 export function getSchedulerStatus(): {

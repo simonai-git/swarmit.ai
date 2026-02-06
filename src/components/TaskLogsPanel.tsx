@@ -8,6 +8,13 @@ interface TaskLogsPanelProps {
   isActive: boolean;
 }
 
+interface RunOption {
+  id: string;
+  agentType: string;
+  status: string;
+  startedAt: string | null;
+}
+
 type StreamFilter = 'all' | 'stdout' | 'stderr' | 'system';
 
 const streamColors: Record<string, string> = {
@@ -16,12 +23,62 @@ const streamColors: Record<string, string> = {
   system: 'text-blue-400',
 };
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+const statusIcon: Record<string, string> = {
+  completed: '\u2705',
+  running: '\u{1F504}',
+  failed: '\u274C',
+  cancelled: '\u26A0\uFE0F',
+};
+
 export default function TaskLogsPanel({ taskId, isActive }: TaskLogsPanelProps) {
-  const { logs, isConnected, isLoading } = useTaskLogs({ taskId, enabled: isActive });
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunOption[]>([]);
+
+  const { logs, isConnected, isLoading } = useTaskLogs({
+    taskId,
+    runId: selectedRunId,
+    enabled: isActive,
+  });
+
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState<StreamFilter>('all');
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
+
+  // Fetch runs list when panel becomes active
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    const fetchRuns = async () => {
+      try {
+        const res = await fetch(`/api/runs?taskId=${taskId}&limit=20`);
+        const data = await res.json();
+        if (cancelled) return;
+        const fetchedRuns: RunOption[] = (data.runs || []).map((r: { id: string; agentType: string; status: string; startedAt: string | null }) => ({
+          id: r.id,
+          agentType: r.agentType,
+          status: r.status,
+          startedAt: r.startedAt,
+        }));
+        setRuns(fetchedRuns);
+      } catch (err) {
+        if (!cancelled) console.error('[TaskLogsPanel] Failed to fetch runs:', err);
+      }
+    };
+    fetchRuns();
+    return () => { cancelled = true; };
+  }, [taskId, isActive]);
 
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => l.stream === filter);
 
@@ -60,16 +117,40 @@ export default function TaskLogsPanel({ taskId, isActive }: TaskLogsPanelProps) 
     return ts.toLocaleTimeString();
   };
 
+  const isLive = selectedRunId === null;
+
   return (
     <div className="flex flex-col h-full space-y-3">
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
+          {/* Run selector */}
+          <select
+            value={selectedRunId ?? '__live__'}
+            onChange={(e) => setSelectedRunId(e.target.value === '__live__' ? null : e.target.value)}
+            className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-xs text-white/70 focus:outline-none focus:border-white/20 max-w-[240px]"
+          >
+            <option value="__live__">Live (current)</option>
+            {runs.map(run => (
+              <option key={run.id} value={run.id}>
+                {run.agentType} {statusIcon[run.status] || ''} {run.startedAt ? timeAgo(run.startedAt) : ''}
+              </option>
+            ))}
+          </select>
+
           {/* Connection indicator */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-            <span className="text-white/50">{isConnected ? 'Connected' : 'Disconnected'}</span>
-          </div>
+          {isLive && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className={`relative flex h-2 w-2`}>
+                {isConnected && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              </span>
+              <span className="text-white/50">{isConnected ? 'Live' : 'Disconnected'}</span>
+            </div>
+          )}
+
           {/* Line count */}
           <span className="text-xs text-white/40">{logs.length} lines</span>
         </div>
@@ -113,7 +194,9 @@ export default function TaskLogsPanel({ taskId, isActive }: TaskLogsPanelProps) 
           </div>
         ) : filteredLogs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-white/40">
-            No logs yet. Logs will appear here when an agent runs.
+            {isLive
+              ? 'No logs yet. Logs will appear here when an agent runs.'
+              : 'No logs found for this run.'}
           </div>
         ) : (
           filteredLogs.map((entry, i) => (

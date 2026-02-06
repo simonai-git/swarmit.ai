@@ -15,6 +15,7 @@ export interface LogEntry {
 
 interface UseTaskLogsOptions {
   taskId: string | null;
+  runId: string | null;   // null = live SSE stream, string = historical REST fetch
   enabled: boolean;
 }
 
@@ -24,7 +25,7 @@ interface UseTaskLogsResult {
   isLoading: boolean;
 }
 
-export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLogsResult {
+export function useTaskLogs({ taskId, runId, enabled }: UseTaskLogsOptions): UseTaskLogsResult {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,12 +44,12 @@ export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLog
     setIsConnected(false);
   }, []);
 
-  // Reset logs when task changes or stream is disabled
-  const activeTaskId = enabled ? taskId : null;
+  // Reset logs when task or runId changes or stream is disabled
+  const cacheKey = enabled ? `${taskId}:${runId}` : null;
   useMemo(() => {
     setLogs([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId]);
+  }, [cacheKey]);
 
   useEffect(() => {
     if (!taskId || !enabled) {
@@ -56,6 +57,24 @@ export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLog
       return;
     }
 
+    // Historical mode: one-time REST fetch
+    if (runId) {
+      cleanup();
+      setIsLoading(true);
+      fetch(`/api/tasks/${taskId}/logs?runId=${runId}&limit=2000`)
+        .then(res => res.json())
+        .then(data => {
+          setLogs(data.logs || []);
+          setIsLoading(false);
+        })
+        .catch(err => {
+          console.error('[useTaskLogs] Failed to fetch historical logs:', err);
+          setIsLoading(false);
+        });
+      return;
+    }
+
+    // Live mode: SSE stream
     const connect = () => {
       cleanup();
       setIsLoading(true);
@@ -91,7 +110,7 @@ export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLog
 
         // Reconnect after 3s
         reconnectTimerRef.current = setTimeout(() => {
-          if (enabled && taskId) {
+          if (enabled && taskId && !runId) {
             connect();
           }
         }, 3000);
@@ -101,7 +120,7 @@ export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLog
     connect();
 
     return cleanup;
-  }, [taskId, enabled, cleanup]);
+  }, [taskId, runId, enabled, cleanup]);
 
   return { logs, isConnected, isLoading };
 }
