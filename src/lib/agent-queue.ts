@@ -135,6 +135,7 @@ class AgentQueue {
         agentType: job.agentType,
         priority: job.priority,
         maxRetries: CONFIG.maxRetries,
+        userEmail: job.userEmail,
       });
       
       // Auto-start processing

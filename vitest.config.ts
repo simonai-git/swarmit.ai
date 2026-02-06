@@ -21,11 +21,11 @@ export default defineConfig({
         '**/types/**',
       ],
       thresholds: {
-        // Current coverage levels - increase as more tests are added
-        statements: 42,
-        branches: 33,
-        functions: 45,
-        lines: 41,
+        // Updated after comprehensive test suite expansion
+        statements: 70,
+        branches: 55,
+        functions: 70,
+        lines: 70,
       },
     },
   },

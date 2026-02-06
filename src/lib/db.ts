@@ -1420,4 +1420,17 @@ export async function getAllTaskDependencyCounts(): Promise<Record<string, numbe
   return Object.fromEntries(result.rows.map(r => [r.task_id, parseInt(r.count)]));
 }
 
+// Get automation user email (first user with a Claude API key)
+export async function getAutomationUserEmail(): Promise<string | undefined> {
+  try {
+    const result = await pool.query(
+      'SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL LIMIT 1'
+    );
+    return result.rows[0]?.email;
+  } catch (error) {
+    console.error('[DB] Failed to get automation user:', error);
+    return undefined;
+  }
+}
+
 export default pool;

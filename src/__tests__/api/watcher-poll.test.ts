@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/db', () => ({
   getAllTasks: vi.fn(),
   getWatcherConfig: vi.fn(),
+  getAutomationUserEmail: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -19,7 +20,7 @@ vi.mock('@/lib/agent-queue', () => ({
 process.env.SIMON_API_KEY = 'test-api-key';
 
 import { POST, GET } from '@/app/api/watcher/poll/route';
-import { getAllTasks, getWatcherConfig } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getAutomationUserEmail } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 describe('API /api/watcher/poll', () => {
@@ -172,6 +173,52 @@ describe('API /api/watcher/poll', () => {
       const response = await POST(request);
 
       expect(response.status).toBe(500);
+    });
+
+    it('should pass userEmail from getAutomationUserEmail to enqueue (BUG 1 regression)', async () => {
+      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@example.com');
+      vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
+      vi.mocked(getAllTasks).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium' },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        pending: 0,
+        running: 0,
+      } as any);
+
+      const request = new NextRequest('http://localhost/api/watcher/poll', {
+        method: 'POST',
+        headers: { 'x-api-key': 'test-api-key' },
+      });
+      await POST(request);
+
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ userEmail: 'automation@example.com' })
+      );
+    });
+
+    it('should pass undefined userEmail when no automation user found', async () => {
+      vi.mocked(getAutomationUserEmail).mockResolvedValue(undefined);
+      vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
+      vi.mocked(getAllTasks).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium' },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        pending: 0,
+        running: 0,
+      } as any);
+
+      const request = new NextRequest('http://localhost/api/watcher/poll', {
+        method: 'POST',
+        headers: { 'x-api-key': 'test-api-key' },
+      });
+      await POST(request);
+
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ userEmail: undefined })
+      );
     });
   });
 

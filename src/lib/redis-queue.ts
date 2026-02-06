@@ -106,6 +106,7 @@ export class RedisQueue {
     agentType: 'developer' | 'qa' | 'reviewer';
     priority?: number;
     maxRetries?: number;
+    userEmail?: string;
     metadata?: Record<string, unknown>;
   }): Promise<QueueJob> {
     const r = getRedis();
@@ -123,6 +124,7 @@ export class RedisQueue {
       createdAt: now,
       retryCount: 0,
       maxRetries: params.maxRetries ?? 3,
+      userEmail: params.userEmail,
       metadata: params.metadata,
     };
 
@@ -467,6 +469,7 @@ export class RedisQueue {
       retryCount: String(job.retryCount),
       maxRetries: String(job.maxRetries),
       workerId: job.workerId || '',
+      userEmail: job.userEmail || '',
       metadata: JSON.stringify(job.metadata || {}),
     };
   }
@@ -487,6 +490,7 @@ export class RedisQueue {
       retryCount: parseInt(hash.retryCount) || 0,
       maxRetries: parseInt(hash.maxRetries) || 3,
       workerId: hash.workerId || undefined,
+      userEmail: hash.userEmail || undefined,
       metadata: hash.metadata ? JSON.parse(hash.metadata) : undefined,
     };
   }

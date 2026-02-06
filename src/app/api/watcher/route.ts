@@ -54,8 +54,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(config);
     }
     
-    // Otherwise, update with provided values
-    const config = await updateWatcherConfig(body);
+    // Otherwise, update with provided values (allowlist valid fields)
+    const allowedFields = ['is_running', 'last_run', 'current_task_id', 'active_task_ids'];
+    const sanitized: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (key in body) {
+        sanitized[key] = body[key];
+      }
+    }
+    const config = await updateWatcherConfig(sanitized as any);
     return NextResponse.json(config);
   } catch (error) {
     console.error('Error updating watcher config:', error);

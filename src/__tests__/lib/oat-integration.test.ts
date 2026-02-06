@@ -5,9 +5,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('OAT Token Integration', () => {
   describe('Token Detection', () => {
-    // Mirrors the isOATToken function in claude.ts
+    // Mirrors the isOATToken function in claude.ts (fixed version)
     const isOATToken = (key: string): boolean => {
-      return key.startsWith('sk-ant-oat') || key.includes('sk-ant-oat');
+      return key.startsWith('sk-ant-oat');
     };
 
     it('should detect OAT tokens by prefix', () => {
@@ -15,8 +15,8 @@ describe('OAT Token Integration', () => {
       expect(isOATToken('sk-ant-oat01-xyz789')).toBe(true);
     });
 
-    it('should detect OAT tokens embedded in string', () => {
-      expect(isOATToken('some-prefix-sk-ant-oat-suffix')).toBe(true);
+    it('should NOT detect OAT tokens embedded in middle of string', () => {
+      expect(isOATToken('some-prefix-sk-ant-oat-suffix')).toBe(false);
     });
 
     it('should NOT detect regular API keys as OAT', () => {

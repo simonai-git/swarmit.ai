@@ -245,4 +245,34 @@ describe('agent-queue', () => {
       expect(run?.transcript).toEqual([]);
     });
   });
+
+  describe('saveAgentRun with transcript', () => {
+    it('should serialize transcript to JSON', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [] });
+
+      const run = {
+        id: 'run-tx',
+        jobId: 'job-tx',
+        taskId: 'task-tx',
+        agentType: 'developer',
+        status: 'completed' as const,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        inputTokens: 100,
+        outputTokens: 50,
+        costCents: 10,
+        transcript: [
+          { role: 'user', content: 'Hello', timestamp: new Date() },
+          { role: 'assistant', content: 'Hi', timestamp: new Date() },
+        ],
+      };
+
+      await saveAgentRun(run);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO agent_runs'),
+        expect.arrayContaining([expect.stringContaining('"role":"user"')])
+      );
+    });
+  });
 });
