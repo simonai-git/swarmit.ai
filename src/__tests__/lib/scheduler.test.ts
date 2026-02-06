@@ -832,6 +832,201 @@ describe('scheduler', () => {
       });
     });
 
+    it('marks tasks with 6+ lifetime runs as blocked (tier 2)', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'slow-burn-task',
+          title: 'Slow Burn Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 6 runs spread over many hours — all outside the 30min window
+      const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: oldDate },
+        { status: 'failed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+        { status: 'failed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+        { status: 'failed', created_at: oldDate },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      expect(updateTask).toHaveBeenCalledWith('slow-burn-task', {
+        is_blocked: true,
+        blocked_reason: 'Agent ran 6 times total without advancing status. Manual intervention needed.',
+      });
+    });
+
+    it('does not trigger tier 2 with fewer than 6 lifetime runs', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'under-limit-task',
+          title: 'Under Limit Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 5 old runs — under the tier 2 threshold
+      const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: oldDate },
+        { status: 'failed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+        { status: 'failed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      // Should not be blocked by tier 2, but backoff may apply
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('skips task with recent run due to backoff', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'backoff-task',
+          title: 'Backoff Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 3 runs with latest 30 seconds ago — backoff should be 3 min
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', created_at: new Date(Date.now() - 30_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      // Should be skipped due to backoff (3 runs * 1min = 3min, but only 30s passed)
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('enqueues task when enough backoff time has passed', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'ready-task',
+          title: 'Ready Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 2 runs, latest 3 minutes ago — backoff is 2min, so 3min > 2min → should enqueue
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', created_at: new Date(Date.now() - 3 * 60_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 10 * 60_000).toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('caps backoff at 10 minutes', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'capped-task',
+          title: 'Capped Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 5 runs, latest 11 minutes ago — backoff = min(5*60k, 600k)=300k=5min, 11min > 5min → enqueue
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', created_at: new Date(Date.now() - 11 * 60_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 20 * 60_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 30 * 60_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 40 * 60_000).toISOString() },
+        { status: 'failed', created_at: new Date(Date.now() - 50 * 60_000).toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores old completed runs outside 30min window', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([

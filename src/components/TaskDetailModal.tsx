@@ -3,6 +3,7 @@
 import { useState, useEffect, memo } from 'react';
 import { useSession } from 'next-auth/react';
 import { Task } from '@/lib/db';
+import TaskLogsPanel from './TaskLogsPanel';
 
 interface Comment {
   id: string;
@@ -122,7 +123,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   const [newComment, setNewComment] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs' | 'logs'>('details');
   const [dependencies, setDependencies] = useState<DependencyItem[]>([]);
   const [dependents, setDependents] = useState<DependencyItem[]>([]);
   const [depSearchQuery, setDepSearchQuery] = useState('');
@@ -494,6 +495,20 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
           >
             <span>📊</span>
             <span>Runs{runs.length > 0 ? ` (${runs.length})` : ''}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 ${
+              activeTab === 'logs' ? 'text-white border-b-2 border-emerald-500' : 'text-white/50 hover:text-white/70'
+            }`}
+          >
+            {isActive && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            )}
+            <span>Live Logs</span>
           </button>
         </div>
 
@@ -894,6 +909,9 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                 </div>
               )}
             </div>
+          ) : activeTab === 'logs' ? (
+            /* Live Logs Tab */
+            <TaskLogsPanel taskId={task.id} isActive={activeTab === 'logs'} />
           ) : (
             /* Agent Runs Tab */
             <div className="space-y-4">

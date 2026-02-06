@@ -250,6 +250,23 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
       CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at ON agent_runs(started_at DESC);
     `);
+
+    // Create task_logs table for live terminal output from sandbox execution
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS task_logs (
+        id BIGSERIAL PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+        agent_type TEXT,
+        stream TEXT NOT NULL DEFAULT 'stdout',
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_task_logs_task_id_id ON task_logs(task_id, id);
+      CREATE INDEX IF NOT EXISTS idx_task_logs_created_at ON task_logs(created_at);
+    `);
     
     // Create agent_configs table for customizable agent configurations
     await client.query(`
@@ -1494,6 +1511,78 @@ export async function assignOrphanedTasks(userEmail: string): Promise<number> {
   const result = await pool.query(
     `UPDATE tasks SET user_email = $1 WHERE user_email IS NULL RETURNING id`,
     [userEmail]
+  );
+  return result.rowCount || 0;
+}
+
+// ==================== Task Logs ====================
+
+export interface TaskLog {
+  id: number;
+  task_id: string;
+  run_id: string | null;
+  agent_type: string | null;
+  stream: 'stdout' | 'stderr' | 'system';
+  content: string;
+  created_at: string;
+}
+
+export async function appendTaskLogBatch(logs: Array<Omit<TaskLog, 'id' | 'created_at'>>): Promise<void> {
+  if (logs.length === 0) return;
+  const values: (string | null)[] = [];
+  const placeholders: string[] = [];
+  let idx = 1;
+  for (const log of logs) {
+    const content = log.content.length > 4096 ? log.content.slice(0, 4096) : log.content;
+    placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
+    values.push(log.task_id, log.run_id, log.agent_type, log.stream, content);
+    idx += 5;
+  }
+  await pool.query(
+    `INSERT INTO task_logs (task_id, run_id, agent_type, stream, content) VALUES ${placeholders.join(', ')}`,
+    values
+  );
+}
+
+export async function getTaskLogs(
+  taskId: string,
+  opts: { afterId?: number; limit?: number; runId?: string } = {}
+): Promise<TaskLog[]> {
+  const conditions = ['task_id = $1'];
+  const values: (string | number)[] = [taskId];
+  let idx = 2;
+
+  if (opts.afterId != null) {
+    conditions.push(`id > $${idx}`);
+    values.push(opts.afterId);
+    idx++;
+  }
+  if (opts.runId) {
+    conditions.push(`run_id = $${idx}`);
+    values.push(opts.runId);
+    idx++;
+  }
+
+  const limit = opts.limit || 500;
+  const result = await pool.query(
+    `SELECT * FROM task_logs WHERE ${conditions.join(' AND ')} ORDER BY id ASC LIMIT $${idx}`,
+    [...values, limit]
+  );
+  return result.rows;
+}
+
+export async function getTaskLogCount(taskId: string): Promise<number> {
+  const result = await pool.query(
+    'SELECT COUNT(*) as count FROM task_logs WHERE task_id = $1',
+    [taskId]
+  );
+  return parseInt(result.rows[0].count) || 0;
+}
+
+export async function cleanupOldTaskLogs(retentionDays: number = 7): Promise<number> {
+  const result = await pool.query(
+    `DELETE FROM task_logs WHERE created_at < NOW() - INTERVAL '1 day' * $1`,
+    [retentionDays]
   );
   return result.rowCount || 0;
 }

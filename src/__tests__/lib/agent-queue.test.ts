@@ -340,6 +340,79 @@ describe('agent-queue', () => {
     });
   });
 
+  describe('cleanup - stale running jobs', () => {
+    it('should force-fail jobs running longer than 5 minutes', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'stale-task-1',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Simulate job running for 6 minutes
+      const status = await agentQueue.getStatus();
+      const internalJob = status.jobs.find(j => j.id === job.id);
+      if (internalJob) {
+        internalJob.status = 'running';
+        internalJob.startedAt = new Date(Date.now() - 6 * 60000);
+      }
+
+      agentQueue.cleanup();
+
+      const afterStatus = await agentQueue.getStatus();
+      const updatedJob = afterStatus.jobs.find(j => j.id === job.id);
+      expect(updatedJob?.status).toBe('failed');
+      expect(updatedJob?.error).toBe('Job timed out (stale)');
+    });
+
+    it('should keep jobs running less than 5 minutes', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'fresh-task-1',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Simulate job running for 2 minutes
+      const status = await agentQueue.getStatus();
+      const internalJob = status.jobs.find(j => j.id === job.id);
+      if (internalJob) {
+        internalJob.status = 'running';
+        internalJob.startedAt = new Date(Date.now() - 2 * 60000);
+      }
+
+      agentQueue.cleanup();
+
+      const afterStatus = await agentQueue.getStatus();
+      const updatedJob = afterStatus.jobs.find(j => j.id === job.id);
+      expect(updatedJob?.status).toBe('running');
+    });
+
+    it('should set error message and completedAt on force-failed jobs', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'stale-task-2',
+        agentType: 'qa',
+        priority: 5,
+        tenantId: 'default',
+      });
+
+      // Simulate job running for 10 minutes
+      const status = await agentQueue.getStatus();
+      const internalJob = status.jobs.find(j => j.id === job.id);
+      if (internalJob) {
+        internalJob.status = 'running';
+        internalJob.startedAt = new Date(Date.now() - 10 * 60000);
+      }
+
+      agentQueue.cleanup();
+
+      const afterStatus = await agentQueue.getStatus();
+      const updatedJob = afterStatus.jobs.find(j => j.id === job.id);
+      expect(updatedJob?.error).toBe('Job timed out (stale)');
+      expect(updatedJob?.completedAt).toBeDefined();
+    });
+  });
+
   describe('getStatus with tenantId filtering', () => {
     it('returns all jobs when no tenantId provided', async () => {
       await agentQueue.enqueue({ taskId: 'all-task-a', agentType: 'developer', priority: 5, tenantId: 'all-alice@test.com' });

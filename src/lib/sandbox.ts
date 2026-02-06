@@ -113,7 +113,7 @@ export abstract class TaskSandbox {
   }
 
   abstract initialize(): Promise<void>;
-  abstract exec(command: string, cwd?: string): Promise<ExecResult>;
+  abstract exec(command: string, cwd?: string, onOutput?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<ExecResult>;
   abstract readFile(filePath: string): Promise<string>;
   abstract writeFile(filePath: string, content: string): Promise<void>;
   abstract listFiles(dir?: string): Promise<string[]>;
@@ -222,13 +222,13 @@ export class DockerSandbox extends TaskSandbox {
     }
   }
 
-  async exec(command: string, cwd?: string): Promise<ExecResult> {
+  async exec(command: string, cwd?: string, onOutput?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<ExecResult> {
     const workdir = cwd ? path.join(this.workdir, cwd) : this.workdir;
     const timeoutMs = this.config.timeoutMs!;
-    
+
     return new Promise((resolve) => {
       const fullCommand = `docker exec -w ${workdir} ${this.containerId} sh -c "${command.replace(/"/g, '\\"')}"`;
-      
+
       const child = spawn('sh', ['-c', fullCommand], {
         timeout: timeoutMs
       });
@@ -240,15 +240,19 @@ export class DockerSandbox extends TaskSandbox {
       const maxBytes = this.config.maxOutputBytes!;
 
       child.stdout?.on('data', (data) => {
+        const chunk = data.toString();
         if (stdout.length < maxBytes) {
-          stdout += data.toString().slice(0, maxBytes - stdout.length);
+          stdout += chunk.slice(0, maxBytes - stdout.length);
         }
+        onOutput?.('stdout', chunk);
       });
 
       child.stderr?.on('data', (data) => {
+        const chunk = data.toString();
         if (stderr.length < maxBytes) {
-          stderr += data.toString().slice(0, maxBytes - stderr.length);
+          stderr += chunk.slice(0, maxBytes - stderr.length);
         }
+        onOutput?.('stderr', chunk);
       });
 
       const timeout = setTimeout(() => {
@@ -348,7 +352,7 @@ export class SubprocessSandbox extends TaskSandbox {
     }
   }
 
-  async exec(command: string, cwd?: string): Promise<ExecResult> {
+  async exec(command: string, cwd?: string, onOutput?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<ExecResult> {
     const workdir = cwd ? path.join(this.workdir, cwd) : this.workdir;
     const timeoutMs = this.config.timeoutMs!;
 
@@ -370,15 +374,19 @@ export class SubprocessSandbox extends TaskSandbox {
       const maxBytes = this.config.maxOutputBytes!;
 
       child.stdout?.on('data', (data) => {
+        const chunk = data.toString();
         if (stdout.length < maxBytes) {
-          stdout += data.toString().slice(0, maxBytes - stdout.length);
+          stdout += chunk.slice(0, maxBytes - stdout.length);
         }
+        onOutput?.('stdout', chunk);
       });
 
       child.stderr?.on('data', (data) => {
+        const chunk = data.toString();
         if (stderr.length < maxBytes) {
-          stderr += data.toString().slice(0, maxBytes - stderr.length);
+          stderr += chunk.slice(0, maxBytes - stderr.length);
         }
+        onOutput?.('stderr', chunk);
       });
 
       const timeout = setTimeout(() => {

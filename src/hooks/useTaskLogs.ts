@@ -1,0 +1,107 @@
+'use client';
+
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+
+export interface LogEntry {
+  id?: number;
+  task_id: string;
+  run_id: string | null;
+  agent_type: string | null;
+  stream: 'stdout' | 'stderr' | 'system';
+  content: string;
+  created_at?: string;
+  timestamp?: number;
+}
+
+interface UseTaskLogsOptions {
+  taskId: string | null;
+  enabled: boolean;
+}
+
+interface UseTaskLogsResult {
+  logs: LogEntry[];
+  isConnected: boolean;
+  isLoading: boolean;
+}
+
+export function useTaskLogs({ taskId, enabled }: UseTaskLogsOptions): UseTaskLogsResult {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cleanup = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    setIsConnected(false);
+  }, []);
+
+  // Reset logs when task changes or stream is disabled
+  const activeTaskId = enabled ? taskId : null;
+  useMemo(() => {
+    setLogs([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTaskId]);
+
+  useEffect(() => {
+    if (!taskId || !enabled) {
+      cleanup();
+      return;
+    }
+
+    const connect = () => {
+      cleanup();
+      setIsLoading(true);
+
+      const es = new EventSource(`/api/tasks/${taskId}/logs/stream`);
+      eventSourceRef.current = es;
+
+      es.addEventListener('history', (e) => {
+        const historyLogs: LogEntry[] = JSON.parse(e.data);
+        setLogs(historyLogs);
+        setIsLoading(false);
+      });
+
+      es.addEventListener('buffered', (e) => {
+        const buffered: LogEntry[] = JSON.parse(e.data);
+        setLogs(prev => [...prev, ...buffered]);
+      });
+
+      es.addEventListener('log', (e) => {
+        const entry: LogEntry = JSON.parse(e.data);
+        setLogs(prev => [...prev, entry]);
+      });
+
+      es.onopen = () => {
+        setIsConnected(true);
+      };
+
+      es.onerror = () => {
+        setIsConnected(false);
+        setIsLoading(false);
+        es.close();
+        eventSourceRef.current = null;
+
+        // Reconnect after 3s
+        reconnectTimerRef.current = setTimeout(() => {
+          if (enabled && taskId) {
+            connect();
+          }
+        }, 3000);
+      };
+    };
+
+    connect();
+
+    return cleanup;
+  }, [taskId, enabled, cleanup]);
+
+  return { logs, isConnected, isLoading };
+}
