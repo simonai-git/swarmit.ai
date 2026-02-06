@@ -371,14 +371,15 @@ class AgentQueue {
         },
       };
 
-      // Create sandbox
-      console.log(`[Agent] Creating sandbox for task ${job.taskId}`);
+      // Create sandbox with agent-specific toolkit
+      console.log(`[Agent] Creating sandbox for task ${job.taskId} with ${job.agentType} toolkit`);
       const repoUrl = process.env.DEFAULT_REPO;
       executor = await SandboxToolExecutor.create({
         taskId: job.taskId,
         repo: repoUrl,
         branch: 'main',
         timeoutMs: 120000,
+        agentType: job.agentType,
       });
 
       run.transcript.push({
