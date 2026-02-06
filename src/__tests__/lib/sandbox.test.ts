@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('child_process', () => ({
-  exec: vi.fn(),
-  spawn: vi.fn(),
-}));
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as any),
+    exec: vi.fn(),
+    spawn: vi.fn(),
+  };
+});
 
 vi.mock('fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),

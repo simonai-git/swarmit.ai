@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock modules before importing the route
-const mockQuery = vi.fn();
+const { mockQuery } = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+}));
+
 vi.mock('@/lib/db', () => ({
   default: { query: mockQuery },
 }));

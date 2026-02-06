@@ -5,15 +5,14 @@ const { mockQuery } = vi.hoisted(() => ({
 }));
 
 vi.mock('pg', () => {
-  return {
-    Pool: vi.fn(() => ({
+  const PoolClass = vi.fn(function(this: any) {
+    this.query = mockQuery;
+    this.connect = vi.fn(() => Promise.resolve({
       query: mockQuery,
-      connect: vi.fn(() => Promise.resolve({
-        query: mockQuery,
-        release: vi.fn(),
-      })),
-    })),
-  };
+      release: vi.fn(),
+    }));
+  });
+  return { Pool: PoolClass };
 });
 
 import * as db from '../../lib/db';

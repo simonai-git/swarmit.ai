@@ -99,7 +99,8 @@ describe('API /api/tasks/[id]', () => {
       });
       await PATCH(request, { params: Promise.resolve({ id: 'task-123' }) });
 
-      expect(logActivity).toHaveBeenCalledTimes(2);
+      // 3 calls: status, priority, and auto-added worked_by (for in_progress status)
+      expect(logActivity).toHaveBeenCalledTimes(3);
       expect(logActivity).toHaveBeenCalledWith(expect.objectContaining({
         task_id: 'task-123',
         action: 'updated',

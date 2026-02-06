@@ -267,8 +267,7 @@ describe('SandboxToolExecutor', () => {
       const result = await executor.search('test');
 
       expect(mockSandbox.exec).toHaveBeenCalledWith(
-        expect.stringContaining('grep -rn'),
-        undefined
+        expect.stringContaining('grep -rn')
       );
       expect(result).toBe('file.ts:10:const test = 123');
     });
@@ -284,8 +283,7 @@ describe('SandboxToolExecutor', () => {
       const result = await executor.search('pattern', undefined, 'files_with_matches');
 
       expect(mockSandbox.exec).toHaveBeenCalledWith(
-        expect.stringMatching(/grep -rl/),
-        undefined
+        expect.stringMatching(/grep -rl/)
       );
       expect(result).toContain('file1.ts');
     });
@@ -301,8 +299,7 @@ describe('SandboxToolExecutor', () => {
       const result = await executor.search('pattern', './src', 'count');
 
       expect(mockSandbox.exec).toHaveBeenCalledWith(
-        expect.stringMatching(/grep -rc/),
-        undefined
+        expect.stringMatching(/grep -rc/)
       );
       expect(result).toBe('file.ts:5');
     });
@@ -318,8 +315,7 @@ describe('SandboxToolExecutor', () => {
       await executor.search('pattern "with" quotes');
 
       expect(mockSandbox.exec).toHaveBeenCalledWith(
-        expect.stringContaining('pattern \\"with\\" quotes'),
-        undefined
+        expect.stringContaining('pattern \\"with\\" quotes')
       );
     });
 
@@ -334,8 +330,7 @@ describe('SandboxToolExecutor', () => {
       await executor.search('test', './src/lib');
 
       expect(mockSandbox.exec).toHaveBeenCalledWith(
-        expect.stringContaining('"./src/lib"'),
-        undefined
+        expect.stringContaining('"./src/lib"')
       );
     });
 

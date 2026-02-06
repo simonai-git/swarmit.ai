@@ -3,41 +3,45 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Set up environment before imports
 process.env.REDIS_URL = 'redis://test:6379';
 
-// Mock Redis client
-const mockRedis = {
-  hset: vi.fn(),
-  hgetall: vi.fn(),
-  zadd: vi.fn(),
-  zrem: vi.fn(),
-  zrange: vi.fn(),
-  zrevrange: vi.fn(),
-  zcard: vi.fn(),
-  scard: vi.fn(),
-  sadd: vi.fn(),
-  srem: vi.fn(),
-  smembers: vi.fn(),
-  expire: vi.fn(),
-  multi: vi.fn(),
-  on: vi.fn(),
-  quit: vi.fn(),
-};
+// Use vi.hoisted so mocks are available in vi.mock factories (which get hoisted)
+const { mockRedis, mockMulti } = vi.hoisted(() => {
+  const mockMulti = {
+    zrem: vi.fn().mockReturnThis(),
+    zadd: vi.fn().mockReturnThis(),
+    sadd: vi.fn().mockReturnThis(),
+    srem: vi.fn().mockReturnThis(),
+    hset: vi.fn().mockReturnThis(),
+    expire: vi.fn().mockReturnThis(),
+    exec: vi.fn().mockResolvedValue([]),
+  };
 
-// multi() returns an object with chainable methods
-const mockMulti = {
-  zrem: vi.fn().mockReturnThis(),
-  zadd: vi.fn().mockReturnThis(),
-  sadd: vi.fn().mockReturnThis(),
-  srem: vi.fn().mockReturnThis(),
-  hset: vi.fn().mockReturnThis(),
-  expire: vi.fn().mockReturnThis(),
-  exec: vi.fn().mockResolvedValue([]),
-};
+  const mockRedis = {
+    hset: vi.fn(),
+    hgetall: vi.fn(),
+    zadd: vi.fn(),
+    zrem: vi.fn(),
+    zrange: vi.fn(),
+    zrevrange: vi.fn(),
+    zcard: vi.fn(),
+    scard: vi.fn(),
+    sadd: vi.fn(),
+    srem: vi.fn(),
+    smembers: vi.fn(),
+    expire: vi.fn(),
+    multi: vi.fn().mockReturnValue(mockMulti),
+    on: vi.fn(),
+    quit: vi.fn(),
+  };
 
-mockRedis.multi.mockReturnValue(mockMulti);
+  return { mockRedis, mockMulti };
+});
 
-vi.mock('ioredis', () => ({
-  Redis: vi.fn(() => mockRedis),
-}));
+vi.mock('ioredis', () => {
+  const RedisClass = vi.fn(function(this: any) {
+    Object.assign(this, mockRedis);
+  });
+  return { default: RedisClass, Redis: RedisClass };
+});
 
 vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid-123'),
