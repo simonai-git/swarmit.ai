@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const { mockExec, mockSpawn } = vi.hoisted(() => ({
+  mockExec: vi.fn(),
+  mockSpawn: vi.fn(),
+}));
+
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
     ...actual,
-    exec: vi.fn(),
-    spawn: vi.fn(),
+    exec: mockExec,
+    spawn: mockSpawn,
   };
 });
 
@@ -13,11 +18,25 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
   return {
     ...actual,
+    default: {
+      ...actual,
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn(),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      readdir: vi.fn(),
+      rm: vi.fn().mockResolvedValue(undefined),
+      stat: vi.fn(),
+      access: vi.fn(),
+      unlink: vi.fn(),
+    },
     mkdir: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn(),
     writeFile: vi.fn().mockResolvedValue(undefined),
     readdir: vi.fn(),
     rm: vi.fn().mockResolvedValue(undefined),
+    stat: vi.fn(),
+    access: vi.fn(),
+    unlink: vi.fn(),
   };
 });
 
@@ -25,7 +44,9 @@ vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
   return {
     ...actual,
+    default: { ...actual, tmpdir: vi.fn(() => '/tmp'), platform: vi.fn(() => 'linux') },
     tmpdir: vi.fn(() => '/tmp'),
+    platform: vi.fn(() => 'linux'),
   };
 });
 
