@@ -367,11 +367,12 @@ export async function runAgent(
     iteration++;
 
     // Use any to avoid type issues that might affect runtime behavior
+    // DEBUG: Try without tools to see if that's the issue
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamContext: any = {
       systemPrompt,
       messages,
-      tools: AGENT_TOOLS
+      tools: [] // AGENT_TOOLS - temporarily disabled for debugging
     };
 
     try {
