@@ -342,6 +342,8 @@ export async function runAgent(
   const effectiveKey = getClaudeKey(apiKey);
   const usingOAT = isOATToken(effectiveKey);
   
+  console.log(`[Claude] runAgent called with apiKey param: ${apiKey ? apiKey.slice(0, 20) + '...' : 'undefined'}`);
+  console.log(`[Claude] effectiveKey: ${effectiveKey.slice(0, 20)}...`);
   console.log(`[Claude] Using pi-ai with ${usingOAT ? 'OAT token' : 'regular API key'}`);
   
   const model = createModel(modelId);
