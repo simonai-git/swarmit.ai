@@ -1,6 +1,7 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs } from './db';
 import { agentQueue } from './agent-queue';
+import { taskLogBuffer } from './task-log-buffer';
 
 // Track if scheduler is already running (singleton)
 let isSchedulerRunning = false;
@@ -12,6 +13,7 @@ const recentlyEnqueued = new Map<string, Set<string>>();
 // Stuck-task detection: skip tasks with too many completed runs in a window
 const MAX_RECENT_RUNS = 3;
 const STUCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_LIFETIME_RUNS = 6; // Total runs before permanent block
 
 /**
  * Determine agent type based on task status
@@ -82,19 +84,42 @@ async function processUserTasks(userEmail: string): Promise<void> {
     if (!['todo', 'in_progress', 'testing', 'in_review'].includes(task.status)) continue;
     if (task.is_blocked) continue;
 
-    // Skip stuck tasks: too many finished runs in the last 30 minutes
+    // Stuck detection: check both windowed and lifetime metrics
     const recentRuns = await getAgentRunsByTask(task.id);
-    const recentFinishedRuns = recentRuns.filter(r =>
-      ['completed', 'failed'].includes(r.status) &&
+    const finishedRuns = recentRuns.filter(r =>
+      ['completed', 'failed'].includes(r.status)
+    );
+
+    // Tier 1: Rapid loop — 3+ runs in 30 minutes
+    const recentFinishedRuns = finishedRuns.filter(r =>
       new Date(r.created_at).getTime() > Date.now() - STUCK_WINDOW_MS
     );
     if (recentFinishedRuns.length >= MAX_RECENT_RUNS) {
-      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck: ${recentFinishedRuns.length} runs in 30min, marking blocked`);
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (rapid): ${recentFinishedRuns.length} runs in 30min, marking blocked`);
       await updateTask(task.id, {
         is_blocked: true,
         blocked_reason: `Agent ran ${recentFinishedRuns.length} times in 30 minutes without advancing status. Manual intervention needed.`,
       });
       continue;
+    }
+
+    // Tier 2: Slow burn — 6+ total lifetime runs without status change
+    if (finishedRuns.length >= MAX_LIFETIME_RUNS) {
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (lifetime): ${finishedRuns.length} total runs, marking blocked`);
+      await updateTask(task.id, {
+        is_blocked: true,
+        blocked_reason: `Agent ran ${finishedRuns.length} times total without advancing status. Manual intervention needed.`,
+      });
+      continue;
+    }
+
+    // Exponential backoff: wait longer between retries as failures accumulate
+    if (finishedRuns.length > 0) {
+      const lastRunTime = new Date(finishedRuns[0].created_at).getTime();
+      const backoffMs = Math.min(finishedRuns.length * 60_000, 600_000); // 1min per run, max 10min
+      if (Date.now() - lastRunTime < backoffMs) {
+        continue; // Not enough time has passed, skip for now
+      }
     }
 
     tasksNeedingWork.push(task);
@@ -170,6 +195,16 @@ async function schedulerTick(): Promise<void> {
     const updatedStatus = await agentQueue.getStatus();
     console.log(`[Scheduler] Queue status: ${updatedStatus.jobs.length} queued, ${updatedStatus.activeRuns.length} active`);
 
+    // Cleanup old task logs (7-day retention)
+    try {
+      const cleaned = await cleanupOldTaskLogs(7);
+      if (cleaned > 0) {
+        console.log(`[Scheduler] Cleaned up ${cleaned} old task log entries`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] Failed to cleanup old task logs:', err);
+    }
+
   } catch (error) {
     console.error('[Scheduler] Error in scheduler tick:', error);
   }
@@ -186,6 +221,9 @@ export function startScheduler(): void {
   }
 
   console.log('[Scheduler] Starting internal task scheduler...');
+
+  // Start the task log buffer flush interval
+  taskLogBuffer.start();
 
   // Run immediately on start
   schedulerTick().catch(console.error);
@@ -208,6 +246,7 @@ export function stopScheduler(): void {
     scheduledTask.stop();
     scheduledTask = null;
   }
+  taskLogBuffer.stop();
   isSchedulerRunning = false;
   recentlyEnqueued.clear();
   console.log('[Scheduler] Scheduler stopped');

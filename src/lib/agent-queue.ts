@@ -3,6 +3,7 @@ import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComme
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
+import { taskLogBuffer } from './task-log-buffer';
 
 /**
  * When an agent succeeds without calling task_complete, determine the
@@ -46,6 +47,9 @@ export interface AgentRun {
   transcript: Array<{ role: string; content: string; timestamp: Date }>;
   error?: string;
 }
+
+// Job timeout for in-memory queue (matches Redis jobTimeoutMs)
+const JOB_TIMEOUT_MS = 300000; // 5 minutes
 
 // Queue configuration
 const CONFIG = {
@@ -338,6 +342,19 @@ class AgentQueue {
   cleanup(maxAgeMs: number = 3600000): void {
     if (this.useRedis) return; // Redis handles cleanup automatically via TTL
 
+    // Force-fail stale running jobs (no built-in timeout in in-memory queue unlike Redis)
+    for (const j of this.jobs) {
+      if (j.status === 'running' && j.startedAt) {
+        const runningFor = Date.now() - j.startedAt.getTime();
+        if (runningFor > JOB_TIMEOUT_MS) {
+          console.warn(`[AgentQueue] Force-failing stale job ${j.id} for task ${j.taskId} (running ${Math.round(runningFor / 1000)}s)`);
+          j.status = 'failed';
+          j.error = 'Job timed out (stale)';
+          j.completedAt = new Date();
+        }
+      }
+    }
+
     const cutoff = Date.now() - maxAgeMs;
     const before = this.jobs.length;
     this.jobs = this.jobs.filter(j => {
@@ -408,6 +425,28 @@ class AgentQueue {
         },
       };
 
+      // Create onOutput callback that feeds TaskLogBuffer
+      const onOutput = (stream: 'stdout' | 'stderr', data: string) => {
+        taskLogBuffer.append({
+          task_id: job.taskId,
+          run_id: run.id,
+          agent_type: job.agentType,
+          stream,
+          content: data,
+          timestamp: Date.now(),
+        });
+      };
+
+      // Emit system lifecycle event
+      taskLogBuffer.append({
+        task_id: job.taskId,
+        run_id: run.id,
+        agent_type: job.agentType,
+        stream: 'system',
+        content: `[${job.agentType}] Agent started — creating sandbox...`,
+        timestamp: Date.now(),
+      });
+
       // Create sandbox with agent-specific toolkit
       console.log(`[Agent] Creating sandbox for task ${job.taskId} with ${job.agentType} toolkit`);
       const repoUrl = process.env.DEFAULT_REPO;
@@ -417,6 +456,15 @@ class AgentQueue {
         branch: 'main',
         timeoutMs: 120000,
         agentType: job.agentType,
+      }, onOutput);
+
+      taskLogBuffer.append({
+        task_id: job.taskId,
+        run_id: run.id,
+        agent_type: job.agentType,
+        stream: 'system',
+        content: `Sandbox ready at ${executor.getWorkdir()}`,
+        timestamp: Date.now(),
       });
 
       run.transcript.push({
@@ -485,6 +533,14 @@ class AgentQueue {
         }
       }
 
+      // Safety: warn if agent succeeded but task status didn't change
+      if (result.success) {
+        const finalTask = await getTask(job.taskId);
+        if (finalTask && finalTask.status === task.status) {
+          console.warn(`[Agent] WARNING: Task ${job.taskId.slice(0, 8)} status unchanged after successful ${job.agentType} run (still '${task.status}')`);
+        }
+      }
+
       // Add completion comment
       if (result.success) {
         await createComment({
@@ -501,6 +557,15 @@ class AgentQueue {
         timestamp: new Date(),
       });
 
+      taskLogBuffer.append({
+        task_id: job.taskId,
+        run_id: run.id,
+        agent_type: job.agentType,
+        stream: 'system',
+        content: `[${job.agentType}] Agent ${result.success ? 'completed successfully' : 'failed: ' + (result.error || 'unknown error')}`,
+        timestamp: Date.now(),
+      });
+
       if (!result.success) {
         throw new Error(result.error || 'Agent failed');
       }
@@ -509,12 +574,31 @@ class AgentQueue {
       run.status = 'failed';
       run.error = error instanceof Error ? error.message : String(error);
       run.completedAt = new Date();
+
+      taskLogBuffer.append({
+        task_id: job.taskId,
+        run_id: run.id,
+        agent_type: job.agentType,
+        stream: 'system',
+        content: `[${job.agentType}] Agent error: ${run.error}`,
+        timestamp: Date.now(),
+      });
+
       throw error;
     } finally {
       // Cleanup sandbox
       if (executor) {
         await executor.cleanup();
       }
+
+      taskLogBuffer.append({
+        task_id: job.taskId,
+        run_id: run.id,
+        agent_type: job.agentType,
+        stream: 'system',
+        content: 'Sandbox cleaned up',
+        timestamp: Date.now(),
+      });
       // Save run to database
       await saveAgentRun(run);
       // Keep in memory briefly, then cleanup

@@ -72,7 +72,7 @@ describe('SandboxToolExecutor', () => {
 
       const result = await executor.execCommand('echo test');
 
-      expect(mockSandbox.exec).toHaveBeenCalledWith('echo test', undefined);
+      expect(mockSandbox.exec).toHaveBeenCalledWith('echo test', undefined, undefined);
       expect(result).toEqual({
         stdout: 'command output',
         stderr: '',
@@ -91,7 +91,7 @@ describe('SandboxToolExecutor', () => {
 
       await executor.execCommand('ls', './src');
 
-      expect(mockSandbox.exec).toHaveBeenCalledWith('ls', './src');
+      expect(mockSandbox.exec).toHaveBeenCalledWith('ls', './src', undefined);
     });
 
     it('should return stderr and exitCode on command failure', async () => {

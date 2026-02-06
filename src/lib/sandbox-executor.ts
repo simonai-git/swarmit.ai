@@ -11,23 +11,25 @@ import { ToolExecutor } from './claude';
 export class SandboxToolExecutor implements ToolExecutor {
   private sandbox: TaskSandbox;
   private initialized = false;
+  private onOutput?: (stream: 'stdout' | 'stderr', data: string) => void;
 
-  constructor(sandbox: TaskSandbox) {
+  constructor(sandbox: TaskSandbox, onOutput?: (stream: 'stdout' | 'stderr', data: string) => void) {
     this.sandbox = sandbox;
+    this.onOutput = onOutput;
     this.initialized = true;
   }
 
   /**
    * Create a new executor with its own sandbox
    */
-  static async create(config: SandboxConfig): Promise<SandboxToolExecutor> {
+  static async create(config: SandboxConfig, onOutput?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<SandboxToolExecutor> {
     const sandbox = await TaskSandbox.create(config);
-    return new SandboxToolExecutor(sandbox);
+    return new SandboxToolExecutor(sandbox, onOutput);
   }
 
   async execCommand(command: string, workdir?: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     this.ensureInitialized();
-    const result = await this.sandbox.exec(command, workdir);
+    const result = await this.sandbox.exec(command, workdir, this.onOutput);
     return {
       stdout: result.stdout,
       stderr: result.stderr,
