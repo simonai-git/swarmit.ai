@@ -2490,8 +2490,11 @@ describe('Database Module', () => {
       });
 
       it('should throw error when cycle would be created', async () => {
+        // wouldCreateCycle('task-1', 'task-2') queries depends_on_id='task-1'
+        // returns task-2, which means task-2→task-1 exists already
+        // then stack pops task-2, which === dependsOnId ('task-2') → cycle!
         mockQuery.mockResolvedValueOnce({
-          rows: [{ task_id: 'task-1' }],
+          rows: [{ task_id: 'task-2' }],
           rowCount: 1
         });
 

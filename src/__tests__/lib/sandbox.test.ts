@@ -1,25 +1,33 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import('child_process')>();
   return {
-    ...(actual as any),
+    ...actual,
     exec: vi.fn(),
     spawn: vi.fn(),
   };
 });
 
-vi.mock('fs/promises', () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  readFile: vi.fn(),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  readdir: vi.fn(),
-  rm: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return {
+    ...actual,
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn(),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    readdir: vi.fn(),
+    rm: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
-vi.mock('os', () => ({
-  tmpdir: vi.fn(() => '/tmp'),
-}));
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    tmpdir: vi.fn(() => '/tmp'),
+  };
+});
 
 vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid'),
