@@ -342,44 +342,44 @@ describe('agent-queue', () => {
 
   describe('getStatus with tenantId filtering', () => {
     it('returns all jobs when no tenantId provided', async () => {
-      await agentQueue.enqueue({ taskId: 'task-a', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
-      await agentQueue.enqueue({ taskId: 'task-b', agentType: 'qa', priority: 5, tenantId: 'bob@test.com' });
+      await agentQueue.enqueue({ taskId: 'all-task-a', agentType: 'developer', priority: 5, tenantId: 'all-alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'all-task-b', agentType: 'qa', priority: 5, tenantId: 'all-bob@test.com' });
 
       const status = await agentQueue.getStatus();
       const taskIds = status.jobs.map(j => j.taskId);
-      expect(taskIds).toContain('task-a');
-      expect(taskIds).toContain('task-b');
+      expect(taskIds).toContain('all-task-a');
+      expect(taskIds).toContain('all-task-b');
     });
 
     it('filters jobs by tenantId when provided', async () => {
-      await agentQueue.enqueue({ taskId: 'task-a', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
-      await agentQueue.enqueue({ taskId: 'task-b', agentType: 'qa', priority: 5, tenantId: 'bob@test.com' });
+      await agentQueue.enqueue({ taskId: 'filt-task-a', agentType: 'developer', priority: 5, tenantId: 'filt-alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'filt-task-b', agentType: 'qa', priority: 5, tenantId: 'filt-bob@test.com' });
 
-      const aliceStatus = await agentQueue.getStatus('alice@test.com');
+      const aliceStatus = await agentQueue.getStatus('filt-alice@test.com');
       const aliceTaskIds = aliceStatus.jobs.map(j => j.taskId);
-      expect(aliceTaskIds).toContain('task-a');
-      expect(aliceTaskIds).not.toContain('task-b');
+      expect(aliceTaskIds).toContain('filt-task-a');
+      expect(aliceTaskIds).not.toContain('filt-task-b');
 
-      const bobStatus = await agentQueue.getStatus('bob@test.com');
+      const bobStatus = await agentQueue.getStatus('filt-bob@test.com');
       const bobTaskIds = bobStatus.jobs.map(j => j.taskId);
-      expect(bobTaskIds).toContain('task-b');
-      expect(bobTaskIds).not.toContain('task-a');
+      expect(bobTaskIds).toContain('filt-task-b');
+      expect(bobTaskIds).not.toContain('filt-task-a');
     });
 
     it('stores tenantId on in-memory jobs', async () => {
-      const job = await agentQueue.enqueue({ taskId: 'task-t', agentType: 'developer', priority: 5, tenantId: 'tenant@test.com' });
-      expect(job.tenantId).toBe('tenant@test.com');
+      const job = await agentQueue.enqueue({ taskId: 'store-task-t', agentType: 'developer', priority: 5, tenantId: 'store-tenant@test.com' });
+      expect(job.tenantId).toBe('store-tenant@test.com');
     });
 
     it('returns correct counts per tenant', async () => {
-      await agentQueue.enqueue({ taskId: 'task-a1', agentType: 'developer', priority: 5, tenantId: 'alice@test.com' });
-      await agentQueue.enqueue({ taskId: 'task-a2', agentType: 'qa', priority: 5, tenantId: 'alice@test.com' });
-      await agentQueue.enqueue({ taskId: 'task-b1', agentType: 'developer', priority: 5, tenantId: 'bob@test.com' });
+      await agentQueue.enqueue({ taskId: 'cnt-a1', agentType: 'developer', priority: 5, tenantId: 'cnt-alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'cnt-a2', agentType: 'qa', priority: 5, tenantId: 'cnt-alice@test.com' });
+      await agentQueue.enqueue({ taskId: 'cnt-b1', agentType: 'developer', priority: 5, tenantId: 'cnt-bob@test.com' });
 
-      const aliceStatus = await agentQueue.getStatus('alice@test.com');
+      const aliceStatus = await agentQueue.getStatus('cnt-alice@test.com');
       expect(aliceStatus.pending).toBe(2);
 
-      const bobStatus = await agentQueue.getStatus('bob@test.com');
+      const bobStatus = await agentQueue.getStatus('cnt-bob@test.com');
       expect(bobStatus.pending).toBe(1);
     });
   });

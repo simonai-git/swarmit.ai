@@ -4,10 +4,12 @@ import { NextRequest } from 'next/server';
 // Mock modules before importing the route
 vi.mock('@/lib/db', () => ({
   getAllTasks: vi.fn(),
+  getTasksByUserEmail: vi.fn(),
   createTask: vi.fn(),
   getTask: vi.fn(),
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
+  searchTasks: vi.fn(),
 }));
 
 vi.mock('@/lib/webhook', () => ({
@@ -21,6 +23,14 @@ vi.mock('@/lib/task-lifecycle', () => ({
 
 vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid-123'),
+}));
+
+vi.mock('next-auth', () => ({
+  getServerSession: vi.fn(() => Promise.resolve(null)),
+}));
+
+vi.mock('@/lib/auth', () => ({
+  authOptions: {},
 }));
 
 import { GET, POST } from '@/app/api/tasks/route';
