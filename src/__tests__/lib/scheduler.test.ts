@@ -648,10 +648,11 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // Only 2 completed runs — under threshold
+      // Only 2 completed runs — under threshold, and old enough to pass backoff
+      const oldEnough = new Date(Date.now() - 3 * 60_000).toISOString(); // 3 min ago > 2-run backoff
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: new Date().toISOString() },
-        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', created_at: oldEnough },
+        { status: 'completed', created_at: oldEnough },
       ] as any);
 
       await forceSchedulerTick();
