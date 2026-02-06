@@ -28,7 +28,68 @@ export interface SandboxConfig {
   branch?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  agentType?: string;
 }
+
+export interface SandboxToolkit {
+  setupCommands: string[];
+  envVars: Record<string, string>;
+}
+
+// Pre-configured toolkits per agent specialization
+export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
+  developer: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'development',
+    },
+  },
+  frontend: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'development',
+      NEXT_TELEMETRY_DISABLED: '1',
+    },
+  },
+  backend: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'development',
+    },
+  },
+  devops: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'production',
+      CI: 'true',
+    },
+  },
+  qa: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm run build 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'test',
+    },
+  },
+  reviewer: {
+    setupCommands: [
+      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+    ],
+    envVars: {
+      NODE_ENV: 'development',
+    },
+  },
+};
 
 const DEFAULT_TIMEOUT_MS = 60000; // 1 minute
 const DEFAULT_MAX_OUTPUT = 1024 * 1024; // 1MB
@@ -63,6 +124,23 @@ export abstract class TaskSandbox {
   }
 
   /**
+   * Apply a toolkit's setup commands and env vars for the given agent type
+   */
+  async applyToolkit(agentType: string): Promise<void> {
+    const toolkit = AGENT_TOOLKITS[agentType];
+    if (!toolkit) return;
+
+    console.log(`[Sandbox] Applying ${agentType} toolkit`);
+
+    for (const cmd of toolkit.setupCommands) {
+      const result = await this.exec(cmd);
+      if (result.exitCode !== 0 && !cmd.includes('|| true')) {
+        console.warn(`[Sandbox] Toolkit setup command failed: ${cmd} - ${result.stderr}`);
+      }
+    }
+  }
+
+  /**
    * Clone a git repository into the sandbox
    */
   async gitClone(repo: string, branch?: string): Promise<ExecResult> {
@@ -89,14 +167,20 @@ export abstract class TaskSandbox {
    * Factory method to create appropriate sandbox based on environment
    */
   static async create(config: SandboxConfig): Promise<TaskSandbox> {
-    const useDocker = process.env.SANDBOX_MODE === 'docker' || 
+    const useDocker = process.env.SANDBOX_MODE === 'docker' ||
                       (process.env.NODE_ENV === 'development' && await isDockerAvailable());
-    
-    const sandbox = useDocker 
+
+    const sandbox = useDocker
       ? new DockerSandbox(config)
       : new SubprocessSandbox(config);
-    
+
     await sandbox.initialize();
+
+    // Apply agent-specific toolkit if agentType is provided
+    if (config.agentType) {
+      await sandbox.applyToolkit(config.agentType);
+    }
+
     return sandbox;
   }
 }
@@ -241,12 +325,22 @@ export class DockerSandbox extends TaskSandbox {
  * Lightweight temp directory isolation
  */
 export class SubprocessSandbox extends TaskSandbox {
+  private toolkitEnvVars: Record<string, string> = {};
+
   async initialize(): Promise<void> {
     // Create temp directory for this task
     const tmpBase = os.tmpdir();
     this.workdir = path.join(tmpBase, `swarmit-${this.taskId.slice(0, 8)}-${uuidv4().slice(0, 8)}`);
-    
+
     await fs.mkdir(this.workdir, { recursive: true });
+
+    // Apply toolkit env vars if agentType is specified
+    if (this.config.agentType) {
+      const toolkit = AGENT_TOOLKITS[this.config.agentType];
+      if (toolkit?.envVars) {
+        this.toolkitEnvVars = toolkit.envVars;
+      }
+    }
 
     // Clone repo if specified
     if (this.config.repo) {
@@ -257,12 +351,13 @@ export class SubprocessSandbox extends TaskSandbox {
   async exec(command: string, cwd?: string): Promise<ExecResult> {
     const workdir = cwd ? path.join(this.workdir, cwd) : this.workdir;
     const timeoutMs = this.config.timeoutMs!;
-    
+
     return new Promise((resolve) => {
       const child = spawn('sh', ['-c', command], {
         cwd: workdir,
         env: {
           ...process.env,
+          ...this.toolkitEnvVars,
           // Restrict some capabilities
           PATH: '/usr/local/bin:/usr/bin:/bin',
         }
