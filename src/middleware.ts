@@ -21,7 +21,9 @@ export async function middleware(request: NextRequest) {
     '/api/costs',
     '/api/settings',
     '/api/scheduler',
-    '/api/debug'
+    '/api/debug',
+    '/api/dashboard',
+    '/api/monitoring'
   ];
   
   if (apiKeyRoutes.some(route => pathname.startsWith(route))) {

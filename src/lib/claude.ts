@@ -7,7 +7,7 @@ type AnyTool = any;
 
 // Check if key is an OAT token (OAuth Access Token from Claude Code)
 function isOATToken(key: string): boolean {
-  return key.startsWith('sk-ant-oat') || key.includes('sk-ant-oat');
+  return key.startsWith('sk-ant-oat');
 }
 
 // Claude Code identity - MUST be first in system prompt for OAT tokens
@@ -519,8 +519,11 @@ async function executeTool(
         const dir = (toolInput.path as string) || '.';
         const grepPattern = toolInput.pattern as string;
         const mode = (toolInput.output_mode as string) || 'content';
+        // Escape all shell-special characters to prevent command injection
+        const escapedPattern = grepPattern.replace(/[\\`$"!{}();&|<>]/g, '\\$&');
+        const escapedDir = dir.replace(/[\\`$"!{}();&|<>]/g, '\\$&');
         const r = await executor.execCommand(
-          `grep -r${mode === 'files_with_matches' ? 'l' : mode === 'count' ? 'c' : 'n'} "${grepPattern.replace(/"/g, '\\"')}" "${dir}" 2>/dev/null | head -100`
+          `grep -r${mode === 'files_with_matches' ? 'l' : mode === 'count' ? 'c' : 'n'} "${escapedPattern}" "${escapedDir}" 2>/dev/null | head -100`
         );
         return r.stdout || 'No matches found';
       }

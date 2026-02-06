@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getTask } from '@/lib/db';
+import { getTask, getAutomationUserEmail } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 // Verify API key
@@ -48,12 +48,12 @@ export async function POST(
     // tenantId for multi-tenant support (defaults to 'default')
     const { tenantId = 'default', userEmail: requestUserEmail } = body;
 
-    // Get user email: from request body, from session, or default to first user with Claude key
+    // Get user email: from request body, from session, or look up automation user
     let userEmail = requestUserEmail || session?.user?.email;
-    
-    // If no user email provided, default to bogdan@alexandrescu.io (the main user)
+
+    // If no user email provided, look up the automation user dynamically
     if (!userEmail) {
-      userEmail = 'bogdan@alexandrescu.io';
+      userEmail = await getAutomationUserEmail();
     }
 
     // Enqueue the job

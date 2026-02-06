@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTasks, getWatcherConfig } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getAutomationUserEmail } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 // Verify API key
@@ -32,6 +32,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Get the automation user for Claude API key lookup
+    const automationUserEmail = await getAutomationUserEmail();
+
     const results = {
       processed: 0,
       enqueued: 0,
@@ -59,6 +62,7 @@ export async function POST(request: NextRequest) {
           taskId: task.id,
           agentType: 'developer',
           priority,
+          userEmail: automationUserEmail,
         });
         results.enqueued++;
         console.log(`[Watcher] Enqueued task ${task.id}: ${task.title}`);
