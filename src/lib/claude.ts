@@ -109,51 +109,52 @@ export interface AgentResult {
   outputTokens: number;
 }
 
-// Tool definitions (use any to avoid typebox complexity)
+// Tool definitions using Claude Code naming conventions for OAT compatibility
+// Note: pi-ai converts lowercase names to Claude Code PascalCase (bash -> Bash)
 const AGENT_TOOLS: AnyTool[] = [
   {
-    name: 'exec_command',
+    name: 'bash', // Will be converted to 'Bash' by pi-ai
     description: 'Execute a shell command',
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Shell command to execute' },
-        workdir: { type: 'string', description: 'Working directory' }
       },
       required: ['command']
     }
   },
   {
-    name: 'read_file',
+    name: 'read', // Will be converted to 'Read' by pi-ai
     description: 'Read file contents',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string' } },
-      required: ['path']
+      properties: { 
+        file_path: { type: 'string', description: 'Path to the file to read' }
+      },
+      required: ['file_path']
     }
   },
   {
-    name: 'write_file',
+    name: 'write', // Will be converted to 'Write' by pi-ai
     description: 'Write content to file',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
-        content: { type: 'string' }
+        file_path: { type: 'string', description: 'Path to the file to write' },
+        content: { type: 'string', description: 'Content to write to the file' }
       },
-      required: ['path', 'content']
+      required: ['file_path', 'content']
     }
   },
   {
-    name: 'list_files',
-    description: 'List files in directory',
+    name: 'glob', // Will be converted to 'Glob' by pi-ai
+    description: 'List files in directory matching a pattern',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
-        recursive: { type: 'boolean' }
+        pattern: { type: 'string', description: 'Glob pattern to match files' },
       },
-      required: ['path']
+      required: ['pattern']
     }
   },
   {
@@ -367,12 +368,11 @@ export async function runAgent(
     iteration++;
 
     // Use any to avoid type issues that might affect runtime behavior
-    // DEBUG: Try without tools to see if that's the issue
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamContext: any = {
       systemPrompt,
       messages,
-      tools: [] // AGENT_TOOLS - temporarily disabled for debugging
+      tools: AGENT_TOOLS // Re-enabled with Claude Code naming
     };
 
     try {
