@@ -112,6 +112,26 @@ describe('claude utilities', () => {
     it('reviewer prompt should mention code review', () => {
       expect(AGENT_PROMPTS.reviewer.toLowerCase()).toMatch(/review|approve|feedback/);
     });
+
+    it('all prompts should require calling task_complete', () => {
+      expect(AGENT_PROMPTS.developer).toContain('MUST call task_complete');
+      expect(AGENT_PROMPTS.qa).toContain('MUST call task_complete');
+      expect(AGENT_PROMPTS.reviewer).toContain('MUST call task_complete');
+    });
+
+    it('developer prompt should specify next_status=testing', () => {
+      expect(AGENT_PROMPTS.developer).toContain("next_status='testing'");
+    });
+
+    it('qa prompt should specify next_status options', () => {
+      expect(AGENT_PROMPTS.qa).toContain("next_status='in_review'");
+      expect(AGENT_PROMPTS.qa).toContain("next_status='in_progress'");
+    });
+
+    it('reviewer prompt should specify next_status options', () => {
+      expect(AGENT_PROMPTS.reviewer).toContain("next_status='done'");
+      expect(AGENT_PROMPTS.reviewer).toContain("next_status='in_progress'");
+    });
   });
 
   describe('AGENT_TOOLS', () => {

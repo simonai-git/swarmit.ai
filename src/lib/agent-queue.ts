@@ -4,6 +4,18 @@ import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey 
 import { SandboxToolExecutor } from './sandbox-executor';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 
+/**
+ * When an agent succeeds without calling task_complete, determine the
+ * default next status based on the agent type and current task status.
+ * Returns null if no automatic progression applies.
+ */
+export function getDefaultNextStatus(agentType: string, currentStatus: string): Task['status'] | null {
+  if (agentType === 'qa' && currentStatus === 'testing') return 'in_review';
+  if (agentType === 'reviewer' && currentStatus === 'in_review') return 'done';
+  if (agentType === 'developer' && ['todo', 'in_progress'].includes(currentStatus)) return 'testing';
+  return null;
+}
+
 // Legacy interfaces for backward compatibility
 export interface AgentJob {
   id: string;
@@ -458,9 +470,19 @@ class AgentQueue {
       run.status = 'completed';
       run.completedAt = new Date();
 
-      // Update task status if specified
+      // Update task status if specified, or auto-progress if agent succeeded without calling task_complete
       if (result.success && result.nextStatus) {
         await updateTask(job.taskId, { status: result.nextStatus });
+      } else if (result.success && !result.nextStatus) {
+        // Check if agent already changed status via update_task tool
+        const currentTask = await getTask(job.taskId);
+        if (currentTask && currentTask.status === task.status) {
+          const defaultNext = getDefaultNextStatus(job.agentType, task.status);
+          if (defaultNext) {
+            console.log(`[Agent] Auto-progressing task ${job.taskId.slice(0, 8)}: ${task.status} → ${defaultNext}`);
+            await updateTask(job.taskId, { status: defaultNext });
+          }
+        }
       }
 
       // Add completion comment
@@ -569,21 +591,3 @@ export async function getSpendByPeriod(startDate: Date, endDate: Date): Promise<
   };
 }
 
-/**
- * Determine the default next status after an agent completes its work.
- * Returns null if the combination is unrecognized (no auto-transition).
- */
-export function getDefaultNextStatus(agentType: string, currentStatus: string): string | null {
-  if (currentStatus === 'done') return null;
-
-  if (agentType === 'developer' && (currentStatus === 'todo' || currentStatus === 'in_progress')) {
-    return 'testing';
-  }
-  if (agentType === 'qa' && currentStatus === 'testing') {
-    return 'in_review';
-  }
-  if (agentType === 'reviewer' && currentStatus === 'in_review') {
-    return 'done';
-  }
-  return null;
-}
