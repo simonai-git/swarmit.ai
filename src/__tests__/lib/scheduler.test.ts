@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { startScheduler, stopScheduler, getSchedulerStatus, forceSchedulerTick } from '@/lib/scheduler';
-import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask } from '@/lib/db';
+import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 import cron from 'node-cron';
 
@@ -16,6 +16,9 @@ vi.mock('@/lib/db', () => ({
   getUsersWithApiKeys: vi.fn(),
   getTasksByUserEmail: vi.fn(),
   getAgentRunsByTask: vi.fn(),
+  updateTask: vi.fn(),
+  getOrphanedTasks: vi.fn(),
+  assignOrphanedTasks: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -28,6 +31,10 @@ vi.mock('@/lib/agent-queue', () => ({
 describe('scheduler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no orphaned tasks
+    vi.mocked(getOrphanedTasks).mockResolvedValue([]);
+    vi.mocked(assignOrphanedTasks).mockResolvedValue(0);
+    vi.mocked(updateTask).mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -544,7 +551,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).toHaveBeenCalledTimes(2);
     });
 
-    it('skips stuck tasks with too many recent completed runs', async () => {
+    it('marks stuck tasks as blocked and skips them', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -554,6 +561,7 @@ describe('scheduler', () => {
           assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
+          is_blocked: false,
           user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
@@ -577,6 +585,44 @@ describe('scheduler', () => {
       await forceSchedulerTick();
 
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      expect(updateTask).toHaveBeenCalledWith('stuck-task', {
+        is_blocked: true,
+        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+      });
+    });
+
+    it('skips already blocked tasks without checking runs', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'blocked-task',
+          title: 'Blocked Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: true,
+          blocked_reason: 'Already blocked',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      // Should not even check runs since task is skipped early
+      expect(getAgentRunsByTask).not.toHaveBeenCalled();
+      expect(updateTask).not.toHaveBeenCalled();
     });
 
     it('allows tasks with fewer than 3 recent runs', async () => {
@@ -706,6 +752,86 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
 
+    it('marks tasks with 3+ failed runs in 30min as stuck', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'failing-task',
+          title: 'Failing Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 3 failed runs in the last 30 minutes
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', created_at: new Date().toISOString() },
+        { status: 'failed', created_at: new Date().toISOString() },
+        { status: 'failed', created_at: new Date().toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      expect(updateTask).toHaveBeenCalledWith('failing-task', {
+        is_blocked: true,
+        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+      });
+    });
+
+    it('counts mixed completed and failed runs for stuck detection', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'mixed-task',
+          title: 'Mixed Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: false,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // Mix of completed and failed runs totaling 3
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'failed', created_at: new Date().toISOString() },
+        { status: 'completed', created_at: new Date().toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      expect(updateTask).toHaveBeenCalledWith('mixed-task', {
+        is_blocked: true,
+        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+      });
+    });
+
     it('ignores old completed runs outside 30min window', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
@@ -798,6 +924,52 @@ describe('scheduler', () => {
         tenantId: 'bob@test.com',
         userEmail: 'bob@test.com',
       }));
+    });
+
+    it('backfills orphaned tasks to first available user', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getOrphanedTasks).mockResolvedValue([
+        { id: 'orphan-1', title: 'Orphan', status: 'todo', user_email: null },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(assignOrphanedTasks).toHaveBeenCalledWith('user@test.com');
+    });
+
+    it('does not backfill orphans when no users have API keys', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(assignOrphanedTasks).not.toHaveBeenCalled();
+    });
+
+    it('does not call assignOrphanedTasks when no orphaned tasks exist', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getOrphanedTasks).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(assignOrphanedTasks).not.toHaveBeenCalled();
     });
 
     it('one user error does not affect other users', async () => {

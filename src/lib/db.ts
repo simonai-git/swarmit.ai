@@ -1481,4 +1481,21 @@ export async function getTasksByUserEmail(userEmail: string): Promise<Task[]> {
   return result.rows;
 }
 
+// Get tasks with no user_email (orphaned)
+export async function getOrphanedTasks(): Promise<Task[]> {
+  const result = await pool.query(
+    `SELECT * FROM tasks WHERE user_email IS NULL AND status != 'done' LIMIT 50`
+  );
+  return result.rows;
+}
+
+// Assign orphaned tasks to a specific user
+export async function assignOrphanedTasks(userEmail: string): Promise<number> {
+  const result = await pool.query(
+    `UPDATE tasks SET user_email = $1 WHERE user_email IS NULL RETURNING id`,
+    [userEmail]
+  );
+  return result.rowCount || 0;
+}
+
 export default pool;

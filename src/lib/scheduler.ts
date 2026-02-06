@@ -1,5 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks } from './db';
 import { agentQueue } from './agent-queue';
 
 // Track if scheduler is already running (singleton)
@@ -80,15 +80,20 @@ async function processUserTasks(userEmail: string): Promise<void> {
     }
     if (userRecentlyEnqueued.has(task.id)) continue;
     if (!['todo', 'in_progress', 'testing', 'in_review'].includes(task.status)) continue;
+    if (task.is_blocked) continue;
 
-    // Skip stuck tasks: too many completed runs in the last 30 minutes
+    // Skip stuck tasks: too many finished runs in the last 30 minutes
     const recentRuns = await getAgentRunsByTask(task.id);
-    const recentCompletedRuns = recentRuns.filter(r =>
-      r.status === 'completed' &&
+    const recentFinishedRuns = recentRuns.filter(r =>
+      ['completed', 'failed'].includes(r.status) &&
       new Date(r.created_at).getTime() > Date.now() - STUCK_WINDOW_MS
     );
-    if (recentCompletedRuns.length >= MAX_RECENT_RUNS) {
-      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck: ${recentCompletedRuns.length} runs in 30min, skipping`);
+    if (recentFinishedRuns.length >= MAX_RECENT_RUNS) {
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck: ${recentFinishedRuns.length} runs in 30min, marking blocked`);
+      await updateTask(task.id, {
+        is_blocked: true,
+        blocked_reason: `Agent ran ${recentFinishedRuns.length} times in 30 minutes without advancing status. Manual intervention needed.`,
+      });
       continue;
     }
 
@@ -152,6 +157,13 @@ async function schedulerTick(): Promise<void> {
       } catch (error) {
         console.error(`[Scheduler] Error processing tasks for ${user.email}:`, error);
       }
+    }
+
+    // Backfill orphaned tasks (user_email IS NULL) to first available user
+    const orphanedTasks = await getOrphanedTasks();
+    if (orphanedTasks.length > 0 && users.length > 0) {
+      console.warn(`[Scheduler] Found ${orphanedTasks.length} orphaned tasks, assigning to ${users[0].email}`);
+      await assignOrphanedTasks(users[0].email);
     }
 
     // Log summary
