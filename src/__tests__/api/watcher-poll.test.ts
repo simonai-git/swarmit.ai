@@ -5,7 +5,8 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/db', () => ({
   getAllTasks: vi.fn(),
   getWatcherConfig: vi.fn(),
-  getAutomationUserEmail: vi.fn(),
+  getUsersWithApiKeys: vi.fn(),
+  getTasksByUserEmail: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -20,7 +21,7 @@ vi.mock('@/lib/agent-queue', () => ({
 process.env.SIMON_API_KEY = 'test-api-key';
 
 import { POST, GET } from '@/app/api/watcher/poll/route';
-import { getAllTasks, getWatcherConfig, getAutomationUserEmail } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserEmail } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 describe('API /api/watcher/poll', () => {
@@ -55,15 +56,19 @@ describe('API /api/watcher/poll', () => {
 
     it('should enqueue todo tasks when watcher is running', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high' },
-        { id: 'task-2', status: 'in_progress', priority: 'medium' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
+        { id: 'task-2', status: 'in_progress', priority: 'medium', user_email: 'user@test.com' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -81,14 +86,18 @@ describe('API /api/watcher/poll', () => {
 
     it('should not enqueue tasks already in queue', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
-        jobs: [{ taskId: 'task-1' }],
+        jobs: [{ taskId: 'task-1', status: 'pending' } as any],
+        activeRuns: [],
         pending: 1,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -103,14 +112,18 @@ describe('API /api/watcher/poll', () => {
 
     it('should set correct priority for high priority tasks', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -125,14 +138,18 @@ describe('API /api/watcher/poll', () => {
 
     it('should set correct priority for low priority tasks', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'low' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'low', user_email: 'user@test.com' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -147,12 +164,15 @@ describe('API /api/watcher/poll', () => {
 
     it('should call startProcessing', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([]);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -175,17 +195,20 @@ describe('API /api/watcher/poll', () => {
       expect(response.status).toBe(500);
     });
 
-    it('should pass userEmail from getAutomationUserEmail to enqueue (BUG 1 regression)', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@example.com');
+    it('should pass tenantId and userEmail to enqueue', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'medium' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'automation@example.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium', user_email: 'automation@example.com' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -194,21 +217,24 @@ describe('API /api/watcher/poll', () => {
       await POST(request);
 
       expect(agentQueue.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ userEmail: 'automation@example.com' })
+        expect.objectContaining({
+          userEmail: 'automation@example.com',
+          tenantId: 'automation@example.com',
+        })
       );
     });
 
-    it('should pass undefined userEmail when no automation user found', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue(undefined);
+    it('should not enqueue when no users with API keys', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getAllTasks).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'medium' },
-      ] as any);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
+        activeRuns: [],
         pending: 0,
         running: 0,
-      } as any);
+        completed: 0,
+        failed: 0,
+      });
 
       const request = new NextRequest('http://localhost/api/watcher/poll', {
         method: 'POST',
@@ -216,9 +242,7 @@ describe('API /api/watcher/poll', () => {
       });
       await POST(request);
 
-      expect(agentQueue.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ userEmail: undefined })
-      );
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -239,7 +263,10 @@ describe('API /api/watcher/poll', () => {
         pending: 2,
         running: 1,
         jobs: [],
-      } as any);
+        activeRuns: [],
+        completed: 0,
+        failed: 0,
+      });
       vi.mocked(getAllTasks).mockResolvedValue([
         { id: '1', status: 'todo' },
         { id: '2', status: 'in_progress' },

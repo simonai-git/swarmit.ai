@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { startScheduler, stopScheduler, getSchedulerStatus, forceSchedulerTick } from '@/lib/scheduler';
-import { getAllTasks, getAutomationUserEmail } from '@/lib/db';
+import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 import cron from 'node-cron';
 
@@ -13,8 +13,9 @@ vi.mock('node-cron', () => ({
 }));
 
 vi.mock('@/lib/db', () => ({
-  getAllTasks: vi.fn(),
-  getAutomationUserEmail: vi.fn(),
+  getUsersWithApiKeys: vi.fn(),
+  getTasksByUserEmail: vi.fn(),
+  getAgentRunsByTask: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -45,8 +46,8 @@ describe('scheduler', () => {
 
   describe('startScheduler', () => {
     it('calls cron.schedule, sets isRunning, runs tick immediately', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([]);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
         activeRuns: [],
@@ -67,12 +68,12 @@ describe('scheduler', () => {
       expect(status.isRunning).toBe(true);
 
       await new Promise(resolve => setTimeout(resolve, 10));
-      expect(getAutomationUserEmail).toHaveBeenCalled();
+      expect(getUsersWithApiKeys).toHaveBeenCalled();
     });
 
     it('does nothing if already running', () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([]);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
         activeRuns: [],
@@ -97,8 +98,8 @@ describe('scheduler', () => {
       vi.mocked(cron.schedule).mockReturnValue({
         stop: mockStop,
       } as any);
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([]);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
         activeRuns: [],
@@ -120,8 +121,8 @@ describe('scheduler', () => {
 
   describe('forceSchedulerTick', () => {
     it('executes schedulerTick directly', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([]);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
         activeRuns: [],
@@ -133,32 +134,32 @@ describe('scheduler', () => {
 
       await forceSchedulerTick();
 
-      expect(getAutomationUserEmail).toHaveBeenCalled();
-      expect(getAllTasks).toHaveBeenCalled();
+      expect(getUsersWithApiKeys).toHaveBeenCalled();
+      expect(getTasksByUserEmail).toHaveBeenCalledWith('user@test.com');
     });
   });
 
   describe('schedulerTick (via forceSchedulerTick)', () => {
-    it('skips if no automation user email found', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue(undefined);
+    it('skips if no users with API keys found', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
-      expect(getAllTasks).not.toHaveBeenCalled();
+      expect(getTasksByUserEmail).not.toHaveBeenCalled();
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
 
     it('skips done tasks', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Done Task',
           status: 'done',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -178,8 +179,8 @@ describe('scheduler', () => {
     });
 
     it('skips tasks without assignee', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Unassigned Task',
@@ -187,7 +188,7 @@ describe('scheduler', () => {
           assignee: null,
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -207,22 +208,22 @@ describe('scheduler', () => {
     });
 
     it('skips tasks already in queue', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Queued Task',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
-        jobs: [{ taskId: 'task-1' } as any],
+        jobs: [{ taskId: 'task-1', status: 'pending' } as any],
         activeRuns: [],
         pending: 1,
         running: 0,
@@ -236,16 +237,16 @@ describe('scheduler', () => {
     });
 
     it('skips tasks with active agents', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Active Task',
           status: 'in_progress',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -264,20 +265,20 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
 
-    it('enqueues up to 5 tasks max', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
+    it('enqueues up to 5 tasks max per user', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       const tasks = Array.from({ length: 10 }, (_, i) => ({
         id: `task-${i}`,
         title: `Task ${i}`,
         status: 'todo',
-        assignee: 'user@test.com',
+        assignee: 'agent@test.com',
         priority: 'medium',
         description: 'Test',
-        tenant_id: 'default',
+        user_email: 'user@test.com',
         created_at: new Date(),
         updated_at: new Date(),
       }));
-      vi.mocked(getAllTasks).mockResolvedValue(tasks as any);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue(tasks as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
         activeRuns: [],
@@ -286,6 +287,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
@@ -293,16 +295,16 @@ describe('scheduler', () => {
     });
 
     it('uses correct agentType: qa for testing', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Testing Task',
           status: 'testing',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -315,6 +317,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
@@ -322,22 +325,22 @@ describe('scheduler', () => {
         taskId: 'task-1',
         agentType: 'qa',
         priority: 10,
-        tenantId: 'default',
-        userEmail: 'automation@test.com',
+        tenantId: 'user@test.com',
+        userEmail: 'user@test.com',
       });
     });
 
     it('uses correct agentType: reviewer for in_review', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Review Task',
           status: 'in_review',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'medium',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -350,6 +353,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
@@ -357,22 +361,22 @@ describe('scheduler', () => {
         taskId: 'task-1',
         agentType: 'reviewer',
         priority: 5,
-        tenantId: 'default',
-        userEmail: 'automation@test.com',
+        tenantId: 'user@test.com',
+        userEmail: 'user@test.com',
       });
     });
 
     it('uses correct agentType: developer for others', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Dev Task',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'low',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -385,6 +389,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
@@ -392,22 +397,22 @@ describe('scheduler', () => {
         taskId: 'task-1',
         agentType: 'developer',
         priority: 1,
-        tenantId: 'default',
-        userEmail: 'automation@test.com',
+        tenantId: 'user@test.com',
+        userEmail: 'user@test.com',
       });
     });
 
     it('uses correct priority: high=10, medium=5, low=1', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-high',
           title: 'High Priority',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'high',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -415,10 +420,10 @@ describe('scheduler', () => {
           id: 'task-medium',
           title: 'Medium Priority',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'medium',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -426,10 +431,10 @@ describe('scheduler', () => {
           id: 'task-low',
           title: 'Low Priority',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'low',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -442,6 +447,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
@@ -460,16 +466,16 @@ describe('scheduler', () => {
     });
 
     it('passes userEmail to enqueue', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Test Task',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'medium',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -482,27 +488,29 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
 
       await forceSchedulerTick();
 
       expect(agentQueue.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          userEmail: 'automation@test.com',
+          userEmail: 'user@test.com',
+          tenantId: 'user@test.com',
         })
       );
     });
 
     it('handles enqueue errors gracefully', async () => {
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@test.com');
-      vi.mocked(getAllTasks).mockResolvedValue([
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
           id: 'task-1',
           title: 'Task 1',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'medium',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -510,10 +518,10 @@ describe('scheduler', () => {
           id: 'task-2',
           title: 'Task 2',
           status: 'todo',
-          assignee: 'user@test.com',
+          assignee: 'agent@test.com',
           priority: 'medium',
           description: 'Test',
-          tenant_id: 'default',
+          user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -526,6 +534,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
       vi.mocked(agentQueue.enqueue)
         .mockRejectedValueOnce(new Error('Enqueue failed'))
         .mockResolvedValueOnce(undefined as any);
@@ -533,6 +542,303 @@ describe('scheduler', () => {
       await expect(forceSchedulerTick()).resolves.not.toThrow();
 
       expect(agentQueue.enqueue).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips stuck tasks with too many recent completed runs', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'stuck-task',
+          title: 'Stuck Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 3 completed runs in the last 30 minutes
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', created_at: new Date().toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('allows tasks with fewer than 3 recent runs', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'ok-task',
+          title: 'OK Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // Only 2 completed runs — under threshold
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', created_at: new Date().toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not skip tasks whose only jobs are completed', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Testing Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [{ taskId: 'task-1', status: 'completed' } as any],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 1,
+        failed: 0,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'task-1', agentType: 'qa' })
+      );
+    });
+
+    it('does not skip tasks whose only jobs are failed', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Failed Task',
+          status: 'in_progress',
+          assignee: 'agent@test.com',
+          priority: 'medium',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [{ taskId: 'task-1', status: 'failed' } as any],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 1,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'task-1', agentType: 'developer' })
+      );
+    });
+
+    it('still skips tasks with a running job', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Running Task',
+          status: 'in_progress',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [{ taskId: 'task-1', status: 'running' } as any],
+        activeRuns: [],
+        pending: 0,
+        running: 1,
+        completed: 0,
+        failed: 0,
+      });
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('ignores old completed runs outside 30min window', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'old-runs-task',
+          title: 'Old Runs Task',
+          status: 'testing',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // 3 completed runs but all older than 30 minutes
+      const oldDate = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+        { status: 'completed', created_at: oldDate },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('processes multiple users independently', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([
+        { email: 'alice@test.com' },
+        { email: 'bob@test.com' },
+      ]);
+      vi.mocked(getTasksByUserEmail).mockImplementation(async (email: string) => {
+        if (email === 'alice@test.com') {
+          return [{
+            id: 'alice-task',
+            title: 'Alice Task',
+            status: 'todo',
+            assignee: 'Simon',
+            priority: 'high',
+            description: 'Test',
+            user_email: 'alice@test.com',
+            created_at: new Date(),
+            updated_at: new Date(),
+          }] as any;
+        }
+        return [{
+          id: 'bob-task',
+          title: 'Bob Task',
+          status: 'in_review',
+          assignee: 'Simon',
+          priority: 'low',
+          description: 'Test',
+          user_email: 'bob@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }] as any;
+      });
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(2);
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'alice-task',
+        agentType: 'developer',
+        tenantId: 'alice@test.com',
+        userEmail: 'alice@test.com',
+      }));
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'bob-task',
+        agentType: 'reviewer',
+        tenantId: 'bob@test.com',
+        userEmail: 'bob@test.com',
+      }));
+    });
+
+    it('one user error does not affect other users', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([
+        { email: 'failing@test.com' },
+        { email: 'ok@test.com' },
+      ]);
+      vi.mocked(getTasksByUserEmail).mockImplementation(async (email: string) => {
+        if (email === 'failing@test.com') {
+          throw new Error('DB error for user');
+        }
+        return [{
+          id: 'ok-task',
+          title: 'OK Task',
+          status: 'todo',
+          assignee: 'Simon',
+          priority: 'medium',
+          description: 'Test',
+          user_email: 'ok@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }] as any;
+      });
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await expect(forceSchedulerTick()).resolves.not.toThrow();
+
+      // ok@test.com's task should still be enqueued
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'ok-task',
+        userEmail: 'ok@test.com',
+      }));
     });
   });
 });

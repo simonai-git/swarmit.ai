@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
     // tenantId is optional - if not provided, returns global status
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get('tenantId') || undefined;
-    
-    const status = await agentQueue.getStatus();
+
+    const status = await agentQueue.getStatus(tenantId);
     
     // Get today's spend
     let todaySpend = 0;

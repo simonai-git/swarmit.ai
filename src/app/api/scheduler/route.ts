@@ -5,10 +5,17 @@ import { agentQueue } from '@/lib/agent-queue';
 // GET /api/scheduler - Get scheduler status
 export async function GET() {
   const schedulerStatus = getSchedulerStatus();
+
+  // Self-healing: auto-start scheduler if it's not running
+  if (!schedulerStatus.isRunning) {
+    console.log('[Scheduler API] Scheduler not running, auto-starting...');
+    startScheduler();
+  }
+
   const queueStatus = await agentQueue.getStatus();
-  
+
   return NextResponse.json({
-    scheduler: schedulerStatus,
+    scheduler: { ...getSchedulerStatus() },
     queue: {
       jobsQueued: queueStatus.jobs.length,
       activeRuns: queueStatus.activeRuns.length,

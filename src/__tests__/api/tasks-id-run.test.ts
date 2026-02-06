@@ -136,7 +136,7 @@ describe('API /api/tasks/[id]/run', () => {
         taskId: 'task-123',
         agentType: 'developer',
         priority: 10, // high priority
-        tenantId: 'default',
+        tenantId: 'test@example.com',
         userEmail: 'test@example.com',
       });
     });

@@ -106,13 +106,13 @@ export async function PATCH(
     
     // Trigger lifecycle automation hooks
     if (body.status && body.status !== oldTask.status) {
-      onTaskStatusChanged(task as Task, oldTask.status, body.status).catch(err => {
+      onTaskStatusChanged(task as Task, oldTask.status, body.status, task.user_email || undefined).catch(err => {
         console.error('Status change lifecycle hook error:', err);
       });
     }
-    
+
     if (body.assignee && body.assignee !== oldTask.assignee) {
-      onTaskAssigned(task as Task, oldTask.assignee, body.assignee).catch(err => {
+      onTaskAssigned(task as Task, oldTask.assignee, body.assignee, task.user_email || undefined).catch(err => {
         console.error('Assignment lifecycle hook error:', err);
       });
     }

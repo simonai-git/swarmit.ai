@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTasks, getWatcherConfig, getAutomationUserEmail } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserEmail } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 // Verify API key
@@ -9,7 +9,7 @@ function verifyApiKey(request: NextRequest): boolean {
   // Also allow cron secret for Railway cron jobs
   const cronSecret = request.headers.get('x-cron-secret');
   const validCronSecret = process.env.CRON_SECRET;
-  
+
   return apiKey === validKey || (!!cronSecret && cronSecret === validCronSecret);
 }
 
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const config = await getWatcherConfig();
-    
+
     // If watcher is disabled, do nothing
     if (!config.is_running) {
       return NextResponse.json({
@@ -32,8 +32,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Get the automation user for Claude API key lookup
-    const automationUserEmail = await getAutomationUserEmail();
+    // Get all users with Claude API keys for multi-tenant processing
+    const users = await getUsersWithApiKeys();
 
     const results = {
       processed: 0,
@@ -41,56 +41,58 @@ export async function POST(request: NextRequest) {
       errors: [] as string[],
     };
 
-    // Step 1: Check for TODO tasks that need to be enqueued
-    const tasks = await getAllTasks();
-    const todoTasks = tasks.filter(t => t.status === 'todo');
-    
-    // Get current queue status to avoid double-enqueueing
-    const queueStatus = await agentQueue.getStatus();
-    const queuedTaskIds = new Set(queueStatus.jobs.map(j => j.taskId));
-    
-    for (const task of todoTasks) {
-      // Skip if already in queue
-      if (queuedTaskIds.has(task.id)) continue;
-      
-      try {
-        // Determine priority
-        const priorityMap: Record<string, number> = { high: 10, medium: 5, low: 1 };
-        const priority = priorityMap[task.priority] || 5;
-        
-        await agentQueue.enqueue({
-          taskId: task.id,
-          agentType: 'developer',
-          priority,
-          userEmail: automationUserEmail,
-        });
-        results.enqueued++;
-        console.log(`[Watcher] Enqueued task ${task.id}: ${task.title}`);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        results.errors.push(`Failed to enqueue ${task.id}: ${msg}`);
+    // Step 1: Process each user's TODO tasks
+    for (const user of users) {
+      const tasks = await getTasksByUserEmail(user.email);
+      const todoTasks = tasks.filter(t => t.status === 'todo');
+
+      // Get queue status scoped to this user to avoid double-enqueueing
+      const queueStatus = await agentQueue.getStatus(user.email);
+      const queuedTaskIds = new Set(
+        queueStatus.jobs
+          .filter(j => ['pending', 'running'].includes(j.status))
+          .map(j => j.taskId)
+      );
+
+      for (const task of todoTasks) {
+        if (queuedTaskIds.has(task.id)) continue;
+
+        try {
+          const priorityMap: Record<string, number> = { high: 10, medium: 5, low: 1 };
+          const priority = priorityMap[task.priority] || 5;
+
+          await agentQueue.enqueue({
+            taskId: task.id,
+            agentType: 'developer',
+            priority,
+            tenantId: user.email,
+            userEmail: user.email,
+          });
+          results.enqueued++;
+          console.log(`[Watcher] Enqueued task ${task.id}: ${task.title} for ${user.email}`);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          results.errors.push(`Failed to enqueue ${task.id}: ${msg}`);
+        }
       }
     }
 
     // Step 2: Process pending jobs in the queue
-    // In serverless, we process jobs inline rather than relying on intervals
-    const maxToProcess = 3; // Process up to 3 jobs per poll
-    
+    const maxToProcess = 3;
+
     for (let i = 0; i < maxToProcess; i++) {
       const status = await agentQueue.getStatus();
       const pendingJob = status.jobs.find(j => j.status === 'pending');
-      
+
       if (!pendingJob) break;
-      
-      // Note: The actual job processing happens via the agent queue's internal
-      // mechanism. We just need to ensure startProcessing has been called.
-      // The queue will process jobs on its interval.
+
       results.processed++;
     }
 
     // Trigger queue processing (in case it's not running)
     agentQueue.startProcessing();
 
+    const queueStatus = await agentQueue.getStatus();
     return NextResponse.json({
       success: true,
       message: `Processed ${results.processed} jobs, enqueued ${results.enqueued} tasks`,
