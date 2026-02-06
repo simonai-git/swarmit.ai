@@ -12,6 +12,7 @@ interface TaskCardProps {
   onView: (task: Task) => void;
   isActive?: boolean;
   projectName?: string;
+  dependencyCount?: number;
 }
 
 const priorityConfig = {
@@ -49,7 +50,7 @@ function isDateOverdue(dueDateStr: string): boolean {
 }
 
 // Memoized TaskCard to prevent re-renders when task data hasn't changed
-const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActive = false, projectName }: TaskCardProps) {
+const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActive = false, projectName, dependencyCount = 0 }: TaskCardProps) {
   // Defer overdue check to client-side only to avoid hydration mismatch
   // (server runs in UTC, client runs in user's local time)
   // Use useMemo instead of useState+useEffect to avoid cascading renders
@@ -169,6 +170,16 @@ const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActi
             <span className={`w-1.5 h-1.5 rounded-full ${priority.dot}`} />
             <span className="hidden xs:inline">{task.priority}</span>
           </span>
+
+          {/* Dependency count */}
+          {dependencyCount > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border bg-blue-500/20 text-blue-400 border-blue-500/30" title={`${dependencyCount} ${dependencyCount === 1 ? 'dependency' : 'dependencies'}`}>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              {dependencyCount}
+            </span>
+          )}
           
           {/* Time estimate */}
           {task.estimated_hours && (
@@ -220,6 +231,7 @@ const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActi
   return (
     prevProps.isActive === nextProps.isActive &&
     prevProps.projectName === nextProps.projectName &&
+    prevProps.dependencyCount === nextProps.dependencyCount &&
     prevTask.id === nextTask.id &&
     prevTask.title === nextTask.title &&
     prevTask.description === nextTask.description &&
