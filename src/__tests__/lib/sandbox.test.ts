@@ -52,7 +52,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 vi.mock('uuid', () => ({
-  v4: vi.fn(() => 'test-uuid'),
+  v4: vi.fn(() => 'abcd1234-5678-90ef-ghij-klmnopqrstuv'),
 }));
 
 import { SubprocessSandbox, AGENT_TOOLKITS, isDockerAvailable } from '@/lib/sandbox';
@@ -123,9 +123,9 @@ describe('SubprocessSandbox', () => {
 
       expect(fs.mkdir).toHaveBeenCalled();
       const mkdirCall = vi.mocked(fs.mkdir).mock.calls[0];
-      expect(mkdirCall[0]).toMatch(/\/tmp\/swarmit-test-tas-test-uuid/);
+      expect(mkdirCall[0]).toMatch(/\/tmp\/swarmit-test-tas-abcd1234/);
       expect(mkdirCall[1]).toEqual({ recursive: true });
-      expect(sandbox.getWorkdir()).toMatch(/\/tmp\/swarmit-test-tas-test-uuid/);
+      expect(sandbox.getWorkdir()).toMatch(/\/tmp\/swarmit-test-tas-abcd1234/);
     });
 
     it('should apply toolkit env vars when agentType is set', async () => {
@@ -143,7 +143,9 @@ describe('SubprocessSandbox', () => {
       const mockChild = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
-        on: vi.fn(),
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
+          if (event === 'close') handler(0);
+        }),
         kill: vi.fn(),
       };
       vi.mocked(spawn).mockReturnValue(mockChild as any);
@@ -153,13 +155,6 @@ describe('SubprocessSandbox', () => {
       sandbox = new SubprocessSandbox(config);
 
       await sandbox.initialize();
-
-      // Trigger the close event to complete the exec
-      const closeHandler = mockChild.on.mock.calls.find(c => c[0] === 'close')?.[1];
-      if (closeHandler) closeHandler(0);
-
-      // Wait for async operations
-      await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(spawn).toHaveBeenCalled();
       const spawnCall = vi.mocked(spawn).mock.calls[0];
@@ -283,7 +278,7 @@ describe('SubprocessSandbox', () => {
       const content = await sandbox.readFile('test.txt');
 
       expect(fs.readFile).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tmp\/swarmit-test-tas-test-uuid\/test\.txt/),
+        expect.stringMatching(/\/tmp\/swarmit-test-tas-abcd1234\/test\.txt/),
         'utf-8'
       );
       expect(content).toBe('file content');
@@ -300,7 +295,7 @@ describe('SubprocessSandbox', () => {
       const content = await sandbox.readFile(`${workdir}/test.txt`);
 
       expect(fs.readFile).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tmp\/swarmit-test-tas-test-uuid\/test\.txt/),
+        expect.stringMatching(/\/tmp\/swarmit-test-tas-abcd1234\/test\.txt/),
         'utf-8'
       );
       expect(content).toBe('file content');
@@ -332,7 +327,7 @@ describe('SubprocessSandbox', () => {
 
       expect(fs.mkdir).toHaveBeenCalled();
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tmp\/swarmit-test-tas-test-uuid\/test\.txt/),
+        expect.stringMatching(/\/tmp\/swarmit-test-tas-abcd1234\/test\.txt/),
         'content',
         'utf-8'
       );
@@ -364,7 +359,7 @@ describe('SubprocessSandbox', () => {
       await sandbox.writeFile(`${workdir}/test.txt`, 'content');
 
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tmp\/swarmit-test-tas-test-uuid\/test\.txt/),
+        expect.stringMatching(/\/tmp\/swarmit-test-tas-abcd1234\/test\.txt/),
         'content',
         'utf-8'
       );
@@ -537,7 +532,7 @@ describe('SubprocessSandbox', () => {
 
       const workdir = sandbox.getWorkdir();
 
-      expect(workdir).toMatch(/\/tmp\/swarmit-test-tas-test-uuid/);
+      expect(workdir).toMatch(/\/tmp\/swarmit-test-tas-abcd1234/);
     });
   });
 });
