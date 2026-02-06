@@ -66,7 +66,9 @@ class TaskLogBuffer {
 
   start(): void {
     if (this.flushTimer) return;
-    this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
+    this.flushTimer = setInterval(() => {
+      this.flush().catch(err => console.error('[TaskLogBuffer] Flush error:', err));
+    }, FLUSH_INTERVAL_MS);
   }
 
   stop(): void {
@@ -74,11 +76,27 @@ class TaskLogBuffer {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    // Final flush
-    this.flush();
+    // Fire-and-forget final flush (backward compat)
+    this.flush().catch(err => console.error('[TaskLogBuffer] Final flush error:', err));
   }
 
-  private flush(): void {
+  async flushAsync(): Promise<void> {
+    await this.flush();
+  }
+
+  async stopAsync(): Promise<void> {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.flush();
+  }
+
+  clearTask(taskId: string): void {
+    this.buffer.delete(taskId);
+  }
+
+  private async flush(): Promise<void> {
     if (this.pendingFlush.length === 0) return;
 
     const batch = this.pendingFlush.splice(0);
@@ -90,9 +108,13 @@ class TaskLogBuffer {
       content: e.content,
     }));
 
-    appendTaskLogBatch(dbLogs).catch(err => {
+    try {
+      await appendTaskLogBatch(dbLogs);
+    } catch (err) {
       console.error('[TaskLogBuffer] Failed to flush logs to DB:', err);
-    });
+      // Restore entries so they aren't lost
+      this.pendingFlush.unshift(...batch);
+    }
   }
 }
 

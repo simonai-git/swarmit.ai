@@ -19,6 +19,9 @@ export async function GET(
     });
   }
 
+  const { searchParams } = new URL(request.url);
+  const runId = searchParams.get('runId') || undefined;
+
   const encoder = new TextEncoder();
   const isClosed = { value: false };
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -56,21 +59,34 @@ export async function GET(
       };
 
       // 1. Send historical logs from DB
+      let lastDbTs = 0;
       try {
-        const historyLogs = await getTaskLogs(taskId, { limit: 500 });
+        const historyLogs = await getTaskLogs(taskId, { limit: 500, runId });
+        if (historyLogs.length > 0) {
+          const lastLog = historyLogs[historyLogs.length - 1];
+          lastDbTs = new Date(lastLog.created_at).getTime();
+        }
         if (!enqueue(`event: history\ndata: ${JSON.stringify(historyLogs)}\n\n`)) return;
       } catch (err) {
         console.error('[LogsSSE] Failed to load history:', err);
       }
 
-      // 2. Send any buffered entries not yet flushed to DB
+      // 2. Send any buffered entries not yet flushed to DB (deduplicated)
       const buffered = taskLogBuffer.getBuffered(taskId);
-      if (buffered.length > 0) {
-        if (!enqueue(`event: buffered\ndata: ${JSON.stringify(buffered)}\n\n`)) return;
+      const deduped = buffered.filter(e => {
+        // Filter by runId if specified
+        if (runId && e.run_id !== runId) return false;
+        // Only include entries newer than the last DB entry
+        return e.timestamp > lastDbTs;
+      });
+      if (deduped.length > 0) {
+        if (!enqueue(`event: buffered\ndata: ${JSON.stringify(deduped)}\n\n`)) return;
       }
 
       // 3. Subscribe to live log entries
       unsubscribe = taskLogBuffer.subscribe(taskId, (entry: BufferedLogEntry) => {
+        // Filter by runId if specified
+        if (runId && entry.run_id !== runId) return;
         enqueue(`event: log\ndata: ${JSON.stringify(entry)}\n\n`);
       });
 

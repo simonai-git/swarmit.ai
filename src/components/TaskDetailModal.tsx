@@ -508,7 +508,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
             )}
-            <span>Live Logs</span>
+            <span>Run Logs</span>
           </button>
         </div>
 

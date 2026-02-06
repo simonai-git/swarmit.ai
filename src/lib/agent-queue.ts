@@ -601,6 +601,9 @@ class AgentQueue {
       });
       // Save run to database
       await saveAgentRun(run);
+      // Flush all pending logs to DB so they're visible in the modal
+      await taskLogBuffer.flushAsync();
+      taskLogBuffer.clearTask(job.taskId);
       // Keep in memory briefly, then cleanup
       setTimeout(() => this.running.delete(run.id), 3600000);
     }
