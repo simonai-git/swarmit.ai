@@ -548,8 +548,17 @@ export default function KanbanBoard() {
               <span className="text-base sm:text-lg">📊</span>
               <span className="hidden sm:inline">Runs</span>
             </Link>
+
+            {/* Dashboard Button */}
+            <Link
+              href="/dashboard"
+              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
+            >
+              <span className="text-base sm:text-lg">📈</span>
+              <span className="hidden sm:inline">Dashboard</span>
+            </Link>
           </div>
-          
+
           <div className="flex items-center gap-2">
             {/* Search Bar - Hidden on mobile, visible on md+ */}
             <div className="relative hidden md:block">
