@@ -214,6 +214,160 @@ const AGENT_TOOLS: AnyTool[] = [
   }
 ];
 
+// Claude Code-compatible tool definitions for OAT mode
+const CLAUDE_CODE_TOOLS: AnyTool[] = [
+  {
+    name: 'Bash',
+    description: 'Execute a shell command in the sandbox environment',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'The command to execute' },
+        description: { type: 'string', description: 'Short description of what this command does' },
+        timeout: { type: 'number', description: 'Timeout in milliseconds' },
+      },
+      required: ['command']
+    }
+  },
+  {
+    name: 'Read',
+    description: 'Read a file from the filesystem',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Path to the file to read' },
+        offset: { type: 'number', description: 'Line number to start reading from' },
+        limit: { type: 'number', description: 'Number of lines to read' },
+      },
+      required: ['file_path']
+    }
+  },
+  {
+    name: 'Write',
+    description: 'Write content to a file, creating it if necessary',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Path to the file to write' },
+        content: { type: 'string', description: 'The content to write' },
+      },
+      required: ['file_path', 'content']
+    }
+  },
+  {
+    name: 'Edit',
+    description: 'Perform an exact string replacement in a file',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Path to the file to edit' },
+        old_string: { type: 'string', description: 'The exact text to replace' },
+        new_string: { type: 'string', description: 'The replacement text' },
+      },
+      required: ['file_path', 'old_string', 'new_string']
+    }
+  },
+  {
+    name: 'Glob',
+    description: 'Find files matching a glob pattern',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Glob pattern to match files' },
+        path: { type: 'string', description: 'Directory to search in' },
+      },
+      required: ['pattern']
+    }
+  },
+  {
+    name: 'Grep',
+    description: 'Search file contents using regex',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Regex pattern to search for' },
+        path: { type: 'string', description: 'File or directory to search in' },
+        output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'], description: 'Output format' },
+      },
+      required: ['pattern']
+    }
+  },
+  // Task management tools (same as standard)
+  {
+    name: 'update_task',
+    description: 'Update task status or agent context',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['in_progress', 'testing', 'in_review', 'done'] },
+        agent_context: { type: 'string' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'add_comment',
+    description: 'Add comment to the task',
+    parameters: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content']
+    }
+  },
+  {
+    name: 'task_complete',
+    description: 'Signal task completion',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        files_changed: { type: 'array', items: { type: 'string' } },
+        next_status: { type: 'string', enum: ['testing', 'in_review', 'done'] }
+      },
+      required: ['summary', 'next_status']
+    }
+  }
+];
+
+// Returns appropriate tool set based on whether we're using OAT
+function getToolsForMode(usingOAT: boolean): AnyTool[] {
+  return usingOAT ? CLAUDE_CODE_TOOLS : AGENT_TOOLS;
+}
+
+// Build OAT-specific system prompt with Claude Code formatting
+function buildOATSystemPrompt(context: AgentContext): string {
+  const agentType = context.agentConfig?.name?.toLowerCase() || 'developer';
+  const basePrompt = context.agentConfig?.systemPrompt ||
+    AGENT_PROMPTS[agentType as keyof typeof AGENT_PROMPTS] ||
+    AGENT_PROMPTS.developer;
+
+  return `${CLAUDE_CODE_IDENTITY}
+
+${basePrompt}
+
+# Environment
+- Working directory: /workspace
+- Platform: linux
+- You have access to Bash, Read, Write, Edit, Glob, and Grep tools
+
+# Current Task
+- **ID:** ${context.task.id}
+- **Title:** ${context.task.title}
+- **Status:** ${context.task.status}
+${context.task.description ? `- **Description:** ${context.task.description}` : ''}
+
+${context.agentMemory ? `# Previous Notes\n${context.agentMemory}\n` : ''}
+
+# Instructions
+- Use Read to examine files before editing
+- Use Edit for precise string replacements in existing files
+- Use Write only for new files
+- Use Glob to find files by pattern
+- Use Grep to search file contents
+- Use Bash for running commands, tests, and git operations
+- Call task_complete when done`;
+}
+
 // Default agent prompts
 export const AGENT_PROMPTS = {
   developer: `You are a senior software developer. Analyze requirements, write clean code, test changes, move task to 'testing' when done.`,
@@ -274,7 +428,7 @@ export interface TaskAPI {
   addComment(taskId: string, author: string, content: string): Promise<void>;
 }
 
-// Execute tool
+// Execute tool (handles both standard and Claude Code tool names)
 async function executeTool(
   toolName: string,
   toolInput: Record<string, unknown>,
@@ -321,6 +475,57 @@ async function executeTool(
       case 'git_push':
         await executor.gitPush(toolInput.branch as string);
         return 'Pushed';
+
+      // Claude Code-compatible tools
+      case 'Bash': {
+        const r = await executor.execCommand(toolInput.command as string);
+        return `Exit: ${r.exitCode}\n${r.stdout}\n${r.stderr}`;
+      }
+      case 'Read': {
+        return await executor.readFile(toolInput.file_path as string);
+      }
+      case 'Write': {
+        await executor.writeFile(toolInput.file_path as string, toolInput.content as string);
+        return `Written: ${toolInput.file_path}`;
+      }
+      case 'Edit': {
+        // Read-modify-write for precise edits
+        const filePath = toolInput.file_path as string;
+        const oldStr = toolInput.old_string as string;
+        const newStr = toolInput.new_string as string;
+        const content = await executor.readFile(filePath);
+        if (!content.includes(oldStr)) {
+          return `Error: old_string not found in ${filePath}`;
+        }
+        const updated = content.replace(oldStr, newStr);
+        await executor.writeFile(filePath, updated);
+        return `Edited: ${filePath}`;
+      }
+      case 'Glob': {
+        const dir = (toolInput.path as string) || '.';
+        const files = await executor.listFiles(dir, true);
+        const pattern = toolInput.pattern as string;
+        // Simple glob matching: convert glob to regex
+        const regex = new RegExp(
+          pattern.replace(/\*\*/g, '___DOUBLESTAR___')
+            .replace(/\*/g, '[^/]*')
+            .replace(/___DOUBLESTAR___/g, '.*')
+            .replace(/\?/g, '.')
+        );
+        const matched = files.filter(f => regex.test(f));
+        return matched.join('\n') || 'No files matched';
+      }
+      case 'Grep': {
+        const dir = (toolInput.path as string) || '.';
+        const grepPattern = toolInput.pattern as string;
+        const mode = (toolInput.output_mode as string) || 'content';
+        const r = await executor.execCommand(
+          `grep -r${mode === 'files_with_matches' ? 'l' : mode === 'count' ? 'c' : 'n'} "${grepPattern.replace(/"/g, '\\"')}" "${dir}" 2>/dev/null | head -100`
+        );
+        return r.stdout || 'No matches found';
+      }
+
+      // Task management tools (shared)
       case 'update_task': {
         const updates: Partial<Task> = {};
         if (toolInput.status) updates.status = toolInput.status as Task['status'];
@@ -365,8 +570,11 @@ export async function runAgent(
   console.log(`[Claude] Using pi-ai with ${usingOAT ? 'OAT token' : 'regular API key'}`);
   
   const model = createModel(modelId);
-  const systemPrompt = buildSystemPrompt(context, usingOAT);
-  
+  const systemPrompt = usingOAT
+    ? buildOATSystemPrompt(context)
+    : buildSystemPrompt(context, false);
+  const tools = getToolsForMode(usingOAT);
+
   // Build messages in pi-ai format
   const messages: Message[] = [
     {
@@ -389,7 +597,7 @@ export async function runAgent(
     const streamContext: any = {
       systemPrompt,
       messages,
-      tools: AGENT_TOOLS // Re-enabled with Claude Code naming
+      tools,
     };
 
     try {
@@ -462,6 +670,9 @@ export async function runAgent(
           if (tc.name === 'write_file' && tc.arguments.path) {
             filesChanged.push(tc.arguments.path as string);
           }
+          if ((tc.name === 'Write' || tc.name === 'Edit') && tc.arguments.file_path) {
+            filesChanged.push(tc.arguments.file_path as string);
+          }
         }
       }
 
@@ -521,4 +732,4 @@ export function calculateCost(inputTokens: number, outputTokens: number, model: 
   return Math.ceil((inputTokens / 1_000_000) * p.input * 100 + (outputTokens / 1_000_000) * p.output * 100);
 }
 
-export { AGENT_TOOLS, buildSystemPrompt, buildTaskPrompt };
+export { AGENT_TOOLS, CLAUDE_CODE_TOOLS, buildSystemPrompt, buildTaskPrompt, buildOATSystemPrompt, getToolsForMode };
