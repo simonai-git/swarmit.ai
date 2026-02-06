@@ -411,6 +411,79 @@ export async function getAllTasks(): Promise<Task[]> {
   return result.rows;
 }
 
+export interface SearchFilters {
+  q?: string;
+  status?: string;
+  assignee?: string;
+  priority?: string;
+  project_id?: string;
+  is_blocked?: string;
+}
+
+export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
+  const conditions: string[] = [];
+  const values: (string | boolean)[] = [];
+  let paramIndex = 1;
+
+  if (filters.q) {
+    conditions.push(`(LOWER(title) LIKE $${paramIndex} OR LOWER(description) LIKE $${paramIndex} OR LOWER(id) LIKE $${paramIndex})`);
+    values.push(`%${filters.q.toLowerCase()}%`);
+    paramIndex++;
+  }
+
+  if (filters.status) {
+    const statuses = filters.status.split(',').map(s => s.trim());
+    conditions.push(`status = ANY($${paramIndex})`);
+    values.push(statuses as unknown as string);
+    paramIndex++;
+  }
+
+  if (filters.assignee) {
+    if (filters.assignee === 'unassigned') {
+      conditions.push(`assignee IS NULL`);
+    } else {
+      conditions.push(`assignee = $${paramIndex}`);
+      values.push(filters.assignee);
+      paramIndex++;
+    }
+  }
+
+  if (filters.priority) {
+    conditions.push(`priority = $${paramIndex}`);
+    values.push(filters.priority);
+    paramIndex++;
+  }
+
+  if (filters.project_id) {
+    if (filters.project_id === 'none') {
+      conditions.push(`project_id IS NULL`);
+    } else {
+      conditions.push(`project_id = $${paramIndex}`);
+      values.push(filters.project_id);
+      paramIndex++;
+    }
+  }
+
+  if (filters.is_blocked === 'true') {
+    conditions.push(`is_blocked = TRUE`);
+  } else if (filters.is_blocked === 'false') {
+    conditions.push(`(is_blocked = FALSE OR is_blocked IS NULL)`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const result = await pool.query(`
+    SELECT id, title, description, status, assignee, priority, due_date,
+           estimated_hours, time_spent, progress, is_blocked, blocked_reason,
+           created_at, updated_at, project_id, COALESCE(worked_by, '[]') as worked_by,
+           CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
+    FROM tasks
+    ${whereClause}
+    ORDER BY updated_at DESC
+  `, values);
+  return result.rows;
+}
+
 export async function getTask(id: string): Promise<Task | null> {
   const result = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
   return result.rows[0] || null;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTasks, createTask, Task } from '@/lib/db';
+import { getAllTasks, searchTasks, createTask, Task } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
 import { onTaskCreated, selectSpecialist } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
@@ -7,16 +7,36 @@ import { v4 as uuidv4 } from 'uuid';
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
+    const q = searchParams.get('q');
     const status = searchParams.get('status');
-    
-    let tasks = await getAllTasks();
-    
-    // Filter by status if provided (supports comma-separated values)
-    if (status) {
-      const statuses = status.split(',').map(s => s.trim());
-      tasks = tasks.filter(task => statuses.includes(task.status));
+    const assignee = searchParams.get('assignee');
+    const priority = searchParams.get('priority');
+    const project_id = searchParams.get('project_id');
+    const is_blocked = searchParams.get('is_blocked');
+
+    // Use server-side search if any filter params are provided
+    const hasFilters = q || assignee || priority || project_id || is_blocked;
+
+    let tasks;
+    if (hasFilters) {
+      tasks = await searchTasks({
+        q: q || undefined,
+        status: status || undefined,
+        assignee: assignee || undefined,
+        priority: priority || undefined,
+        project_id: project_id || undefined,
+        is_blocked: is_blocked || undefined,
+      });
+    } else {
+      tasks = await getAllTasks();
+
+      // Filter by status if provided (supports comma-separated values)
+      if (status) {
+        const statuses = status.split(',').map(s => s.trim());
+        tasks = tasks.filter(task => statuses.includes(task.status));
+      }
     }
-    
+
     return NextResponse.json(tasks, {
       headers: {
         'Cache-Control': 'private, max-age=5, stale-while-revalidate=10',

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   DndContext,
   DragEndEvent,
@@ -146,20 +147,84 @@ export default function KanbanBoard() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskTitle: string }>({ isOpen: false, taskId: null, taskTitle: '' });
   const [isDeleting, setIsDeleting] = useState(false);
   const [dependencyCounts, setDependencyCounts] = useState<Record<string, number>>({});
+  const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [projectsList, setProjectsList] = useState<Array<{ id: string; title: string }>>([]);
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
-  // Filter tasks based on search query (matches title, project name, or task ID)
+  // Filter state from URL params
+  const [filterAssignee, setFilterAssignee] = useState(searchParams.get('assignee') || '');
+  const [filterPriority, setFilterPriority] = useState(searchParams.get('priority') || '');
+  const [filterProject, setFilterProject] = useState(searchParams.get('project_id') || '');
+  const [filterBlocked, setFilterBlocked] = useState(searchParams.get('is_blocked') || '');
+
+  // Update URL when filters change
+  const updateFilters = useCallback((updates: Record<string, string>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+    }
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    router.replace(newUrl, { scroll: false });
+  }, [searchParams, router]);
+
+  const hasActiveFilters = filterAssignee || filterPriority || filterProject || filterBlocked;
+
+  const clearAllFilters = useCallback(() => {
+    setFilterAssignee('');
+    setFilterPriority('');
+    setFilterProject('');
+    setFilterBlocked('');
+    router.replace(window.location.pathname, { scroll: false });
+  }, [router]);
+
+  // Filter tasks based on search query and dropdown filters
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return tasks;
-    const query = searchQuery.toLowerCase().trim();
-    return tasks.filter(task => {
-      const titleMatch = task.title.toLowerCase().includes(query);
-      const projectName = task.project_id ? projects.get(task.project_id) : '';
-      const projectMatch = projectName?.toLowerCase().includes(query);
-      const idMatch = task.id.toLowerCase().includes(query);
-      return titleMatch || projectMatch || idMatch;
-    });
-  }, [tasks, searchQuery, projects]);
+    let filtered = tasks;
+
+    // Text search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(task => {
+        const titleMatch = task.title.toLowerCase().includes(query);
+        const projectName = task.project_id ? projects.get(task.project_id) : '';
+        const projectMatch = projectName?.toLowerCase().includes(query);
+        const idMatch = task.id.toLowerCase().includes(query);
+        return titleMatch || projectMatch || idMatch;
+      });
+    }
+
+    // Dropdown filters (client-side for real-time SSE compatibility)
+    if (filterAssignee) {
+      if (filterAssignee === 'unassigned') {
+        filtered = filtered.filter(t => !t.assignee);
+      } else {
+        filtered = filtered.filter(t => t.assignee === filterAssignee);
+      }
+    }
+    if (filterPriority) {
+      filtered = filtered.filter(t => t.priority === filterPriority);
+    }
+    if (filterProject) {
+      if (filterProject === 'none') {
+        filtered = filtered.filter(t => !t.project_id);
+      } else {
+        filtered = filtered.filter(t => t.project_id === filterProject);
+      }
+    }
+    if (filterBlocked === 'true') {
+      filtered = filtered.filter(t => t.is_blocked);
+    } else if (filterBlocked === 'false') {
+      filtered = filtered.filter(t => !t.is_blocked);
+    }
+
+    return filtered;
+  }, [tasks, searchQuery, projects, filterAssignee, filterPriority, filterProject, filterBlocked]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -217,6 +282,7 @@ export default function KanbanBoard() {
     fetchWatcherConfig();
     fetchProjects();
     fetchDependencyCounts();
+    fetchAgentsList();
   }, []);
 
   const fetchDependencyCounts = async () => {
@@ -231,11 +297,22 @@ export default function KanbanBoard() {
     }
   };
 
+  const fetchAgentsList = async () => {
+    try {
+      const res = await fetch('/api/agents');
+      const data = await res.json();
+      setAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })));
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+    }
+  };
+
   const fetchProjects = async () => {
     try {
       const res = await fetch('/api/projects');
       const data: Project[] = await res.json();
       setProjects(new Map(data.map(p => [p.id, p.title])));
+      setProjectsList(data.map(p => ({ id: p.id, title: p.title })));
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -567,6 +644,78 @@ export default function KanbanBoard() {
               )}
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Filter Bar */}
+      <div className="glass rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 mb-3 sm:mb-4 flex items-center gap-2 flex-wrap animate-fade-in">
+        <span className="text-xs text-white/40 mr-1 hidden sm:inline">Filters:</span>
+
+        {/* Assignee */}
+        <select
+          value={filterAssignee}
+          onChange={(e) => { setFilterAssignee(e.target.value); updateFilters({ assignee: e.target.value }); }}
+          className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 cursor-pointer [&>option]:bg-slate-800"
+        >
+          <option value="">All Assignees</option>
+          <option value="unassigned">Unassigned</option>
+          <option value="Bogdan">Bogdan</option>
+          {agents.map(a => (
+            <option key={a.id} value={a.name}>{a.name}</option>
+          ))}
+        </select>
+
+        {/* Priority */}
+        <select
+          value={filterPriority}
+          onChange={(e) => { setFilterPriority(e.target.value); updateFilters({ priority: e.target.value }); }}
+          className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 cursor-pointer [&>option]:bg-slate-800"
+        >
+          <option value="">All Priorities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+
+        {/* Project */}
+        <select
+          value={filterProject}
+          onChange={(e) => { setFilterProject(e.target.value); updateFilters({ project_id: e.target.value }); }}
+          className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 cursor-pointer [&>option]:bg-slate-800"
+        >
+          <option value="">All Projects</option>
+          <option value="none">No Project</option>
+          {projectsList.map(p => (
+            <option key={p.id} value={p.id}>{p.title}</option>
+          ))}
+        </select>
+
+        {/* Blocked */}
+        <select
+          value={filterBlocked}
+          onChange={(e) => { setFilterBlocked(e.target.value); updateFilters({ is_blocked: e.target.value }); }}
+          className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 cursor-pointer [&>option]:bg-slate-800"
+        >
+          <option value="">All Status</option>
+          <option value="true">Blocked</option>
+          <option value="false">Not Blocked</option>
+        </select>
+
+        {/* Clear filters */}
+        {hasActiveFilters && (
+          <button
+            onClick={clearAllFilters}
+            className="text-xs text-white/50 hover:text-white/80 px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            Clear all
+          </button>
+        )}
+
+        {/* Active filter count */}
+        {hasActiveFilters && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-full ml-auto">
+            {[filterAssignee, filterPriority, filterProject, filterBlocked].filter(Boolean).length} active
+          </span>
         )}
       </div>
 
