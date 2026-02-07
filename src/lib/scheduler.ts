@@ -7,6 +7,10 @@ import { taskLogBuffer } from './task-log-buffer';
 let isSchedulerRunning = false;
 let scheduledTask: ScheduledTask | null = null;
 
+// Track the last successful tick for staleness detection and self-healing
+let lastTickTime: number = 0;
+const STALE_THRESHOLD_MS = 120000; // 2 minutes — if no tick for this long, scheduler is stale
+
 // Track tasks we've already enqueued this cycle, per user
 const recentlyEnqueued = new Map<string, Set<string>>();
 
@@ -171,6 +175,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
 async function schedulerTick(): Promise<void> {
   const timestamp = new Date().toISOString();
   console.log(`[Scheduler] Tick at ${timestamp}`);
+  lastTickTime = Date.now();
 
   try {
     // Get all users with Claude API keys
@@ -258,6 +263,7 @@ export function stopScheduler(): void {
   }
   taskLogBuffer.stop();
   isSchedulerRunning = false;
+  lastTickTime = 0;
   recentlyEnqueued.clear();
   console.log('[Scheduler] Scheduler stopped');
 }
@@ -272,6 +278,7 @@ export async function stopSchedulerAsync(): Promise<void> {
   }
   await taskLogBuffer.stopAsync();
   isSchedulerRunning = false;
+  lastTickTime = 0;
   recentlyEnqueued.clear();
   console.log('[Scheduler] Scheduler stopped (async)');
 }
@@ -282,14 +289,22 @@ export async function stopSchedulerAsync(): Promise<void> {
 export function getSchedulerStatus(): {
   isRunning: boolean;
   recentlyEnqueuedCount: number;
+  lastTickTime: number;
+  lastTickAgo: number;
+  isStale: boolean;
 } {
   let total = 0;
   for (const set of recentlyEnqueued.values()) {
     total += set.size;
   }
+  const now = Date.now();
+  const lastTickAgo = lastTickTime > 0 ? now - lastTickTime : -1;
   return {
     isRunning: isSchedulerRunning,
     recentlyEnqueuedCount: total,
+    lastTickTime,
+    lastTickAgo,
+    isStale: isSchedulerRunning && lastTickTime > 0 && lastTickAgo > STALE_THRESHOLD_MS,
   };
 }
 

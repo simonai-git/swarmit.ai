@@ -12,6 +12,13 @@ export async function GET() {
     startScheduler();
   }
 
+  // Self-healing: restart scheduler if cron stopped ticking (stale)
+  if (schedulerStatus.isStale) {
+    console.warn(`[Scheduler API] Scheduler stale (last tick ${Math.round(schedulerStatus.lastTickAgo / 1000)}s ago), restarting...`);
+    stopScheduler();
+    startScheduler();
+  }
+
   let queueInfo = { jobsQueued: 0, activeRuns: 0, jobs: [] as unknown[], runs: [] as unknown[] };
   try {
     const queueStatus = await agentQueue.getStatus();
