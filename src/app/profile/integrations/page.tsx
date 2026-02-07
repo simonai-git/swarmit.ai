@@ -424,7 +424,7 @@ export default function IntegrationsPage() {
                     <p className="text-xs text-gray-500 mb-3">
                       Create an <strong className="text-gray-300">Account Token</strong> at{' '}
                       <a
-                        href="https://railway.app/account/tokens"
+                        href="https://railway.com/account/tokens"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-400 hover:underline"
@@ -432,8 +432,9 @@ export default function IntegrationsPage() {
                         Railway Account Settings
                         <ExternalLink className="w-3 h-3 inline ml-1" />
                       </a>
+                      {' '}and select <strong className="text-gray-300">&quot;No workspace&quot;</strong> when creating it.
                       <br />
-                      <span className="text-yellow-500/70">Note: Project-scoped tokens won&apos;t work — an Account Token is required.</span>
+                      <span className="text-yellow-500/70">Note: Workspace and Project tokens won&apos;t work — only Account Tokens have the required access.</span>
                     </p>
                     <input
                       type="password"

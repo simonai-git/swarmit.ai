@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
       if (msg === 'NOT_AUTHORIZED') {
         return NextResponse.json({
           error: 'Token does not have account-level access',
-          message: 'Please create an Account Token at railway.app/account/tokens. Project-scoped tokens cannot access account data.',
+          message: 'Please create an Account Token (not a Workspace or Project token) at railway.com/account/tokens — select "No workspace" when creating it.',
         }, { status: 400 });
       }
       if (msg === 'RAILWAY_UNREACHABLE') {
