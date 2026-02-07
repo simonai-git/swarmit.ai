@@ -49,6 +49,46 @@ describe('scheduler', () => {
       expect(typeof status.isRunning).toBe('boolean');
       expect(typeof status.recentlyEnqueuedCount).toBe('number');
     });
+
+    it('returns lastTickTime, lastTickAgo, and isStale', () => {
+      const status = getSchedulerStatus();
+      expect(status).toHaveProperty('lastTickTime');
+      expect(status).toHaveProperty('lastTickAgo');
+      expect(status).toHaveProperty('isStale');
+    });
+
+    it('updates lastTickTime after a tick', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
+
+      const before = getSchedulerStatus().lastTickTime;
+      await forceSchedulerTick();
+      const after = getSchedulerStatus().lastTickTime;
+
+      expect(after).toBeGreaterThan(before);
+    });
+
+    it('reports isStale=false right after a tick', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
+
+      // Start scheduler so isRunning=true
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [], activeRuns: [], pending: 0, running: 0, completed: 0, failed: 0,
+      });
+      startScheduler();
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const status = getSchedulerStatus();
+      expect(status.isStale).toBe(false);
+    });
+
+    it('resets lastTickTime on stopScheduler', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
+      await forceSchedulerTick();
+      expect(getSchedulerStatus().lastTickTime).toBeGreaterThan(0);
+
+      stopScheduler();
+      expect(getSchedulerStatus().lastTickTime).toBe(0);
+    });
   });
 
   describe('startScheduler', () => {

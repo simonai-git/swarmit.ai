@@ -488,6 +488,29 @@ describe('agent-queue', () => {
     });
   });
 
+  describe('getDefaultNextStatus — pipeline progression', () => {
+    // These tests verify the status progression that triggers next-agent enqueuing
+    // When developer completes: todo/in_progress → testing → QA agent enqueued
+    // When QA completes: testing → in_review → reviewer agent enqueued
+    // When reviewer completes: in_review → done → no agent enqueued
+
+    it('developer completing todo → testing (triggers QA)', () => {
+      expect(getDefaultNextStatus('developer', 'todo')).toBe('testing');
+    });
+
+    it('developer completing in_progress → testing (triggers QA)', () => {
+      expect(getDefaultNextStatus('developer', 'in_progress')).toBe('testing');
+    });
+
+    it('qa completing testing → in_review (triggers reviewer)', () => {
+      expect(getDefaultNextStatus('qa', 'testing')).toBe('in_review');
+    });
+
+    it('reviewer completing in_review → done (no next agent)', () => {
+      expect(getDefaultNextStatus('reviewer', 'in_review')).toBe('done');
+    });
+  });
+
   describe('activeRuns filtering', () => {
     it('getStatus should only return actually running runs, not completed ones', async () => {
       // The running map may contain completed/failed runs that haven't been cleaned up yet

@@ -18,6 +18,18 @@ export function getDefaultNextStatus(agentType: string, currentStatus: string): 
   return null;
 }
 
+/**
+ * Determine the agent type needed for a given task status.
+ * Returns null if no agent should be auto-spawned for this status.
+ */
+function getAgentTypeForNewStatus(status: string): 'developer' | 'qa' | 'reviewer' | null {
+  switch (status) {
+    case 'testing': return 'qa';
+    case 'in_review': return 'reviewer';
+    default: return null; // 'done', 'todo', 'in_progress' — no auto-spawn
+  }
+}
+
 // Legacy interfaces for backward compatibility
 export interface AgentJob {
   id: string;
@@ -641,6 +653,31 @@ class AgentQueue {
         const finalTask = await getTask(job.taskId);
         if (finalTask && finalTask.status === task.status) {
           console.warn(`[Agent] WARNING: Task ${job.taskId.slice(0, 8)} status unchanged after successful ${job.agentType} run (still '${task.status}')`);
+        }
+      }
+
+      // Immediately enqueue the next agent for the new status
+      // This eliminates the dependency on the scheduler for pipeline progression
+      if (result.success) {
+        try {
+          const updatedTask = await getTask(job.taskId);
+          if (updatedTask && updatedTask.status !== task.status) {
+            const nextAgentType = getAgentTypeForNewStatus(updatedTask.status);
+            if (nextAgentType) {
+              const priority = job.priority;
+              console.log(`[Agent] Immediately enqueuing ${nextAgentType} agent for task ${job.taskId.slice(0, 8)} (status: ${updatedTask.status})`);
+              await this.enqueue({
+                taskId: job.taskId,
+                agentType: nextAgentType,
+                priority,
+                tenantId: job.tenantId,
+                userEmail: job.userEmail,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[Agent] Failed to enqueue next agent for task ${job.taskId.slice(0, 8)}:`, err);
+          // Non-fatal: scheduler will catch it eventually
         }
       }
 

@@ -15,7 +15,7 @@ vi.mock('@/lib/agent-queue', () => ({
 }));
 
 import { GET, POST } from '@/app/api/scheduler/route';
-import { getSchedulerStatus, startScheduler, forceSchedulerTick } from '@/lib/scheduler';
+import { getSchedulerStatus, startScheduler, stopScheduler, forceSchedulerTick } from '@/lib/scheduler';
 import { agentQueue } from '@/lib/agent-queue';
 
 describe('API /api/scheduler', () => {
@@ -28,6 +28,9 @@ describe('API /api/scheduler', () => {
       vi.mocked(getSchedulerStatus).mockReturnValue({
         isRunning: true,
         recentlyEnqueuedCount: 3,
+        lastTickTime: Date.now(),
+        lastTickAgo: 5000,
+        isStale: false,
       });
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [{ id: 'job-1' } as any],
@@ -50,6 +53,9 @@ describe('API /api/scheduler', () => {
       vi.mocked(getSchedulerStatus).mockReturnValue({
         isRunning: false,
         recentlyEnqueuedCount: 0,
+        lastTickTime: 0,
+        lastTickAgo: -1,
+        isStale: false,
       });
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
@@ -65,10 +71,60 @@ describe('API /api/scheduler', () => {
       expect(startScheduler).toHaveBeenCalled();
     });
 
+    it('should restart stale scheduler', async () => {
+      vi.mocked(getSchedulerStatus).mockReturnValue({
+        isRunning: true,
+        recentlyEnqueuedCount: 0,
+        lastTickTime: Date.now() - 180000, // 3 minutes ago
+        lastTickAgo: 180000,
+        isStale: true,
+      });
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+
+      await GET();
+
+      expect(stopScheduler).toHaveBeenCalled();
+      expect(startScheduler).toHaveBeenCalled();
+    });
+
+    it('should not restart scheduler that is not stale', async () => {
+      vi.mocked(getSchedulerStatus).mockReturnValue({
+        isRunning: true,
+        recentlyEnqueuedCount: 0,
+        lastTickTime: Date.now() - 10000,
+        lastTickAgo: 10000,
+        isStale: false,
+      });
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+
+      await GET();
+
+      expect(stopScheduler).not.toHaveBeenCalled();
+      // startScheduler also shouldn't be called since isRunning is true
+      expect(startScheduler).not.toHaveBeenCalled();
+    });
+
     it('should return 200 with zero queue stats when getStatus fails (Redis down)', async () => {
       vi.mocked(getSchedulerStatus).mockReturnValue({
         isRunning: true,
         recentlyEnqueuedCount: 0,
+        lastTickTime: Date.now(),
+        lastTickAgo: 5000,
+        isStale: false,
       });
       vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));
 
