@@ -378,6 +378,16 @@ async function initDb() {
       END $$;
     `);
 
+    // Add Railway OAuth columns to user_integrations
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS railway_refresh_token TEXT;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS railway_token_expires_at TIMESTAMPTZ;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS railway_auth_method TEXT DEFAULT 'token';
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
     // Add github_repo to projects
     await client.query(`
       DO $$ BEGIN
