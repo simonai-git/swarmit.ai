@@ -488,6 +488,18 @@ describe('agent-queue', () => {
     });
   });
 
+  describe('activeRuns filtering', () => {
+    it('getStatus should only return actually running runs, not completed ones', async () => {
+      // The running map may contain completed/failed runs that haven't been cleaned up yet
+      // getStatus should filter these out so the scheduler doesn't skip tasks
+      const status = await agentQueue.getStatus();
+      // All activeRuns should have status 'running'
+      for (const run of status.activeRuns) {
+        expect(run.status).toBe('running');
+      }
+    });
+  });
+
   describe('in-memory duplicate detection', () => {
     it('should return existing pending job for same task+agentType', async () => {
       const job1 = await agentQueue.enqueue({

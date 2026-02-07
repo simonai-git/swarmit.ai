@@ -249,7 +249,7 @@ class AgentQueue {
           completed: 0, // Redis doesn't track completed count
           failed: 0,
           jobs: status.jobs.map(queueJobToAgentJob),
-          activeRuns: Array.from(this.running.values()),
+          activeRuns: Array.from(this.running.values()).filter(r => r.status === 'running'),
         };
       } catch (error) {
         this.markRedisUnhealthy(error);
@@ -268,7 +268,7 @@ class AgentQueue {
       completed: filteredJobs.filter(j => j.status === 'completed').length,
       failed: filteredJobs.filter(j => j.status === 'failed').length,
       jobs: [...filteredJobs],
-      activeRuns: Array.from(this.running.values()),
+      activeRuns: Array.from(this.running.values()).filter(r => r.status === 'running'),
     };
   }
 
