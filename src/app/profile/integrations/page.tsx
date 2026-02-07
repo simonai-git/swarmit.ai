@@ -1,18 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ExternalLink, Check, X, RefreshCw, Plug, Train, Github, Cloud, Sparkles, Key } from 'lucide-react';
-
-interface Integration {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  connected: boolean;
-  account?: string;
-  connectedAt?: string;
-  features: string[];
-}
+import { useState, useEffect, useCallback } from 'react';
+import { ExternalLink, Check, X, RefreshCw, Plug, Train, Github, Cloud, Sparkles, Key, AlertCircle } from 'lucide-react';
 
 interface RailwayProject {
   id: string;
@@ -20,10 +9,28 @@ interface RailwayProject {
   environments: { id: string; name: string }[];
 }
 
+interface RailwayAccount {
+  name: string;
+  email: string;
+}
+
+function InlineError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+      <span className="flex-1">{message}</span>
+      <button onClick={onDismiss} className="shrink-0 hover:text-red-300">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 export default function IntegrationsPage() {
   // Railway state
   const [railwayConnected, setRailwayConnected] = useState(false);
   const [railwayProjects, setRailwayProjects] = useState<RailwayProject[]>([]);
+  const [railwayAccount, setRailwayAccount] = useState<RailwayAccount | null>(null);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [railwayToken, setRailwayToken] = useState('');
   const [showTokenInput, setShowTokenInput] = useState(false);
@@ -44,18 +51,41 @@ export default function IntegrationsPage() {
   const [showGithubInput, setShowGithubInput] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
 
-  useEffect(() => {
-    fetchIntegrations();
-    fetchClaudeConnection();
-  }, []);
+  // Inline error state
+  const [railwayError, setRailwayError] = useState('');
+  const [claudeError, setClaudeError] = useState('');
+  const [githubError, setGithubError] = useState('');
 
-  const fetchIntegrations = async () => {
+  // Auto-clear errors after 10 seconds
+  useEffect(() => {
+    if (railwayError) {
+      const timer = setTimeout(() => setRailwayError(''), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [railwayError]);
+
+  useEffect(() => {
+    if (claudeError) {
+      const timer = setTimeout(() => setClaudeError(''), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [claudeError]);
+
+  useEffect(() => {
+    if (githubError) {
+      const timer = setTimeout(() => setGithubError(''), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [githubError]);
+
+  const fetchIntegrations = useCallback(async () => {
     try {
       const res = await fetch('/api/profile/integrations');
       if (res.ok) {
         const data = await res.json();
         setRailwayConnected(data.railway?.connected || false);
         setRailwayProjects(data.railway?.projects || []);
+        setRailwayAccount(data.railway?.account || null);
         setSelectedProject(data.railway?.selectedProject || '');
         setGithubConnected(data.github?.connected || false);
         setGithubUsername(data.github?.username || '');
@@ -65,9 +95,9 @@ export default function IntegrationsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchClaudeConnection = async () => {
+  const fetchClaudeConnection = useCallback(async () => {
     try {
       const res = await fetch('/api/profile/claude-key');
       if (res.ok) {
@@ -78,19 +108,25 @@ export default function IntegrationsPage() {
     } catch (error) {
       console.error('Failed to fetch Claude connection:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchIntegrations();
+    fetchClaudeConnection();
+  }, [fetchIntegrations, fetchClaudeConnection]);
 
   const connectClaude = async () => {
     if (!claudeToken.trim()) return;
-    
+
     setConnectingClaude(true);
+    setClaudeError('');
     try {
       const res = await fetch('/api/profile/claude-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: claudeToken }),
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setClaudeConnected(true);
@@ -99,11 +135,11 @@ export default function IntegrationsPage() {
         setClaudeToken('');
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to connect Claude');
+        setClaudeError(error.error || 'Failed to connect Claude');
       }
     } catch (error) {
       console.error('Failed to connect Claude:', error);
-      alert('Failed to connect Claude');
+      setClaudeError('Failed to connect Claude');
     } finally {
       setConnectingClaude(false);
     }
@@ -111,7 +147,7 @@ export default function IntegrationsPage() {
 
   const disconnectClaude = async () => {
     if (!confirm('Are you sure you want to disconnect Claude?')) return;
-    
+
     try {
       const res = await fetch('/api/profile/claude-key', {
         method: 'DELETE',
@@ -127,28 +163,30 @@ export default function IntegrationsPage() {
 
   const connectRailway = async () => {
     if (!railwayToken.trim()) return;
-    
+
     setConnecting(true);
+    setRailwayError('');
     try {
       const res = await fetch('/api/profile/integrations/railway', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: railwayToken }),
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setRailwayConnected(true);
         setRailwayProjects(data.projects || []);
+        setRailwayAccount(data.account || null);
         setShowTokenInput(false);
         setRailwayToken('');
       } else {
         const error = await res.json();
-        alert(error.message || 'Failed to connect to Railway');
+        setRailwayError(error.message || error.error || 'Failed to connect to Railway');
       }
     } catch (error) {
       console.error('Failed to connect Railway:', error);
-      alert('Failed to connect to Railway');
+      setRailwayError('Failed to connect to Railway');
     } finally {
       setConnecting(false);
     }
@@ -156,7 +194,7 @@ export default function IntegrationsPage() {
 
   const disconnectRailway = async () => {
     if (!confirm('Are you sure you want to disconnect Railway?')) return;
-    
+
     try {
       const res = await fetch('/api/profile/integrations/railway', {
         method: 'DELETE',
@@ -164,6 +202,7 @@ export default function IntegrationsPage() {
       if (res.ok) {
         setRailwayConnected(false);
         setRailwayProjects([]);
+        setRailwayAccount(null);
         setSelectedProject('');
       }
     } catch (error) {
@@ -175,6 +214,7 @@ export default function IntegrationsPage() {
     if (!githubToken.trim()) return;
 
     setConnectingGithub(true);
+    setGithubError('');
     try {
       const res = await fetch('/api/profile/integrations/github', {
         method: 'POST',
@@ -190,11 +230,11 @@ export default function IntegrationsPage() {
         setGithubToken('');
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to connect GitHub');
+        setGithubError(error.error || 'Failed to connect GitHub');
       }
     } catch (error) {
       console.error('Failed to connect GitHub:', error);
-      alert('Failed to connect GitHub');
+      setGithubError('Failed to connect GitHub');
     } finally {
       setConnectingGithub(false);
     }
@@ -338,40 +378,30 @@ export default function IntegrationsPage() {
                       <Check className="w-4 h-4" />
                       Connected
                     </span>
-                    {integration.id === 'railway' && (
-                      <button
-                        onClick={disconnectRailway}
-                        className="text-sm text-red-400 hover:text-red-300"
-                      >
-                        Disconnect
-                      </button>
-                    )}
-                    {integration.id === 'claude' && (
-                      <button
-                        onClick={disconnectClaude}
-                        className="text-sm text-red-400 hover:text-red-300"
-                      >
-                        Disconnect
-                      </button>
-                    )}
-                    {integration.id === 'github' && (
-                      <button
-                        onClick={disconnectGithub}
-                        className="text-sm text-red-400 hover:text-red-300"
-                      >
-                        Disconnect
-                      </button>
-                    )}
+                    <button
+                      onClick={
+                        integration.id === 'railway' ? disconnectRailway :
+                        integration.id === 'claude' ? disconnectClaude :
+                        integration.id === 'github' ? disconnectGithub :
+                        undefined
+                      }
+                      className="text-sm text-red-400 hover:text-red-300"
+                    >
+                      Disconnect
+                    </button>
                   </div>
                 ) : (
                   <button
                     onClick={() => {
                       if (integration.id === 'railway') {
                         setShowTokenInput(true);
+                        setRailwayError('');
                       } else if (integration.id === 'claude') {
                         setShowClaudeInput(true);
+                        setClaudeError('');
                       } else if (integration.id === 'github') {
                         setShowGithubInput(true);
+                        setGithubError('');
                       }
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -392,7 +422,7 @@ export default function IntegrationsPage() {
                       Railway API Token
                     </label>
                     <p className="text-xs text-gray-500 mb-3">
-                      Get your API token from{' '}
+                      Create an <strong className="text-gray-300">Account Token</strong> at{' '}
                       <a
                         href="https://railway.app/account/tokens"
                         target="_blank"
@@ -402,15 +432,20 @@ export default function IntegrationsPage() {
                         Railway Account Settings
                         <ExternalLink className="w-3 h-3 inline ml-1" />
                       </a>
+                      <br />
+                      <span className="text-yellow-500/70">Note: Project-scoped tokens won&apos;t work — an Account Token is required.</span>
                     </p>
                     <input
                       type="password"
                       value={railwayToken}
                       onChange={(e) => setRailwayToken(e.target.value)}
-                      placeholder="Enter your Railway API token"
+                      placeholder="Enter your Railway Account API token"
                       className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
+                  {railwayError && (
+                    <InlineError message={railwayError} onDismiss={() => setRailwayError('')} />
+                  )}
                   <div className="flex gap-3">
                     <button
                       onClick={connectRailway}
@@ -424,6 +459,7 @@ export default function IntegrationsPage() {
                       onClick={() => {
                         setShowTokenInput(false);
                         setRailwayToken('');
+                        setRailwayError('');
                       }}
                       className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
                     >
@@ -465,6 +501,9 @@ export default function IntegrationsPage() {
                       className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
+                  {claudeError && (
+                    <InlineError message={claudeError} onDismiss={() => setClaudeError('')} />
+                  )}
                   <div className="flex gap-3">
                     <button
                       onClick={connectClaude}
@@ -478,6 +517,7 @@ export default function IntegrationsPage() {
                       onClick={() => {
                         setShowClaudeInput(false);
                         setClaudeToken('');
+                        setClaudeError('');
                       }}
                       className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
                     >
@@ -532,6 +572,9 @@ export default function IntegrationsPage() {
                       className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
+                  {githubError && (
+                    <InlineError message={githubError} onDismiss={() => setGithubError('')} />
+                  )}
                   <div className="flex gap-3">
                     <button
                       onClick={connectGithub}
@@ -545,6 +588,7 @@ export default function IntegrationsPage() {
                       onClick={() => {
                         setShowGithubInput(false);
                         setGithubToken('');
+                        setGithubError('');
                       }}
                       className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
                     >
@@ -572,32 +616,51 @@ export default function IntegrationsPage() {
               </div>
             )}
 
-            {/* Railway Project Selection */}
-            {integration.id === 'railway' && railwayConnected && railwayProjects.length > 0 && (
-              <div className="px-6 pb-6">
-                <div className="p-4 bg-gray-700/50 rounded-lg">
-                  <label className="block text-sm font-medium text-gray-300 mb-3">
-                    Select Default Project
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {railwayProjects.map((project) => (
-                      <button
-                        key={project.id}
-                        onClick={() => selectProject(project.id)}
-                        className={`p-3 rounded-lg border text-left transition-colors ${
-                          selectedProject === project.id
-                            ? 'border-blue-500 bg-blue-500/10'
-                            : 'border-gray-600 hover:border-gray-500'
-                        }`}
-                      >
-                        <p className="text-white font-medium">{project.name}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {project.environments.length} environment{project.environments.length !== 1 ? 's' : ''}
+            {/* Railway Connected Info */}
+            {integration.id === 'railway' && railwayConnected && (
+              <div className="px-6 pb-6 space-y-4">
+                {railwayAccount && (
+                  <div className="p-4 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <Train className="w-5 h-5 text-gray-400" />
+                      <div>
+                        <p className="text-sm text-gray-300">
+                          Connected as <span className="text-purple-400 font-medium">{railwayAccount.name || railwayAccount.email}</span>
                         </p>
-                      </button>
-                    ))}
+                        <p className="text-xs text-gray-500 mt-1">
+                          {railwayProjects.length} project{railwayProjects.length !== 1 ? 's' : ''} found
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Project Selection */}
+                {railwayProjects.length > 0 && (
+                  <div className="p-4 bg-gray-700/50 rounded-lg">
+                    <label className="block text-sm font-medium text-gray-300 mb-3">
+                      Select Default Project
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {railwayProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          onClick={() => selectProject(project.id)}
+                          className={`p-3 rounded-lg border text-left transition-colors ${
+                            selectedProject === project.id
+                              ? 'border-blue-500 bg-blue-500/10'
+                              : 'border-gray-600 hover:border-gray-500'
+                          }`}
+                        >
+                          <p className="text-white font-medium">{project.name}</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {project.environments.length} environment{project.environments.length !== 1 ? 's' : ''}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
