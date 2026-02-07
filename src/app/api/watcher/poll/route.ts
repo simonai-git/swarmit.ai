@@ -47,12 +47,17 @@ export async function POST(request: NextRequest) {
       const todoTasks = tasks.filter(t => t.status === 'todo');
 
       // Get queue status scoped to this user to avoid double-enqueueing
-      const queueStatus = await agentQueue.getStatus(user.email);
-      const queuedTaskIds = new Set(
-        queueStatus.jobs
-          .filter(j => ['pending', 'running'].includes(j.status))
-          .map(j => j.taskId)
-      );
+      let queuedTaskIds = new Set<string>();
+      try {
+        const queueStatus = await agentQueue.getStatus(user.email);
+        queuedTaskIds = new Set(
+          queueStatus.jobs
+            .filter(j => ['pending', 'running'].includes(j.status))
+            .map(j => j.taskId)
+        );
+      } catch (error) {
+        console.warn(`[Watcher] Failed to get queue status for ${user.email}:`, error instanceof Error ? error.message : String(error));
+      }
 
       for (const task of todoTasks) {
         if (queuedTaskIds.has(task.id)) continue;
@@ -81,26 +86,35 @@ export async function POST(request: NextRequest) {
     const maxToProcess = 3;
 
     for (let i = 0; i < maxToProcess; i++) {
-      const status = await agentQueue.getStatus();
-      const pendingJob = status.jobs.find(j => j.status === 'pending');
-
-      if (!pendingJob) break;
-
-      results.processed++;
+      try {
+        const status = await agentQueue.getStatus();
+        const pendingJob = status.jobs.find(j => j.status === 'pending');
+        if (!pendingJob) break;
+        results.processed++;
+      } catch {
+        break; // Queue unavailable, stop trying
+      }
     }
 
     // Trigger queue processing (in case it's not running)
     agentQueue.startProcessing();
 
-    const queueStatus = await agentQueue.getStatus();
+    let queueStatusInfo = { pending: 0, running: 0 };
+    try {
+      const queueStatus = await agentQueue.getStatus();
+      queueStatusInfo = {
+        pending: queueStatus.pending,
+        running: queueStatus.running,
+      };
+    } catch (error) {
+      console.warn('[Watcher] Failed to get queue status for response:', error instanceof Error ? error.message : String(error));
+    }
+
     return NextResponse.json({
       success: true,
       message: `Processed ${results.processed} jobs, enqueued ${results.enqueued} tasks`,
       ...results,
-      queueStatus: {
-        pending: queueStatus.pending,
-        running: queueStatus.running,
-      },
+      queueStatus: queueStatusInfo,
     });
   } catch (error) {
     console.error('Error in watcher poll:', error);
@@ -119,19 +133,26 @@ export async function GET(request: NextRequest) {
 
   try {
     const config = await getWatcherConfig();
-    const queueStatus = await agentQueue.getStatus();
     const tasks = await getAllTasks();
     const todoCount = tasks.filter(t => t.status === 'todo').length;
+
+    let queueInfo = { pending: 0, running: 0 };
+    try {
+      const queueStatus = await agentQueue.getStatus();
+      queueInfo = {
+        pending: queueStatus.pending,
+        running: queueStatus.running,
+      };
+    } catch (error) {
+      console.warn('[Watcher GET] Failed to get queue status:', error instanceof Error ? error.message : String(error));
+    }
 
     return NextResponse.json({
       watcher: {
         isRunning: config.is_running,
         lastRun: config.last_run,
       },
-      queue: {
-        pending: queueStatus.pending,
-        running: queueStatus.running,
-      },
+      queue: queueInfo,
       tasks: {
         todo: todoCount,
         total: tasks.length,

@@ -53,13 +53,19 @@ async function processUserTasks(userEmail: string): Promise<void> {
   const allTasks = await getTasksByUserEmail(userEmail);
 
   // Get current queue status scoped to this user's tenant
-  const queueStatus = await agentQueue.getStatus(userEmail);
-  const queuedTaskIds = new Set(
-    queueStatus.jobs
-      .filter(j => ['pending', 'running'].includes(j.status))
-      .map(j => j.taskId)
-  );
-  const activeTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
+  let queuedTaskIds = new Set<string>();
+  let activeTaskIds = new Set<string>();
+  try {
+    const queueStatus = await agentQueue.getStatus(userEmail);
+    queuedTaskIds = new Set(
+      queueStatus.jobs
+        .filter(j => ['pending', 'running'].includes(j.status))
+        .map(j => j.taskId)
+    );
+    activeTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
+  } catch (error) {
+    console.warn(`[Scheduler] Failed to get queue status for ${userEmail}, proceeding without queue dedup:`, error instanceof Error ? error.message : String(error));
+  }
 
   // Get or create per-user recently enqueued set
   if (!recentlyEnqueued.has(userEmail)) {
@@ -192,8 +198,12 @@ async function schedulerTick(): Promise<void> {
     }
 
     // Log summary
-    const updatedStatus = await agentQueue.getStatus();
-    console.log(`[Scheduler] Queue status: ${updatedStatus.jobs.length} queued, ${updatedStatus.activeRuns.length} active`);
+    try {
+      const updatedStatus = await agentQueue.getStatus();
+      console.log(`[Scheduler] Queue status: ${updatedStatus.jobs.length} queued, ${updatedStatus.activeRuns.length} active`);
+    } catch (error) {
+      console.warn('[Scheduler] Failed to get queue status for summary:', error instanceof Error ? error.message : String(error));
+    }
 
     // Cleanup old task logs (7-day retention)
     try {

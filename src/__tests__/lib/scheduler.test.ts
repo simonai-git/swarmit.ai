@@ -1168,6 +1168,49 @@ describe('scheduler', () => {
       expect(assignOrphanedTasks).not.toHaveBeenCalled();
     });
 
+    it('continues when agentQueue.getStatus fails for a user', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Test Task',
+          status: 'todo',
+          assignee: 'Simon',
+          priority: 'medium',
+          description: 'Test',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      // getStatus fails (Redis down) — scheduler should still try to enqueue
+      vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await expect(forceSchedulerTick()).resolves.not.toThrow();
+
+      // Should still attempt to enqueue despite getStatus failure
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles getStatus failure in summary logging gracefully', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([]);
+      // First call for processUserTasks succeeds, second for summary fails
+      vi.mocked(agentQueue.getStatus)
+        .mockResolvedValueOnce({
+          jobs: [],
+          activeRuns: [],
+          pending: 0,
+          running: 0,
+          completed: 0,
+          failed: 0,
+        })
+        .mockRejectedValueOnce(new Error('Redis timeout'));
+
+      await expect(forceSchedulerTick()).resolves.not.toThrow();
+    });
+
     it('one user error does not affect other users', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([
         { email: 'failing@test.com' },

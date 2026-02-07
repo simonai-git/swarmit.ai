@@ -487,4 +487,81 @@ describe('agent-queue', () => {
       expect(getDefaultNextStatus('reviewer', 'done')).toBeNull();
     });
   });
+
+  describe('in-memory duplicate detection', () => {
+    it('should return existing pending job for same task+agentType', async () => {
+      const job1 = await agentQueue.enqueue({
+        taskId: 'dup-test-task',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'dup-tenant',
+      });
+
+      const job2 = await agentQueue.enqueue({
+        taskId: 'dup-test-task',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'dup-tenant',
+      });
+
+      expect(job2.id).toBe(job1.id);
+    });
+
+    it('should allow different agentType for same task', async () => {
+      const job1 = await agentQueue.enqueue({
+        taskId: 'dup-test-task-2',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'dup-tenant-2',
+      });
+
+      const job2 = await agentQueue.enqueue({
+        taskId: 'dup-test-task-2',
+        agentType: 'qa',
+        priority: 5,
+        tenantId: 'dup-tenant-2',
+      });
+
+      expect(job2.id).not.toBe(job1.id);
+    });
+  });
+
+  describe('in-memory getJob', () => {
+    it('should find a job by id in in-memory storage', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'getjob-task',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'getjob-tenant',
+      });
+
+      const found = await agentQueue.getJob(job.id);
+      expect(found).toBeDefined();
+      expect(found?.taskId).toBe('getjob-task');
+    });
+
+    it('should return undefined for unknown job id', async () => {
+      const found = await agentQueue.getJob('nonexistent-job-id');
+      expect(found).toBeUndefined();
+    });
+  });
+
+  describe('in-memory cancel', () => {
+    it('should cancel a pending job', async () => {
+      const job = await agentQueue.enqueue({
+        taskId: 'cancel-task',
+        agentType: 'developer',
+        priority: 5,
+        tenantId: 'cancel-tenant',
+      });
+
+      const cancelled = await agentQueue.cancel(job.id);
+      expect(cancelled).toBe(true);
+    });
+
+    it('should return false for unknown job id', async () => {
+      const cancelled = await agentQueue.cancel('nonexistent-job');
+      expect(cancelled).toBe(false);
+    });
+  });
 });
