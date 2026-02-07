@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import pool from '@/lib/db';
+import { refreshRailwayToken } from './railway/route';
 
 // GET /api/profile/integrations - Get all integrations status
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession();
     if (!session?.user?.email) {
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
 
     const result = await pool.query(
       `SELECT railway_token, railway_projects, railway_selected_project, railway_connected_at,
+              railway_refresh_token, railway_token_expires_at, railway_auth_method,
               github_token, github_username, github_connected_at
        FROM user_integrations
        WHERE user_email = $1`,
@@ -19,6 +21,38 @@ export async function GET(request: NextRequest) {
     );
 
     const integrations = result.rows[0] || {};
+
+    // Auto-refresh expired OAuth tokens
+    if (
+      integrations.railway_token &&
+      integrations.railway_auth_method === 'oauth' &&
+      integrations.railway_refresh_token &&
+      integrations.railway_token_expires_at
+    ) {
+      const expiresAt = new Date(integrations.railway_token_expires_at);
+      const now = new Date();
+      // Refresh if token expires within 5 minutes
+      if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
+        try {
+          const refreshed = await refreshRailwayToken(integrations.railway_refresh_token);
+          const newExpiresAt = new Date(Date.now() + (refreshed.expires_in || 3600) * 1000);
+
+          await pool.query(
+            `UPDATE user_integrations SET
+              railway_token = $1, railway_refresh_token = $2, railway_token_expires_at = $3, updated_at = NOW()
+             WHERE user_email = $4`,
+            [refreshed.access_token, refreshed.refresh_token, newExpiresAt, session.user.email]
+          );
+
+          integrations.railway_token = refreshed.access_token;
+          integrations.railway_refresh_token = refreshed.refresh_token;
+          integrations.railway_token_expires_at = newExpiresAt;
+        } catch (error) {
+          console.error('Failed to refresh Railway OAuth token:', error);
+          // Token refresh failed — still return current state, user may need to re-auth
+        }
+      }
+    }
 
     // Parse railway_projects - supports both old format (array) and new format ({ account, projects })
     let railwayProjects: any[] = [];
@@ -42,6 +76,8 @@ export async function GET(request: NextRequest) {
         selectedProject: integrations.railway_selected_project,
         connectedAt: integrations.railway_connected_at || null,
         account: railwayAccount,
+        authMethod: integrations.railway_auth_method || null,
+        oauthAvailable: !!process.env.RAILWAY_CLIENT_ID,
       },
       github: {
         connected: !!integrations.github_token,

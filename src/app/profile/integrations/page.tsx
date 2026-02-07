@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { ExternalLink, Check, X, RefreshCw, Plug, Train, Github, Cloud, Sparkles, Key, AlertCircle } from 'lucide-react';
+import { Suspense } from 'react';
 
 interface RailwayProject {
   id: string;
@@ -26,11 +28,16 @@ function InlineError({ message, onDismiss }: { message: string; onDismiss: () =>
   );
 }
 
-export default function IntegrationsPage() {
+function IntegrationsContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   // Railway state
   const [railwayConnected, setRailwayConnected] = useState(false);
   const [railwayProjects, setRailwayProjects] = useState<RailwayProject[]>([]);
   const [railwayAccount, setRailwayAccount] = useState<RailwayAccount | null>(null);
+  const [railwayAuthMethod, setRailwayAuthMethod] = useState<string | null>(null);
+  const [railwayOAuthAvailable, setRailwayOAuthAvailable] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [railwayToken, setRailwayToken] = useState('');
   const [showTokenInput, setShowTokenInput] = useState(false);
@@ -55,6 +62,19 @@ export default function IntegrationsPage() {
   const [railwayError, setRailwayError] = useState('');
   const [claudeError, setClaudeError] = useState('');
   const [githubError, setGithubError] = useState('');
+
+  // Handle OAuth callback query params
+  useEffect(() => {
+    const railwayStatus = searchParams.get('railway');
+    if (railwayStatus === 'error') {
+      const message = searchParams.get('message') || 'Failed to connect Railway via OAuth';
+      setRailwayError(message);
+    }
+    // Clean up URL params after reading
+    if (railwayStatus) {
+      router.replace('/profile/integrations', { scroll: false });
+    }
+  }, [searchParams, router]);
 
   // Auto-clear errors after 10 seconds
   useEffect(() => {
@@ -86,6 +106,8 @@ export default function IntegrationsPage() {
         setRailwayConnected(data.railway?.connected || false);
         setRailwayProjects(data.railway?.projects || []);
         setRailwayAccount(data.railway?.account || null);
+        setRailwayAuthMethod(data.railway?.authMethod || null);
+        setRailwayOAuthAvailable(data.railway?.oauthAvailable || false);
         setSelectedProject(data.railway?.selectedProject || '');
         setGithubConnected(data.github?.connected || false);
         setGithubUsername(data.github?.username || '');
@@ -178,6 +200,7 @@ export default function IntegrationsPage() {
         setRailwayConnected(true);
         setRailwayProjects(data.projects || []);
         setRailwayAccount(data.account || null);
+        setRailwayAuthMethod('token');
         setShowTokenInput(false);
         setRailwayToken('');
       } else {
@@ -203,6 +226,7 @@ export default function IntegrationsPage() {
         setRailwayConnected(false);
         setRailwayProjects([]);
         setRailwayAccount(null);
+        setRailwayAuthMethod(null);
         setSelectedProject('');
       }
     } catch (error) {
@@ -391,31 +415,78 @@ export default function IntegrationsPage() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => {
-                      if (integration.id === 'railway') {
+                  integration.id === 'railway' ? (
+                    // Railway: show connect button that expands to two-option view
+                    <button
+                      onClick={() => {
                         setShowTokenInput(true);
                         setRailwayError('');
-                      } else if (integration.id === 'claude') {
-                        setShowClaudeInput(true);
-                        setClaudeError('');
-                      } else if (integration.id === 'github') {
-                        setShowGithubInput(true);
-                        setGithubError('');
-                      }
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    <Plug className="w-4 h-4" />
-                    Connect
-                  </button>
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      <Plug className="w-4 h-4" />
+                      Connect
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (integration.id === 'claude') {
+                          setShowClaudeInput(true);
+                          setClaudeError('');
+                        } else if (integration.id === 'github') {
+                          setShowGithubInput(true);
+                          setGithubError('');
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      <Plug className="w-4 h-4" />
+                      Connect
+                    </button>
+                  )
                 )
               )}
             </div>
 
-            {/* Railway Token Input */}
+            {/* Railway Connection Options */}
             {integration.id === 'railway' && showTokenInput && !railwayConnected && (
-              <div className="px-6 pb-6">
+              <div className="px-6 pb-6 space-y-4">
+                {/* OAuth Option */}
+                {railwayOAuthAvailable && (
+                  <div className="p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-sm font-medium text-white">Connect with Railway</h4>
+                          <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 rounded font-medium">
+                            Recommended
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400">
+                          Sign in with your Railway account. Tokens auto-refresh.
+                        </p>
+                      </div>
+                      <a
+                        href="/api/profile/integrations/railway/oauth"
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-medium hover:opacity-90 transition-opacity text-sm"
+                      >
+                        <Train className="w-4 h-4" />
+                        Connect with Railway
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Divider */}
+                {railwayOAuthAvailable && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 border-t border-gray-600" />
+                    <span className="text-xs text-gray-500">Or use an API token</span>
+                    <div className="flex-1 border-t border-gray-600" />
+                  </div>
+                )}
+
+                {/* Token Input Option */}
                 <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -626,7 +697,8 @@ export default function IntegrationsPage() {
                       <Train className="w-5 h-5 text-gray-400" />
                       <div>
                         <p className="text-sm text-gray-300">
-                          Connected as <span className="text-purple-400 font-medium">{railwayAccount.name || railwayAccount.email}</span>
+                          Connected via {railwayAuthMethod === 'oauth' ? 'Railway OAuth' : 'API token'} as{' '}
+                          <span className="text-purple-400 font-medium">{railwayAccount.name || railwayAccount.email}</span>
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
                           {railwayProjects.length} project{railwayProjects.length !== 1 ? 's' : ''} found
@@ -681,5 +753,17 @@ export default function IntegrationsPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function IntegrationsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
+    }>
+      <IntegrationsContent />
+    </Suspense>
   );
 }

@@ -2,6 +2,41 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import pool from '@/lib/db';
 
+// Refresh an OAuth access token using the refresh token
+export async function refreshRailwayToken(refreshToken: string): Promise<{
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}> {
+  const clientId = process.env.RAILWAY_CLIENT_ID;
+  const clientSecret = process.env.RAILWAY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Railway OAuth not configured');
+  }
+
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const response = await fetch('https://backboard.railway.com/oauth/token', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${basicAuth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token refresh failed: ${text}`);
+  }
+
+  return response.json();
+}
+
 // Step 1: Validate token with lightweight query and get account info
 async function validateRailwayToken(token: string): Promise<{ name: string; email: string }> {
   const response = await fetch('https://backboard.railway.app/graphql/v2', {
@@ -135,7 +170,7 @@ export async function POST(request: NextRequest) {
 }
 
 // DELETE /api/profile/integrations/railway - Disconnect Railway
-export async function DELETE(request: NextRequest) {
+export async function DELETE(_request: NextRequest) {
   try {
     const session = await getServerSession();
     if (!session?.user?.email) {
@@ -144,7 +179,8 @@ export async function DELETE(request: NextRequest) {
 
     await pool.query(
       `UPDATE user_integrations
-       SET railway_token = NULL, railway_projects = NULL, railway_selected_project = NULL, railway_connected_at = NULL
+       SET railway_token = NULL, railway_projects = NULL, railway_selected_project = NULL, railway_connected_at = NULL,
+           railway_refresh_token = NULL, railway_token_expires_at = NULL, railway_auth_method = NULL
        WHERE user_email = $1`,
       [session.user.email]
     );
