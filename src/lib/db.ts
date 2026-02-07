@@ -368,6 +368,41 @@ async function initDb() {
       )
     `);
     
+    // Add GitHub columns to user_integrations
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_token TEXT;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_username TEXT;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_connected_at TIMESTAMPTZ;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
+    // Add github_repo to projects
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_repo TEXT;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
+    // Create workspace_snapshots table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workspace_snapshots (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+        agent_type TEXT,
+        snapshot BYTEA NOT NULL,
+        file_count INTEGER DEFAULT 0,
+        size_bytes INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_workspace_snapshots_task_id ON workspace_snapshots(task_id);
+    `);
+
     // Create task_dependencies table for task dependency tracking
     await client.query(`
       CREATE TABLE IF NOT EXISTS task_dependencies (
@@ -795,6 +830,7 @@ export interface Project {
   tech_stack: string | null;
   timeline: string | null;
   deadline: string | null;
+  github_repo: string | null;
   started_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
@@ -1585,6 +1621,83 @@ export async function cleanupOldTaskLogs(retentionDays: number = 7): Promise<num
     [retentionDays]
   );
   return result.rowCount || 0;
+}
+
+// ==================== Workspace Snapshots ====================
+
+export interface WorkspaceSnapshot {
+  id: string;
+  task_id: string;
+  run_id: string | null;
+  agent_type: string | null;
+  snapshot: Buffer;
+  file_count: number;
+  size_bytes: number;
+  created_at: string;
+}
+
+export async function saveWorkspaceSnapshot(
+  taskId: string,
+  runId: string,
+  agentType: string,
+  data: Buffer,
+  fileCount: number,
+  sizeBytes: number
+): Promise<void> {
+  const id = `snap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Upsert: one snapshot per task (latest wins)
+  await pool.query(
+    `INSERT INTO workspace_snapshots (id, task_id, run_id, agent_type, snapshot, file_count, size_bytes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (task_id) DO UPDATE SET
+       id = $1, run_id = $3, agent_type = $4, snapshot = $5, file_count = $6, size_bytes = $7, created_at = NOW()`,
+    [id, taskId, runId, agentType, data, fileCount, sizeBytes]
+  );
+}
+
+export async function getWorkspaceSnapshot(taskId: string): Promise<WorkspaceSnapshot | null> {
+  const result = await pool.query(
+    'SELECT * FROM workspace_snapshots WHERE task_id = $1',
+    [taskId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteWorkspaceSnapshot(taskId: string): Promise<boolean> {
+  const result = await pool.query(
+    'DELETE FROM workspace_snapshots WHERE task_id = $1',
+    [taskId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// ==================== GitHub Integration ====================
+
+export async function getUserGitHubToken(userEmail: string): Promise<{ token: string; username: string } | null> {
+  const result = await pool.query(
+    'SELECT github_token, github_username FROM user_integrations WHERE user_email = $1 AND github_token IS NOT NULL',
+    [userEmail]
+  );
+  if (result.rows.length === 0 || !result.rows[0].github_token) return null;
+  return { token: result.rows[0].github_token, username: result.rows[0].github_username };
+}
+
+export async function setUserGitHubIntegration(userEmail: string, token: string, username: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO user_integrations (user_email, github_token, github_username, github_connected_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_email) DO UPDATE SET
+       github_token = $2, github_username = $3, github_connected_at = NOW(), updated_at = NOW()`,
+    [userEmail, token, username]
+  );
+}
+
+export async function clearUserGitHubIntegration(userEmail: string): Promise<void> {
+  await pool.query(
+    `UPDATE user_integrations SET github_token = NULL, github_username = NULL, github_connected_at = NULL, updated_at = NOW()
+     WHERE user_email = $1`,
+    [userEmail]
+  );
 }
 
 export default pool;

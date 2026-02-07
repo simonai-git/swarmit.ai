@@ -37,6 +37,13 @@ export default function IntegrationsPage() {
   const [showClaudeInput, setShowClaudeInput] = useState(false);
   const [connectingClaude, setConnectingClaude] = useState(false);
 
+  // GitHub state
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubUsername, setGithubUsername] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [showGithubInput, setShowGithubInput] = useState(false);
+  const [connectingGithub, setConnectingGithub] = useState(false);
+
   useEffect(() => {
     fetchIntegrations();
     fetchClaudeConnection();
@@ -50,6 +57,8 @@ export default function IntegrationsPage() {
         setRailwayConnected(data.railway?.connected || false);
         setRailwayProjects(data.railway?.projects || []);
         setSelectedProject(data.railway?.selectedProject || '');
+        setGithubConnected(data.github?.connected || false);
+        setGithubUsername(data.github?.username || '');
       }
     } catch (error) {
       console.error('Failed to fetch integrations:', error);
@@ -162,6 +171,51 @@ export default function IntegrationsPage() {
     }
   };
 
+  const connectGithub = async () => {
+    if (!githubToken.trim()) return;
+
+    setConnectingGithub(true);
+    try {
+      const res = await fetch('/api/profile/integrations/github', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: githubToken }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setGithubConnected(true);
+        setGithubUsername(data.username || '');
+        setShowGithubInput(false);
+        setGithubToken('');
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to connect GitHub');
+      }
+    } catch (error) {
+      console.error('Failed to connect GitHub:', error);
+      alert('Failed to connect GitHub');
+    } finally {
+      setConnectingGithub(false);
+    }
+  };
+
+  const disconnectGithub = async () => {
+    if (!confirm('Are you sure you want to disconnect GitHub?')) return;
+
+    try {
+      const res = await fetch('/api/profile/integrations/github', {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setGithubConnected(false);
+        setGithubUsername('');
+      }
+    } catch (error) {
+      console.error('Failed to disconnect GitHub:', error);
+    }
+  };
+
   const selectProject = async (projectId: string) => {
     try {
       const res = await fetch('/api/profile/integrations/railway/project', {
@@ -209,17 +263,16 @@ export default function IntegrationsPage() {
     {
       id: 'github',
       name: 'GitHub',
-      description: 'Connect repositories for code management',
+      description: 'Push agent code to GitHub repositories',
       icon: <Github className="w-6 h-6" />,
       color: 'from-gray-600 to-gray-800',
-      connected: false,
+      connected: githubConnected,
       features: [
-        'Pull request automation',
-        'Code review integration',
-        'Branch management',
-        'Issue tracking sync',
+        'Auto-push code after agent runs',
+        'Per-project repo configuration',
+        'Auto-create repos for general tasks',
+        'Workspace persistence via snapshots',
       ],
-      comingSoon: true,
     },
     {
       id: 'vercel',
@@ -301,6 +354,14 @@ export default function IntegrationsPage() {
                         Disconnect
                       </button>
                     )}
+                    {integration.id === 'github' && (
+                      <button
+                        onClick={disconnectGithub}
+                        className="text-sm text-red-400 hover:text-red-300"
+                      >
+                        Disconnect
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <button
@@ -309,6 +370,8 @@ export default function IntegrationsPage() {
                         setShowTokenInput(true);
                       } else if (integration.id === 'claude') {
                         setShowClaudeInput(true);
+                      } else if (integration.id === 'github') {
+                        setShowGithubInput(true);
                       }
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -434,6 +497,75 @@ export default function IntegrationsPage() {
                     <div>
                       <p className="text-sm text-gray-300">Token: <code className="text-orange-400">{claudeMaskedKey}</code></p>
                       <p className="text-xs text-gray-500 mt-1">Your agents will use this token for AI operations</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GitHub Token Input */}
+            {integration.id === 'github' && showGithubInput && !githubConnected && (
+              <div className="px-6 pb-6">
+                <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      GitHub Personal Access Token
+                    </label>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Create a fine-grained PAT at{' '}
+                      <a
+                        href="https://github.com/settings/tokens?type=beta"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline"
+                      >
+                        GitHub Settings
+                        <ExternalLink className="w-3 h-3 inline ml-1" />
+                      </a>
+                      {' '}with <code className="text-gray-300">repo</code> scope (full control of private repos)
+                    </p>
+                    <input
+                      type="password"
+                      value={githubToken}
+                      onChange={(e) => setGithubToken(e.target.value)}
+                      placeholder="ghp_... or github_pat_..."
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={connectGithub}
+                      disabled={!githubToken.trim() || connectingGithub}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                    >
+                      {connectingGithub && <RefreshCw className="w-4 h-4 animate-spin" />}
+                      {connectingGithub ? 'Connecting...' : 'Connect'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowGithubInput(false);
+                        setGithubToken('');
+                      }}
+                      className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GitHub Connected Info */}
+            {integration.id === 'github' && githubConnected && (
+              <div className="px-6 pb-6">
+                <div className="p-4 bg-gray-700/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Github className="w-5 h-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-300">
+                        Connected as <a href={`https://github.com/${githubUsername}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-medium">@{githubUsername}</a>
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Agent code will be pushed to GitHub after successful runs</p>
                     </div>
                   </div>
                 </div>

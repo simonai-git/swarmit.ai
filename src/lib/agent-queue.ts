@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 import { taskLogBuffer } from './task-log-buffer';
+import { pushToGitHub } from './github';
 
 /**
  * When an agent succeeds without calling task_complete, determine the
@@ -467,6 +468,40 @@ class AgentQueue {
         timestamp: Date.now(),
       });
 
+      // Restore workspace snapshot if one exists for this task
+      try {
+        const snapshot = await getWorkspaceSnapshot(job.taskId);
+        if (snapshot) {
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: `Restoring workspace snapshot (${(snapshot.size_bytes / 1024).toFixed(0)}KB, ${snapshot.file_count} files)...`,
+            timestamp: Date.now(),
+          });
+          await executor.getSandbox().restoreSnapshot(snapshot.snapshot);
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: 'Workspace restored successfully',
+            timestamp: Date.now(),
+          });
+        }
+      } catch (err) {
+        console.error('[Agent] Failed to restore workspace snapshot:', err);
+        taskLogBuffer.append({
+          task_id: job.taskId,
+          run_id: run.id,
+          agent_type: job.agentType,
+          stream: 'system',
+          content: `Warning: Failed to restore workspace snapshot: ${err instanceof Error ? err.message : String(err)}`,
+          timestamp: Date.now(),
+        });
+      }
+
       run.transcript.push({
         role: 'system',
         content: `Sandbox created at ${executor.getWorkdir()}`,
@@ -565,6 +600,61 @@ class AgentQueue {
         content: `[${job.agentType}] Agent ${result.success ? 'completed successfully' : 'failed: ' + (result.error || 'unknown error')}`,
         timestamp: Date.now(),
       });
+
+      // Save workspace snapshot after successful run
+      if (result.success) {
+        try {
+          const snapshotData = await executor.getSandbox().saveSnapshot();
+          if (snapshotData.length <= 10 * 1024 * 1024) {
+            const fileList = await executor.listFiles('.');
+            await saveWorkspaceSnapshot(job.taskId, run.id, job.agentType, snapshotData, fileList.length, snapshotData.length);
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: `Workspace snapshot saved (${(snapshotData.length / 1024).toFixed(0)}KB, ${fileList.length} files)`,
+              timestamp: Date.now(),
+            });
+          } else {
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: `Workspace snapshot too large (${(snapshotData.length / 1024 / 1024).toFixed(1)}MB), skipped`,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (err) {
+          console.error('[Agent] Failed to save workspace snapshot:', err);
+        }
+
+        // Push to GitHub if user has GitHub connected
+        try {
+          const repoName = await pushToGitHub(job, task, executor);
+          if (repoName) {
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: `Pushed to GitHub: ${repoName}`,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (err) {
+          console.error('[Agent] Failed to push to GitHub:', err);
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: `GitHub push failed: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+          });
+        }
+      }
 
       if (!result.success) {
         throw new Error(result.error || 'Agent failed');
