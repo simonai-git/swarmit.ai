@@ -546,6 +546,37 @@ describe('task-lifecycle', () => {
     });
   });
 
+  describe('resilience to queue failures', () => {
+    const mockTask = {
+      id: 'task-resilient',
+      title: 'Resilient Task',
+      status: 'todo',
+      priority: 'medium',
+      assignee: null,
+    };
+
+    it('onTaskCreated should propagate enqueue errors (caller handles)', async () => {
+      mockEnqueue.mockRejectedValueOnce(new Error('Redis connection refused'));
+
+      // onTaskCreated does NOT catch enqueue errors — caller (scheduler/lifecycle) handles them
+      await expect(onTaskCreated(mockTask as any)).rejects.toThrow('Redis connection refused');
+    });
+
+    it('onTaskStatusChanged should propagate enqueue errors', async () => {
+      const testingTask = { ...mockTask, status: 'testing' };
+      mockEnqueue.mockRejectedValueOnce(new Error('Redis connection refused'));
+
+      await expect(onTaskStatusChanged(testingTask as any, 'in_progress', 'testing')).rejects.toThrow('Redis connection refused');
+    });
+
+    it('onTaskAssigned should propagate enqueue errors', async () => {
+      const inProgressTask = { ...mockTask, status: 'in_progress' };
+      mockEnqueue.mockRejectedValueOnce(new Error('Redis connection refused'));
+
+      await expect(onTaskAssigned(inProgressTask as any, 'Simon', 'Alex')).rejects.toThrow('Redis connection refused');
+    });
+  });
+
   describe('shouldAutomate', () => {
     it('should return true for normal tasks', () => {
       const task = { status: 'todo', is_blocked: false };

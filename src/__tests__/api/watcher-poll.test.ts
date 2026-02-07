@@ -244,6 +244,47 @@ describe('API /api/watcher/poll', () => {
 
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
+
+    it('should still enqueue tasks when getStatus fails (Redis down)', async () => {
+      vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium', user_email: 'user@test.com' },
+      ] as any);
+      // getStatus fails (Redis down) — should still attempt to enqueue
+      vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));
+
+      const request = new NextRequest('http://localhost/api/watcher/poll', {
+        method: 'POST',
+        headers: { 'x-api-key': 'test-api-key' },
+      });
+      const response = await POST(request);
+
+      // Should not return 500 — should gracefully degrade
+      expect(response.status).toBe(200);
+      // Should still attempt to enqueue (no dedup info, but that's ok)
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'task-1' })
+      );
+    });
+
+    it('should return 200 with zero queue stats when getStatus fails for GET response', async () => {
+      vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([]);
+      // All getStatus calls fail
+      vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));
+
+      const request = new NextRequest('http://localhost/api/watcher/poll', {
+        method: 'POST',
+        headers: { 'x-api-key': 'test-api-key' },
+      });
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.queueStatus.pending).toBe(0);
+      expect(data.queueStatus.running).toBe(0);
+    });
   });
 
   describe('GET /api/watcher/poll', () => {
@@ -296,6 +337,31 @@ describe('API /api/watcher/poll', () => {
       const response = await GET(request);
 
       expect(response.status).toBe(500);
+    });
+
+    it('should return 200 with zero queue stats when getStatus fails (Redis down)', async () => {
+      vi.mocked(getWatcherConfig).mockResolvedValue({
+        is_running: true,
+        last_run: '2026-02-05T00:00:00Z',
+      } as any);
+      vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));
+      vi.mocked(getAllTasks).mockResolvedValue([
+        { id: '1', status: 'todo' },
+        { id: '2', status: 'in_progress' },
+      ] as any);
+
+      const request = new NextRequest('http://localhost/api/watcher/poll', {
+        headers: { 'x-api-key': 'test-api-key' },
+      });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.watcher.isRunning).toBe(true);
+      expect(data.queue.pending).toBe(0);
+      expect(data.queue.running).toBe(0);
+      expect(data.tasks.todo).toBe(1);
+      expect(data.tasks.total).toBe(2);
     });
   });
 });

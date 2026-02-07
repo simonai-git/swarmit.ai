@@ -126,6 +126,9 @@ class AgentQueue {
   private isProcessing = false;
   private processInterval: NodeJS.Timeout | null = null;
   private useRedis: boolean;
+  private redisHealthy: boolean = true; // Track Redis health for fallback
+  private lastRedisError: number = 0;   // Timestamp of last Redis failure
+  private static readonly REDIS_RETRY_INTERVAL_MS = 60000; // Retry Redis after 60s
 
   constructor() {
     // Use Redis if REDIS_URL is configured
@@ -143,24 +146,59 @@ class AgentQueue {
     }
   }
 
+  /**
+   * Check if Redis should be attempted. Returns false if Redis recently failed
+   * to avoid hammering a dead connection. Periodically retries to detect recovery.
+   */
+  private shouldUseRedis(): boolean {
+    if (!this.useRedis || !this.redisQueue) return false;
+    if (this.redisHealthy) return true;
+
+    // Periodically retry to detect Redis recovery
+    if (Date.now() - this.lastRedisError > AgentQueue.REDIS_RETRY_INTERVAL_MS) {
+      console.log('[AgentQueue] Retrying Redis connection...');
+      this.redisHealthy = true;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Mark Redis as unhealthy after a failure. Subsequent calls will fall back
+   * to in-memory until REDIS_RETRY_INTERVAL_MS elapses.
+   */
+  private markRedisUnhealthy(error: unknown): void {
+    if (this.redisHealthy) {
+      console.error('[AgentQueue] Redis failed, falling back to in-memory queue:', error instanceof Error ? error.message : String(error));
+    }
+    this.redisHealthy = false;
+    this.lastRedisError = Date.now();
+  }
+
   // Enqueue a job
   async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
-    if (this.useRedis && this.redisQueue) {
-      const qj = await this.redisQueue.enqueue({
-        tenantId,
-        taskId: job.taskId,
-        agentType: job.agentType,
-        priority: job.priority,
-        maxRetries: CONFIG.maxRetries,
-        userEmail: job.userEmail,
-      });
-      
-      // Auto-start processing
-      this.startProcessing();
-      
-      return queueJobToAgentJob(qj);
+    if (this.shouldUseRedis()) {
+      try {
+        const qj = await this.redisQueue!.enqueue({
+          tenantId,
+          taskId: job.taskId,
+          agentType: job.agentType,
+          priority: job.priority,
+          maxRetries: CONFIG.maxRetries,
+          userEmail: job.userEmail,
+        });
+
+        // Auto-start processing
+        this.startProcessing();
+
+        return queueJobToAgentJob(qj);
+      } catch (error) {
+        this.markRedisUnhealthy(error);
+        // Fall through to in-memory
+      }
     }
 
     // Fallback to in-memory
@@ -202,16 +240,21 @@ class AgentQueue {
     jobs: AgentJob[];
     activeRuns: AgentRun[];
   }> {
-    if (this.useRedis && this.redisQueue) {
-      const status = await this.redisQueue.getStatus(tenantId);
-      return {
-        pending: status.pending,
-        running: status.running,
-        completed: 0, // Redis doesn't track completed count
-        failed: 0,
-        jobs: status.jobs.map(queueJobToAgentJob),
-        activeRuns: Array.from(this.running.values()),
-      };
+    if (this.shouldUseRedis()) {
+      try {
+        const status = await this.redisQueue!.getStatus(tenantId);
+        return {
+          pending: status.pending,
+          running: status.running,
+          completed: 0, // Redis doesn't track completed count
+          failed: 0,
+          jobs: status.jobs.map(queueJobToAgentJob),
+          activeRuns: Array.from(this.running.values()),
+        };
+      } catch (error) {
+        this.markRedisUnhealthy(error);
+        // Fall through to in-memory
+      }
     }
 
     // In-memory status, optionally filtered by tenantId
@@ -231,11 +274,16 @@ class AgentQueue {
 
   // Get job by ID
   async getJob(jobId: string): Promise<AgentJob | undefined> {
-    if (this.useRedis && this.redisQueue) {
-      const qj = await this.redisQueue.getJob(jobId);
-      return qj ? queueJobToAgentJob(qj) : undefined;
+    if (this.shouldUseRedis()) {
+      try {
+        const qj = await this.redisQueue!.getJob(jobId);
+        return qj ? queueJobToAgentJob(qj) : undefined;
+      } catch (error) {
+        this.markRedisUnhealthy(error);
+      }
     }
-    return undefined;
+    // In-memory fallback: search local jobs
+    return this.jobs.find(j => j.id === jobId);
   }
 
   // Get run by ID
@@ -245,8 +293,19 @@ class AgentQueue {
 
   // Cancel a job
   async cancel(jobId: string): Promise<boolean> {
-    if (this.useRedis && this.redisQueue) {
-      return this.redisQueue.cancel(jobId);
+    if (this.shouldUseRedis()) {
+      try {
+        return await this.redisQueue!.cancel(jobId);
+      } catch (error) {
+        this.markRedisUnhealthy(error);
+      }
+    }
+    // In-memory fallback: cancel local job
+    const job = this.jobs.find(j => j.id === jobId);
+    if (job && ['pending', 'running'].includes(job.status)) {
+      job.status = 'cancelled' as AgentJob['status'];
+      job.completedAt = new Date();
+      return true;
     }
     return false;
   }
@@ -255,11 +314,16 @@ class AgentQueue {
   startProcessing(): void {
     if (this.processInterval) return;
 
-    if (this.useRedis && this.redisQueue) {
-      // Use Redis queue's built-in processor
-      this.redisQueue.startProcessing(async (job) => {
-        await this.executeJob(job);
-      });
+    if (this.shouldUseRedis()) {
+      try {
+        // Use Redis queue's built-in processor
+        this.redisQueue!.startProcessing(async (job) => {
+          await this.executeJob(job);
+        });
+      } catch (error) {
+        this.markRedisUnhealthy(error);
+        // Fall through to in-memory processing below
+      }
     }
 
     // Process in-memory queue
@@ -268,7 +332,7 @@ class AgentQueue {
       this.cleanup();
 
       if (this.isProcessing) return;
-      if (this.useRedis) return; // Redis handles its own processing
+      if (this.useRedis && this.redisHealthy) return; // Redis handles its own processing when healthy
 
       this.isProcessing = true;
       try {
@@ -335,13 +399,17 @@ class AgentQueue {
       this.processInterval = null;
     }
     if (this.useRedis && this.redisQueue) {
-      this.redisQueue.stopProcessing();
+      try {
+        this.redisQueue.stopProcessing();
+      } catch (error) {
+        console.error('[AgentQueue] Error stopping Redis processing:', error);
+      }
     }
   }
 
   // Cleanup old completed/failed jobs from in-memory storage
   cleanup(maxAgeMs: number = 3600000): void {
-    if (this.useRedis) return; // Redis handles cleanup automatically via TTL
+    if (this.useRedis && this.redisHealthy) return; // Redis handles cleanup automatically via TTL
 
     // Force-fail stale running jobs (no built-in timeout in in-memory queue unlike Redis)
     for (const j of this.jobs) {

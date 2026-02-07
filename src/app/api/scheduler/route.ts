@@ -12,16 +12,22 @@ export async function GET() {
     startScheduler();
   }
 
-  const queueStatus = await agentQueue.getStatus();
-
-  return NextResponse.json({
-    scheduler: { ...getSchedulerStatus() },
-    queue: {
+  let queueInfo = { jobsQueued: 0, activeRuns: 0, jobs: [] as unknown[], runs: [] as unknown[] };
+  try {
+    const queueStatus = await agentQueue.getStatus();
+    queueInfo = {
       jobsQueued: queueStatus.jobs.length,
       activeRuns: queueStatus.activeRuns.length,
       jobs: queueStatus.jobs,
       runs: queueStatus.activeRuns,
-    },
+    };
+  } catch (error) {
+    console.warn('[Scheduler API] Failed to get queue status:', error instanceof Error ? error.message : String(error));
+  }
+
+  return NextResponse.json({
+    scheduler: { ...getSchedulerStatus() },
+    queue: queueInfo,
   });
 }
 
@@ -40,17 +46,24 @@ export async function POST(request: NextRequest) {
         stopScheduler();
         return NextResponse.json({ success: true, message: 'Scheduler stopped' });
 
-      case 'tick':
+      case 'tick': {
         await forceSchedulerTick();
-        const status = await agentQueue.getStatus();
-        return NextResponse.json({ 
-          success: true, 
-          message: 'Scheduler tick executed',
-          queue: {
+        let tickQueueInfo = { jobsQueued: 0, activeRuns: 0 };
+        try {
+          const status = await agentQueue.getStatus();
+          tickQueueInfo = {
             jobsQueued: status.jobs.length,
             activeRuns: status.activeRuns.length,
-          },
+          };
+        } catch (error) {
+          console.warn('[Scheduler API] Failed to get queue status after tick:', error instanceof Error ? error.message : String(error));
+        }
+        return NextResponse.json({
+          success: true,
+          message: 'Scheduler tick executed',
+          queue: tickQueueInfo,
         });
+      }
 
       default:
         return NextResponse.json(
