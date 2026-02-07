@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await pool.query(
-      `SELECT railway_token, railway_projects, railway_selected_project
+      `SELECT railway_token, railway_projects, railway_selected_project,
+              github_token, github_username, github_connected_at
        FROM user_integrations
        WHERE user_email = $1`,
       [session.user.email]
@@ -24,6 +25,11 @@ export async function GET(request: NextRequest) {
         connected: !!integrations.railway_token,
         projects: integrations.railway_projects ? JSON.parse(integrations.railway_projects) : [],
         selectedProject: integrations.railway_selected_project,
+      },
+      github: {
+        connected: !!integrations.github_token,
+        username: integrations.github_username || null,
+        connectedAt: integrations.github_connected_at || null,
       },
     });
   } catch (error) {

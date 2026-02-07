@@ -118,6 +118,8 @@ export abstract class TaskSandbox {
   abstract writeFile(filePath: string, content: string): Promise<void>;
   abstract listFiles(dir?: string): Promise<string[]>;
   abstract cleanup(): Promise<void>;
+  abstract saveSnapshot(excludeDirs?: string[]): Promise<Buffer>;
+  abstract restoreSnapshot(snapshot: Buffer): Promise<void>;
 
   getWorkdir(): string {
     return this.workdir;
@@ -313,6 +315,30 @@ export class DockerSandbox extends TaskSandbox {
     return result.stdout.split('\n').filter(Boolean);
   }
 
+  async saveSnapshot(excludeDirs: string[] = ['node_modules', '.git']): Promise<Buffer> {
+    const excludeArgs = excludeDirs.map(d => `--exclude=${d}`).join(' ');
+    const result = await this.exec(`tar czf /tmp/snapshot.tar.gz ${excludeArgs} -C ${this.workdir} .`);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to create snapshot: ${result.stderr}`);
+    }
+    const catResult = await execAsync(`docker exec ${this.containerId} cat /tmp/snapshot.tar.gz`, { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 });
+    return catResult.stdout as unknown as Buffer;
+  }
+
+  async restoreSnapshot(snapshot: Buffer): Promise<void> {
+    const tmpFile = path.join(os.tmpdir(), `restore-${uuidv4().slice(0, 8)}.tar.gz`);
+    await fs.writeFile(tmpFile, snapshot);
+    try {
+      await execAsync(`docker cp ${tmpFile} ${this.containerId}:/tmp/restore.tar.gz`);
+      const result = await this.exec(`tar xzf /tmp/restore.tar.gz -C ${this.workdir}`);
+      if (result.exitCode !== 0) {
+        throw new Error(`Failed to restore snapshot: ${result.stderr}`);
+      }
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {});
+    }
+  }
+
   async cleanup(): Promise<void> {
     if (this.containerId) {
       try {
@@ -478,6 +504,37 @@ export class SubprocessSandbox extends TaskSandbox {
 
     await walk(targetDir, this.workdir);
     return files;
+  }
+
+  async saveSnapshot(excludeDirs: string[] = ['node_modules', '.git']): Promise<Buffer> {
+    const excludeArgs = excludeDirs.map(d => `--exclude=${d}`).join(' ');
+    const tmpFile = path.join(os.tmpdir(), `snapshot-${uuidv4().slice(0, 8)}.tar.gz`);
+    const result = await this.exec(`tar czf ${tmpFile} ${excludeArgs} -C ${this.workdir} .`);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to create snapshot: ${result.stderr}`);
+    }
+    try {
+      const data = await fs.readFile(tmpFile);
+      if (data.length > 10 * 1024 * 1024) {
+        throw new Error(`Snapshot too large: ${(data.length / 1024 / 1024).toFixed(1)}MB (max 10MB)`);
+      }
+      return data;
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {});
+    }
+  }
+
+  async restoreSnapshot(snapshot: Buffer): Promise<void> {
+    const tmpFile = path.join(os.tmpdir(), `restore-${uuidv4().slice(0, 8)}.tar.gz`);
+    await fs.writeFile(tmpFile, snapshot);
+    try {
+      const result = await this.exec(`tar xzf ${tmpFile} -C ${this.workdir}`);
+      if (result.exitCode !== 0) {
+        throw new Error(`Failed to restore snapshot: ${result.stderr}`);
+      }
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {});
+    }
   }
 
   async cleanup(): Promise<void> {

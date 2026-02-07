@@ -132,6 +132,13 @@ export class SandboxToolExecutor implements ToolExecutor {
   }
 
   /**
+   * Get the underlying sandbox instance
+   */
+  getSandbox(): TaskSandbox {
+    return this.sandbox;
+  }
+
+  /**
    * Get the sandbox working directory
    */
   getWorkdir(): string {
