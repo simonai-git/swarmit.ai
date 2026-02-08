@@ -481,6 +481,9 @@ class AgentQueue {
     };
     this.running.set(run.id, run);
 
+    // Persist run record first so FK constraint on tasks.current_run_id is satisfied
+    await saveAgentRun(run);
+
     let executor: SandboxToolExecutor | null = null;
 
     try {
