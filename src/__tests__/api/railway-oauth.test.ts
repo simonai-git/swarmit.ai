@@ -153,7 +153,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(response.status).toBe(307);
     const location = response.headers.get('location')!;
     expect(location).toContain('railway=error');
-    expect(location).toContain('Not+authenticated');
+    expect(location).toContain('Not%20authenticated');
   });
 
   it('should redirect with error when Railway returns an error', async () => {
@@ -166,7 +166,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(response.status).toBe(307);
     const location = response.headers.get('location')!;
     expect(location).toContain('railway=error');
-    expect(location).toContain('User+denied+access');
+    expect(location).toContain('User%20denied%20access');
   });
 
   it('should redirect with error when code or state is missing', async () => {
@@ -179,7 +179,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(response.status).toBe(307);
     const location = response.headers.get('location')!;
     expect(location).toContain('railway=error');
-    expect(location).toContain('Missing+code+or+state');
+    expect(location).toContain('Missing%20code%20or%20state');
   });
 
   it('should redirect with error when CSRF state does not match', async () => {
@@ -193,7 +193,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(response.status).toBe(307);
     const location = response.headers.get('location')!;
     expect(location).toContain('railway=error');
-    expect(location).toContain('Invalid+state');
+    expect(location).toContain('Invalid%20state');
   });
 
   it('should redirect with error when token exchange fails', async () => {
@@ -212,7 +212,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(response.status).toBe(307);
     const location = response.headers.get('location')!;
     expect(location).toContain('railway=error');
-    expect(location).toContain('Failed+to+exchange');
+    expect(location).toContain('Failed%20to%20exchange');
   });
 
   it('should exchange code for tokens and store in DB on success', async () => {
