@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
+import { cleanupTaskVolume } from './sandbox';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 import { taskLogBuffer } from './task-log-buffer';
 import { pushToGitHub } from './github';
@@ -482,6 +483,18 @@ class AgentQueue {
     let executor: SandboxToolExecutor | null = null;
 
     try {
+      // Atomically claim the task — prevents concurrent runs
+      const claimed = await claimTaskRun(job.taskId, run.id);
+      if (!claimed) {
+        run.status = 'failed';
+        run.error = 'Task already has an active agent run';
+        run.completedAt = new Date();
+        await saveAgentRun(run);
+        this.running.delete(run.id);
+        console.log(`[Agent] Task ${job.taskId.slice(0, 8)} already claimed, skipping run ${run.id}`);
+        return;
+      }
+
       // Load task context
       const task = await getTask(job.taskId);
       if (!task) throw new Error('Task not found');
@@ -548,38 +561,55 @@ class AgentQueue {
         timestamp: Date.now(),
       });
 
-      // Restore workspace snapshot if one exists for this task
-      try {
-        const snapshot = await getWorkspaceSnapshot(job.taskId);
-        if (snapshot) {
-          taskLogBuffer.append({
-            task_id: job.taskId,
-            run_id: run.id,
-            agent_type: job.agentType,
-            stream: 'system',
-            content: `Restoring workspace snapshot (${(snapshot.size_bytes / 1024).toFixed(0)}KB, ${snapshot.file_count} files)...`,
-            timestamp: Date.now(),
-          });
-          await executor.getSandbox().restoreSnapshot(snapshot.snapshot);
-          taskLogBuffer.append({
-            task_id: job.taskId,
-            run_id: run.id,
-            agent_type: job.agentType,
-            stream: 'system',
-            content: 'Workspace restored successfully',
-            timestamp: Date.now(),
-          });
-        }
-      } catch (err) {
-        console.error('[Agent] Failed to restore workspace snapshot:', err);
+      // Verify sandbox has required tools
+      const toolCheck = await executor.execCommand('which node && which npm && which git');
+      if (toolCheck.exitCode !== 0) {
         taskLogBuffer.append({
           task_id: job.taskId,
           run_id: run.id,
           agent_type: job.agentType,
           stream: 'system',
-          content: `Warning: Failed to restore workspace snapshot: ${err instanceof Error ? err.message : String(err)}`,
+          content: `Warning: Some tools not found in sandbox PATH. Output: ${toolCheck.stdout || toolCheck.stderr}`,
           timestamp: Date.now(),
         });
+      }
+
+      // Restore workspace snapshot if one exists for this task
+      // Docker mode uses named volumes for persistence, so snapshots are only needed in subprocess mode
+      const isDockerMode = process.env.SANDBOX_MODE === 'docker';
+      if (!isDockerMode) {
+        try {
+          const snapshot = await getWorkspaceSnapshot(job.taskId);
+          if (snapshot) {
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: `Restoring workspace snapshot (${(snapshot.size_bytes / 1024).toFixed(0)}KB, ${snapshot.file_count} files)...`,
+              timestamp: Date.now(),
+            });
+            await executor.getSandbox().restoreSnapshot(snapshot.snapshot);
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: 'Workspace restored successfully',
+              timestamp: Date.now(),
+            });
+          }
+        } catch (err) {
+          console.error('[Agent] Failed to restore workspace snapshot:', err);
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: `Warning: Failed to restore workspace snapshot: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+          });
+        }
       }
 
       run.transcript.push({
@@ -706,36 +736,50 @@ class AgentQueue {
         timestamp: Date.now(),
       });
 
-      // Save workspace snapshot after successful run
-      if (result.success) {
+      // Save workspace snapshot on ALL runs (not just successful ones)
+      // Even failed runs may have created useful files for the next attempt
+      // Docker mode uses named volumes for persistence, so snapshots are only needed in subprocess mode
+      if (!isDockerMode) {
         try {
-          const snapshotData = await executor.getSandbox().saveSnapshot();
-          if (snapshotData.length <= 10 * 1024 * 1024) {
-            const fileList = await executor.listFiles('.');
-            await saveWorkspaceSnapshot(job.taskId, run.id, job.agentType, snapshotData, fileList.length, snapshotData.length);
-            taskLogBuffer.append({
-              task_id: job.taskId,
-              run_id: run.id,
-              agent_type: job.agentType,
-              stream: 'system',
-              content: `Workspace snapshot saved (${(snapshotData.length / 1024).toFixed(0)}KB, ${fileList.length} files)`,
-              timestamp: Date.now(),
-            });
-          } else {
-            taskLogBuffer.append({
-              task_id: job.taskId,
-              run_id: run.id,
-              agent_type: job.agentType,
-              stream: 'system',
-              content: `Workspace snapshot too large (${(snapshotData.length / 1024 / 1024).toFixed(1)}MB), skipped`,
-              timestamp: Date.now(),
-            });
+          const fileList = await executor.listFiles('.');
+          if (fileList.length > 0) {
+            const snapshotData = await executor.getSandbox().saveSnapshot();
+            if (snapshotData.length <= 10 * 1024 * 1024) {
+              await saveWorkspaceSnapshot(job.taskId, run.id, job.agentType, snapshotData, fileList.length, snapshotData.length);
+              taskLogBuffer.append({
+                task_id: job.taskId,
+                run_id: run.id,
+                agent_type: job.agentType,
+                stream: 'system',
+                content: `Workspace snapshot saved (${(snapshotData.length / 1024).toFixed(0)}KB, ${fileList.length} files)`,
+                timestamp: Date.now(),
+              });
+            } else {
+              taskLogBuffer.append({
+                task_id: job.taskId,
+                run_id: run.id,
+                agent_type: job.agentType,
+                stream: 'system',
+                content: `Workspace snapshot too large (${(snapshotData.length / 1024 / 1024).toFixed(1)}MB), skipped`,
+                timestamp: Date.now(),
+              });
+            }
           }
         } catch (err) {
           console.error('[Agent] Failed to save workspace snapshot:', err);
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: `Warning: Failed to save workspace snapshot: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+          });
         }
+      }
 
-        // Push to GitHub if user has GitHub connected
+      // Push to GitHub only on success
+      if (result.success) {
         try {
           const repoName = await pushToGitHub(job, task, executor);
           if (repoName) {
@@ -781,6 +825,9 @@ class AgentQueue {
 
       throw error;
     } finally {
+      // Release the task claim so other runs can proceed
+      await releaseTaskRun(job.taskId, run.id);
+
       // Cleanup sandbox
       if (executor) {
         await executor.cleanup();
@@ -799,8 +846,8 @@ class AgentQueue {
       // Flush all pending logs to DB so they're visible in the modal
       await taskLogBuffer.flushAsync();
       taskLogBuffer.clearTask(job.taskId);
-      // Keep in memory briefly, then cleanup
-      setTimeout(() => this.running.delete(run.id), 3600000);
+      // Clean up immediately — DB is now the source of truth for active runs
+      this.running.delete(run.id);
     }
   }
 }
@@ -871,5 +918,19 @@ export async function getSpendByPeriod(startDate: Date, endDate: Date): Promise<
     byAgent: Object.fromEntries(byAgentResult.rows.map(r => [r.agent_type, r.total])),
     byDay: byDayResult.rows.map(r => ({ date: r.date.toISOString().split('T')[0], total: r.total })),
   };
+}
+
+/**
+ * Clean up all resources associated with a task (volume + snapshot).
+ * Call when a task reaches 'done' status or is deleted.
+ */
+export async function cleanupTaskResources(taskId: string): Promise<void> {
+  try {
+    await cleanupTaskVolume(taskId);
+    await deleteWorkspaceSnapshot(taskId);
+    console.log(`[Agent] Cleaned up resources for task ${taskId}`);
+  } catch (err) {
+    console.error(`[Agent] Failed to cleanup resources for task ${taskId}:`, err);
+  }
 }
 
