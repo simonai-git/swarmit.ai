@@ -95,35 +95,107 @@ export async function pushWorkspaceToGitHub(
   commitMessage: string,
   branch: string = 'main'
 ): Promise<void> {
-  const authUrl = `https://${token}@github.com/${repoFullName}.git`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
 
-  // Initialize git if not already
-  await sandbox.execCommand('git init');
-  await sandbox.execCommand('git config user.email "swarmit@bot.dev"');
-  await sandbox.execCommand('git config user.name "Swarmit Agent"');
+  // List all files in the workspace
+  const files = await sandbox.listFiles('.', true);
+  if (files.length === 0) {
+    console.warn('[GitHub] No files to push');
+    return;
+  }
 
-  // Set remote (add or update)
-  const remoteCheck = await sandbox.execCommand('git remote get-url github');
-  if (remoteCheck.exitCode !== 0) {
-    await sandbox.execCommand(`git remote add github ${authUrl}`);
+  console.log(`[GitHub] Pushing ${files.length} files to ${repoFullName}`);
+
+  // Create blobs for each file
+  const treeItems: Array<{ path: string; mode: string; type: string; sha: string }> = [];
+
+  for (const filePath of files) {
+    const content = await sandbox.readFile(filePath);
+    const blobRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/blobs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ content, encoding: 'utf-8' }),
+    });
+    if (!blobRes.ok) {
+      throw new Error(`Failed to create blob for ${filePath}: ${blobRes.status}`);
+    }
+    const blob = await blobRes.json();
+    treeItems.push({
+      path: filePath,
+      mode: '100644',
+      type: 'blob',
+      sha: blob.sha,
+    });
+  }
+
+  // Get current commit SHA (if branch exists)
+  let parentSha: string | null = null;
+  const refRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/ref/heads/${branch}`, {
+    headers,
+  });
+  if (refRes.ok) {
+    const ref = await refRes.json();
+    parentSha = ref.object.sha;
+  }
+
+  // Create tree
+  const treeBody: { tree: typeof treeItems; base_tree?: string } = { tree: treeItems };
+  // Don't use base_tree — we want to replace all files cleanly
+  const treeRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/trees`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(treeBody),
+  });
+  if (!treeRes.ok) {
+    throw new Error(`Failed to create tree: ${treeRes.status}`);
+  }
+  const tree = await treeRes.json();
+
+  // Create commit
+  const commitBody: { message: string; tree: string; parents?: string[]; author: { name: string; email: string } } = {
+    message: commitMessage,
+    tree: tree.sha,
+    author: { name: 'Swarmit Agent', email: 'swarmit@bot.dev' },
+  };
+  if (parentSha) {
+    commitBody.parents = [parentSha];
+  }
+  const commitRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/commits`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(commitBody),
+  });
+  if (!commitRes.ok) {
+    throw new Error(`Failed to create commit: ${commitRes.status}`);
+  }
+  const commit = await commitRes.json();
+
+  // Update or create branch ref
+  if (parentSha) {
+    const updateRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/refs/heads/${branch}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ sha: commit.sha, force: true }),
+    });
+    if (!updateRes.ok) {
+      throw new Error(`Failed to update ref: ${updateRes.status}`);
+    }
   } else {
-    await sandbox.execCommand(`git remote set-url github ${authUrl}`);
+    const createRes = await fetch(`${GITHUB_API}/repos/${repoFullName}/git/refs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
+    });
+    if (!createRes.ok) {
+      throw new Error(`Failed to create ref: ${createRes.status}`);
+    }
   }
 
-  // Stage and commit
-  await sandbox.execCommand('git add -A');
-  const commitResult = await sandbox.execCommand(
-    `git commit -m "${commitMessage.replace(/"/g, '\\"')}" --allow-empty`
-  );
-  if (commitResult.exitCode !== 0 && !commitResult.stderr.includes('nothing to commit')) {
-    console.warn('[GitHub] Commit warning:', commitResult.stderr);
-  }
-
-  // Push (force to handle diverged histories from auto-init)
-  const pushResult = await sandbox.execCommand(`git push github HEAD:${branch} --force`);
-  if (pushResult.exitCode !== 0) {
-    throw new Error(`Git push failed: ${pushResult.stderr}`);
-  }
+  console.log(`[GitHub] Pushed ${files.length} files to ${repoFullName}@${branch} (${commit.sha.slice(0, 8)})`);
 }
 
 /**
