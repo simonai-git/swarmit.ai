@@ -64,7 +64,7 @@ export interface AgentRun {
 }
 
 // Job timeout for in-memory queue (matches Redis jobTimeoutMs)
-const JOB_TIMEOUT_MS = 300000; // 5 minutes
+const JOB_TIMEOUT_MS = 600000; // 10 minutes
 
 // Queue configuration
 const CONFIG = {
@@ -152,7 +152,7 @@ class AgentQueue {
       this.redisQueue = getQueue({
         maxConcurrentPerTenant: CONFIG.maxConcurrent,
         maxConcurrentGlobal: 10,
-        jobTimeoutMs: 300000,
+        jobTimeoutMs: 600000,
         retryDelayMs: CONFIG.retryDelayMs,
       });
     } else {

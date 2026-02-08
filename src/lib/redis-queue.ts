@@ -59,7 +59,7 @@ export interface QueueConfig {
 const DEFAULT_CONFIG: QueueConfig = {
   maxConcurrentPerTenant: 3,
   maxConcurrentGlobal: 10,
-  jobTimeoutMs: 300000,        // 5 minutes
+  jobTimeoutMs: 600000,        // 10 minutes
   retryDelayMs: 10000,         // 10 seconds
   cleanupIntervalMs: 60000,    // 1 minute
   jobRetentionMs: 86400000,    // 24 hours
