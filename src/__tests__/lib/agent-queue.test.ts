@@ -362,12 +362,12 @@ describe('agent-queue', () => {
         tenantId: 'default',
       });
 
-      // Simulate job running for 6 minutes
+      // Simulate job running for 11 minutes (exceeds 10 min timeout)
       const status = await agentQueue.getStatus();
       const internalJob = status.jobs.find(j => j.id === job.id);
       if (internalJob) {
         internalJob.status = 'running';
-        internalJob.startedAt = new Date(Date.now() - 6 * 60000);
+        internalJob.startedAt = new Date(Date.now() - 11 * 60000);
       }
 
       agentQueue.cleanup();
@@ -378,7 +378,7 @@ describe('agent-queue', () => {
       expect(updatedJob?.error).toBe('Job timed out (stale)');
     });
 
-    it('should keep jobs running less than 5 minutes', async () => {
+    it('should keep jobs running less than 10 minutes', async () => {
       const job = await agentQueue.enqueue({
         taskId: 'fresh-task-1',
         agentType: 'developer',
@@ -409,12 +409,12 @@ describe('agent-queue', () => {
         tenantId: 'default',
       });
 
-      // Simulate job running for 10 minutes
+      // Simulate job running for 11 minutes (exceeds 10 min timeout)
       const status = await agentQueue.getStatus();
       const internalJob = status.jobs.find(j => j.id === job.id);
       if (internalJob) {
         internalJob.status = 'running';
-        internalJob.startedAt = new Date(Date.now() - 10 * 60000);
+        internalJob.startedAt = new Date(Date.now() - 11 * 60000);
       }
 
       agentQueue.cleanup();

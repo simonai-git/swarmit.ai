@@ -64,7 +64,15 @@ export async function createRepo(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to create repo: ${res.status} ${err.message || ''}`);
+    const msg = err.message || '';
+    if (res.status === 403 && msg.includes('Resource not accessible')) {
+      throw new Error(
+        `Failed to create repo: 403 Resource not accessible by integration. ` +
+        `This usually means the GitHub connection uses a GitHub App token instead of a classic OAuth token. ` +
+        `Please reconnect GitHub using a classic OAuth App or a Personal Access Token with the 'repo' scope.`
+      );
+    }
+    throw new Error(`Failed to create repo: ${res.status} ${msg}`);
   }
   const data = await res.json();
   return { full_name: data.full_name, clone_url: data.clone_url, html_url: data.html_url };
