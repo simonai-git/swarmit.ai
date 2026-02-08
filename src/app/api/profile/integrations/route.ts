@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import pool from '@/lib/db';
 import { refreshRailwayToken } from './railway/route';
+import { refreshGitHubToken } from './github/route';
 
 // GET /api/profile/integrations - Get all integrations status
 export async function GET(_request: NextRequest) {
@@ -14,7 +15,8 @@ export async function GET(_request: NextRequest) {
     const result = await pool.query(
       `SELECT railway_token, railway_projects, railway_selected_project, railway_connected_at,
               railway_refresh_token, railway_token_expires_at, railway_auth_method,
-              github_token, github_username, github_connected_at
+              github_token, github_username, github_connected_at,
+              github_refresh_token, github_token_expires_at, github_auth_method
        FROM user_integrations
        WHERE user_email = $1`,
       [session.user.email]
@@ -54,6 +56,40 @@ export async function GET(_request: NextRequest) {
       }
     }
 
+    // Auto-refresh expired GitHub OAuth tokens
+    if (
+      integrations.github_token &&
+      integrations.github_auth_method === 'oauth' &&
+      integrations.github_refresh_token &&
+      integrations.github_token_expires_at
+    ) {
+      const expiresAt = new Date(integrations.github_token_expires_at);
+      const now = new Date();
+      // Refresh if token expires within 5 minutes
+      if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
+        try {
+          const refreshed = await refreshGitHubToken(integrations.github_refresh_token);
+          const newExpiresAt = refreshed.expires_in
+            ? new Date(Date.now() + refreshed.expires_in * 1000)
+            : null;
+
+          await pool.query(
+            `UPDATE user_integrations SET
+              github_token = $1, github_refresh_token = $2, github_token_expires_at = $3, updated_at = NOW()
+             WHERE user_email = $4`,
+            [refreshed.access_token, refreshed.refresh_token || null, newExpiresAt, session.user.email]
+          );
+
+          integrations.github_token = refreshed.access_token;
+          integrations.github_refresh_token = refreshed.refresh_token;
+          integrations.github_token_expires_at = newExpiresAt;
+        } catch (error) {
+          console.error('Failed to refresh GitHub OAuth token:', error);
+          // Token refresh failed — still return current state, user may need to re-auth
+        }
+      }
+    }
+
     // Parse railway_projects - supports both old format (array) and new format ({ account, projects })
     let railwayProjects: any[] = [];
     let railwayAccount: { name: string; email: string } | null = null;
@@ -83,6 +119,8 @@ export async function GET(_request: NextRequest) {
         connected: !!integrations.github_token,
         username: integrations.github_username || null,
         connectedAt: integrations.github_connected_at || null,
+        authMethod: integrations.github_auth_method || null,
+        oauthAvailable: !!process.env.GITHUB_CLIENT_ID,
       },
     });
   } catch (error) {

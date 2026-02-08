@@ -55,6 +55,8 @@ function IntegrationsContent() {
   const [githubConnected, setGithubConnected] = useState(false);
   const [githubUsername, setGithubUsername] = useState('');
   const [githubToken, setGithubToken] = useState('');
+  const [githubAuthMethod, setGithubAuthMethod] = useState<string | null>(null);
+  const [githubOAuthAvailable, setGithubOAuthAvailable] = useState(false);
   const [showGithubInput, setShowGithubInput] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
 
@@ -70,11 +72,21 @@ function IntegrationsContent() {
       const message = searchParams.get('message') || 'Failed to connect Railway via OAuth';
       setRailwayError(message);
     }
+
+    const githubStatus = searchParams.get('github');
+    if (githubStatus === 'error') {
+      const message = searchParams.get('message') || 'Failed to connect GitHub via OAuth';
+      setGithubError(message);
+    }
+    if (githubStatus === 'connected') {
+      fetchIntegrations();
+    }
+
     // Clean up URL params after reading
-    if (railwayStatus) {
+    if (railwayStatus || githubStatus) {
       router.replace('/profile/integrations', { scroll: false });
     }
-  }, [searchParams, router]);
+  }, [searchParams, router]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-clear errors after 10 seconds
   useEffect(() => {
@@ -111,6 +123,8 @@ function IntegrationsContent() {
         setSelectedProject(data.railway?.selectedProject || '');
         setGithubConnected(data.github?.connected || false);
         setGithubUsername(data.github?.username || '');
+        setGithubAuthMethod(data.github?.authMethod || null);
+        setGithubOAuthAvailable(data.github?.oauthAvailable || false);
       }
     } catch (error) {
       console.error('Failed to fetch integrations:', error);
@@ -274,6 +288,7 @@ function IntegrationsContent() {
       if (res.ok) {
         setGithubConnected(false);
         setGithubUsername('');
+        setGithubAuthMethod(null);
       }
     } catch (error) {
       console.error('Failed to disconnect GitHub:', error);
@@ -415,12 +430,17 @@ function IntegrationsContent() {
                     </button>
                   </div>
                 ) : (
-                  integration.id === 'railway' ? (
-                    // Railway: show connect button that expands to two-option view
+                  (integration.id === 'railway' || integration.id === 'github') ? (
+                    // Railway/GitHub: show connect button that expands to two-option view
                     <button
                       onClick={() => {
-                        setShowTokenInput(true);
-                        setRailwayError('');
+                        if (integration.id === 'railway') {
+                          setShowTokenInput(true);
+                          setRailwayError('');
+                        } else {
+                          setShowGithubInput(true);
+                          setGithubError('');
+                        }
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                     >
@@ -433,9 +453,6 @@ function IntegrationsContent() {
                         if (integration.id === 'claude') {
                           setShowClaudeInput(true);
                           setClaudeError('');
-                        } else if (integration.id === 'github') {
-                          setShowGithubInput(true);
-                          setGithubError('');
                         }
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -615,9 +632,45 @@ function IntegrationsContent() {
               </div>
             )}
 
-            {/* GitHub Token Input */}
+            {/* GitHub Connection Options */}
             {integration.id === 'github' && showGithubInput && !githubConnected && (
-              <div className="px-6 pb-6">
+              <div className="px-6 pb-6 space-y-4">
+                {/* OAuth Option */}
+                {githubOAuthAvailable && (
+                  <div className="p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-sm font-medium text-white">Connect with GitHub</h4>
+                          <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 rounded font-medium">
+                            Recommended
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400">
+                          Sign in with your GitHub account for seamless access.
+                        </p>
+                      </div>
+                      <a
+                        href="/api/profile/integrations/github/oauth"
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-gray-700 to-gray-900 text-white rounded-lg font-medium hover:opacity-90 transition-opacity text-sm"
+                      >
+                        <Github className="w-4 h-4" />
+                        Connect with GitHub
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Divider */}
+                {githubOAuthAvailable && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 border-t border-gray-600" />
+                    <span className="text-xs text-gray-500">Or use a Personal Access Token</span>
+                    <div className="flex-1 border-t border-gray-600" />
+                  </div>
+                )}
+
+                {/* Token Input Option */}
                 <div className="p-4 bg-gray-700/50 rounded-lg space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -679,7 +732,8 @@ function IntegrationsContent() {
                     <Github className="w-5 h-5 text-gray-400" />
                     <div>
                       <p className="text-sm text-gray-300">
-                        Connected as <a href={`https://github.com/${githubUsername}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-medium">@{githubUsername}</a>
+                        Connected via {githubAuthMethod === 'oauth' ? 'GitHub OAuth' : 'Personal Access Token'} as{' '}
+                        <a href={`https://github.com/${githubUsername}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-medium">@{githubUsername}</a>
                       </p>
                       <p className="text-xs text-gray-500 mt-1">Agent code will be pushed to GitHub after successful runs</p>
                     </div>

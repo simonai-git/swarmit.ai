@@ -388,6 +388,16 @@ async function initDb() {
       END $$;
     `);
 
+    // Add GitHub OAuth columns to user_integrations
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_refresh_token TEXT;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_token_expires_at TIMESTAMPTZ;
+        ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS github_auth_method TEXT DEFAULT 'token';
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
     // Add github_repo to projects
     await client.query(`
       DO $$ BEGIN
@@ -1714,28 +1724,50 @@ export async function deleteWorkspaceSnapshot(taskId: string): Promise<boolean> 
 
 // ==================== GitHub Integration ====================
 
-export async function getUserGitHubToken(userEmail: string): Promise<{ token: string; username: string } | null> {
+export async function getUserGitHubToken(userEmail: string): Promise<{
+  token: string;
+  username: string;
+  authMethod: string;
+  refreshToken: string | null;
+  expiresAt: Date | null;
+} | null> {
   const result = await pool.query(
-    'SELECT github_token, github_username FROM user_integrations WHERE user_email = $1 AND github_token IS NOT NULL',
+    `SELECT github_token, github_username, github_auth_method, github_refresh_token, github_token_expires_at
+     FROM user_integrations WHERE user_email = $1 AND github_token IS NOT NULL`,
     [userEmail]
   );
   if (result.rows.length === 0 || !result.rows[0].github_token) return null;
-  return { token: result.rows[0].github_token, username: result.rows[0].github_username };
+  return {
+    token: result.rows[0].github_token,
+    username: result.rows[0].github_username,
+    authMethod: result.rows[0].github_auth_method || 'token',
+    refreshToken: result.rows[0].github_refresh_token || null,
+    expiresAt: result.rows[0].github_token_expires_at ? new Date(result.rows[0].github_token_expires_at) : null,
+  };
 }
 
-export async function setUserGitHubIntegration(userEmail: string, token: string, username: string): Promise<void> {
+export async function setUserGitHubIntegration(
+  userEmail: string,
+  token: string,
+  username: string,
+  authMethod: string = 'token',
+  refreshToken?: string | null,
+  expiresAt?: Date | null
+): Promise<void> {
   await pool.query(
-    `INSERT INTO user_integrations (user_email, github_token, github_username, github_connected_at)
-     VALUES ($1, $2, $3, NOW())
+    `INSERT INTO user_integrations (user_email, github_token, github_username, github_connected_at, github_auth_method, github_refresh_token, github_token_expires_at)
+     VALUES ($1, $2, $3, NOW(), $4, $5, $6)
      ON CONFLICT (user_email) DO UPDATE SET
-       github_token = $2, github_username = $3, github_connected_at = NOW(), updated_at = NOW()`,
-    [userEmail, token, username]
+       github_token = $2, github_username = $3, github_connected_at = NOW(),
+       github_auth_method = $4, github_refresh_token = $5, github_token_expires_at = $6, updated_at = NOW()`,
+    [userEmail, token, username, authMethod, refreshToken || null, expiresAt || null]
   );
 }
 
 export async function clearUserGitHubIntegration(userEmail: string): Promise<void> {
   await pool.query(
-    `UPDATE user_integrations SET github_token = NULL, github_username = NULL, github_connected_at = NULL, updated_at = NOW()
+    `UPDATE user_integrations SET github_token = NULL, github_username = NULL, github_connected_at = NULL,
+       github_refresh_token = NULL, github_token_expires_at = NULL, github_auth_method = NULL, updated_at = NOW()
      WHERE user_email = $1`,
     [userEmail]
   );
