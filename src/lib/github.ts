@@ -199,6 +199,31 @@ export async function pushWorkspaceToGitHub(
 }
 
 /**
+ * Enable GitHub Pages on a repository (deploys from main branch root).
+ * Returns the expected Pages URL.
+ */
+export async function enableGitHubPages(token: string, repoFullName: string): Promise<string> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
+
+  // Enable Pages — may 409 if already enabled, that's OK
+  const res = await fetch(`${GITHUB_API}/repos/${repoFullName}/pages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ source: { branch: 'main', path: '/' } }),
+  });
+  if (!res.ok && res.status !== 409) {
+    console.warn(`[GitHub] Failed to enable Pages for ${repoFullName}: ${res.status}`);
+  }
+
+  const [owner, repo] = repoFullName.split('/');
+  return `https://${owner}.github.io/${repo}/`;
+}
+
+/**
  * High-level: push workspace to GitHub after a successful agent run.
  * Called from agent-queue.ts
  */

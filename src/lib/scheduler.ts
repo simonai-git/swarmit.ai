@@ -17,7 +17,7 @@ const recentlyEnqueued = new Map<string, Set<string>>();
 // Stuck-task detection: skip tasks with too many completed runs in a window
 const MAX_RECENT_RUNS = 3;
 const STUCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_LIFETIME_RUNS = 6; // Total runs before permanent block
+const MAX_LIFETIME_RUNS = 10; // Runs per agent type before permanent block
 
 /**
  * Determine agent type based on task status
@@ -103,30 +103,32 @@ async function processUserTasks(userEmail: string): Promise<void> {
     if (task.is_blocked) continue;
 
     // Stuck detection: check both windowed and lifetime metrics
+    // Count only runs matching the agent type we'd spawn for the current status
+    const expectedAgentType = getAgentTypeForStatus(task.status);
     const recentRuns = await getAgentRunsByTask(task.id);
     const finishedRuns = recentRuns.filter(r =>
-      ['completed', 'failed'].includes(r.status)
+      ['completed', 'failed'].includes(r.status) && r.agent_type === expectedAgentType
     );
 
-    // Tier 1: Rapid loop — 3+ runs in 30 minutes
+    // Tier 1: Rapid loop — 3+ runs of the same type in 30 minutes
     const recentFinishedRuns = finishedRuns.filter(r =>
       new Date(r.created_at).getTime() > Date.now() - STUCK_WINDOW_MS
     );
     if (recentFinishedRuns.length >= MAX_RECENT_RUNS) {
-      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (rapid): ${recentFinishedRuns.length} runs in 30min, marking blocked`);
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (rapid): ${recentFinishedRuns.length} ${expectedAgentType} runs in 30min, marking blocked`);
       await updateTask(task.id, {
         is_blocked: true,
-        blocked_reason: `Agent ran ${recentFinishedRuns.length} times in 30 minutes without advancing status. Manual intervention needed.`,
+        blocked_reason: `${expectedAgentType} agent ran ${recentFinishedRuns.length} times in 30 minutes without advancing status. Manual intervention needed.`,
       });
       continue;
     }
 
-    // Tier 2: Slow burn — 6+ total lifetime runs without status change
+    // Tier 2: Slow burn — 10+ total lifetime runs of the same type
     if (finishedRuns.length >= MAX_LIFETIME_RUNS) {
-      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (lifetime): ${finishedRuns.length} total runs, marking blocked`);
+      console.warn(`[Scheduler] Task ${task.id.slice(0, 8)} stuck (lifetime): ${finishedRuns.length} ${expectedAgentType} runs total, marking blocked`);
       await updateTask(task.id, {
         is_blocked: true,
-        blocked_reason: `Agent ran ${finishedRuns.length} times total without advancing status. Manual intervention needed.`,
+        blocked_reason: `${expectedAgentType} agent ran ${finishedRuns.length} times total without advancing status. Manual intervention needed.`,
       });
       continue;
     }

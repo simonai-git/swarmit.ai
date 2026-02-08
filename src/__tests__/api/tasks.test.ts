@@ -10,6 +10,7 @@ vi.mock('@/lib/db', () => ({
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
   searchTasks: vi.fn(),
+  getAutomationUserEmail: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock('@/lib/webhook', () => ({

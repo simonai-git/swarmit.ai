@@ -1580,7 +1580,7 @@ export interface TaskLog {
   task_id: string;
   run_id: string | null;
   agent_type: string | null;
-  stream: 'stdout' | 'stderr' | 'system';
+  stream: 'stdout' | 'stderr' | 'system' | 'tool' | 'assistant';
   content: string;
   created_at: string;
 }
