@@ -52,6 +52,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         agent: [developer, frontend, backend, devops, qa, reviewer]
     steps:
