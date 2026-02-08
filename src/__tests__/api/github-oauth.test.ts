@@ -3,6 +3,15 @@ import { NextRequest } from 'next/server';
 
 // --- Mocks ---
 
+const { mockPoolQuery, mockCookieStore } = vi.hoisted(() => ({
+  mockPoolQuery: vi.fn(),
+  mockCookieStore: {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  },
+}));
+
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn(),
 }));
@@ -15,7 +24,6 @@ vi.mock('@/lib/auth', () => ({
   authOptions: {},
 }));
 
-const mockPoolQuery = vi.fn();
 vi.mock('@/lib/db', () => ({
   default: { query: mockPoolQuery },
   pool: { query: mockPoolQuery },
@@ -28,11 +36,6 @@ vi.mock('@/lib/github', () => ({
   validateGitHubToken: vi.fn(),
 }));
 
-const mockCookieStore = {
-  get: vi.fn(),
-  set: vi.fn(),
-  delete: vi.fn(),
-};
 vi.mock('next/headers', () => ({
   cookies: vi.fn(() => Promise.resolve(mockCookieStore)),
 }));
