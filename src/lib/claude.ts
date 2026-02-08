@@ -614,18 +614,36 @@ export async function runAgent(
       const toolCalls: ToolCall[] = [];
       let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
       let stopReason = 'stop';
-      
+
+      const streamStartTime = Date.now();
+      let eventCount = 0;
+      let lastEventTime = streamStartTime;
+      console.log(`[Claude] Stream started for iteration ${iteration}`);
+
       for await (const event of stream) {
+        eventCount++;
+        const now = Date.now();
+        const gap = now - lastEventTime;
+        // Log slow events (>5s gap) and periodic updates
+        if (gap > 5000 || eventCount % 50 === 0) {
+          console.log(`[Claude] Event #${eventCount} type=${event.type} gap=${gap}ms total=${now - streamStartTime}ms`);
+        }
+        lastEventTime = now;
+
         if (event.type === 'text_delta') {
           responseText += event.delta;
           onMessage?.(event.delta);
         } else if (event.type === 'toolcall_end') {
           toolCalls.push(event.toolCall);
+          const argLen = JSON.stringify(event.toolCall.arguments).length;
+          console.log(`[Claude] Tool call complete: ${event.toolCall.name} (${argLen} chars args) at ${now - streamStartTime}ms`);
           onToolUse?.(event.toolCall.name, event.toolCall.arguments);
         } else if (event.type === 'done') {
           stopReason = event.reason;
           usage = event.message.usage;
+          console.log(`[Claude] Stream done: ${eventCount} events in ${now - streamStartTime}ms, tokens=${usage.input}/${usage.output}, reason=${stopReason}`);
         } else if (event.type === 'error') {
+          console.error(`[Claude] Stream error at ${now - streamStartTime}ms: ${event.error?.errorMessage}`);
           throw new Error(event.error.errorMessage || 'Stream error');
         }
       }
