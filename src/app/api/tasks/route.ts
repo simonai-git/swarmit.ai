@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getAllTasks, searchTasks, createTask, getTasksByUserEmail, Task } from '@/lib/db';
+import { getAllTasks, searchTasks, createTask, getTasksByUserEmail, getAutomationUserEmail, Task } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
 import { onTaskCreated, selectSpecialist } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     // Determine user email from session
     const session = await getServerSession(authOptions);
-    const userEmail = session?.user?.email || null;
+    const userEmail = session?.user?.email || body.userEmail || await getAutomationUserEmail() || null;
 
     // Auto-assign if no assignee specified
     let assignee = body.assignee;

@@ -616,11 +616,11 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 completed runs in the last 30 minutes
+      // 3 completed runs in the last 30 minutes (matching the expected agent type for 'testing' status = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: new Date().toISOString() },
-        { status: 'completed', created_at: new Date().toISOString() },
-        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -628,7 +628,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('stuck-task', {
         is_blocked: true,
-        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
@@ -692,8 +692,8 @@ describe('scheduler', () => {
       // Only 2 completed runs — under threshold, and old enough to pass backoff
       const oldEnough = new Date(Date.now() - 3 * 60_000).toISOString(); // 3 min ago > 2-run backoff
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: oldEnough },
-        { status: 'completed', created_at: oldEnough },
+        { status: 'completed', agent_type: 'qa', created_at: oldEnough },
+        { status: 'completed', agent_type: 'qa', created_at: oldEnough },
       ] as any);
 
       await forceSchedulerTick();
@@ -818,11 +818,11 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 failed runs in the last 30 minutes
+      // 3 failed runs in the last 30 minutes (matching agent type for 'testing' = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'failed', created_at: new Date().toISOString() },
-        { status: 'failed', created_at: new Date().toISOString() },
-        { status: 'failed', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -830,7 +830,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('failing-task', {
         is_blocked: true,
-        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
@@ -858,11 +858,11 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // Mix of completed and failed runs totaling 3
+      // Mix of completed and failed runs totaling 3 (matching agent type for 'testing' = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: new Date().toISOString() },
-        { status: 'failed', created_at: new Date().toISOString() },
-        { status: 'completed', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -870,11 +870,11 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('mixed-task', {
         is_blocked: true,
-        blocked_reason: 'Agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
-    it('marks tasks with 6+ lifetime runs as blocked (tier 2)', async () => {
+    it('marks tasks with 10+ lifetime runs as blocked (tier 2)', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -898,15 +898,19 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 6 runs spread over many hours — all outside the 30min window
+      // 10 runs spread over many hours — all outside the 30min window (matching agent type for 'testing' = 'qa')
       const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: oldDate },
-        { status: 'failed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
-        { status: 'failed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
-        { status: 'failed', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
       ] as any);
 
       await forceSchedulerTick();
@@ -914,11 +918,11 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('slow-burn-task', {
         is_blocked: true,
-        blocked_reason: 'Agent ran 6 times total without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 10 times total without advancing status. Manual intervention needed.',
       });
     });
 
-    it('does not trigger tier 2 with fewer than 6 lifetime runs', async () => {
+    it('does not trigger tier 2 with fewer than 10 lifetime runs', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -942,14 +946,14 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 5 old runs — under the tier 2 threshold
+      // 5 old runs — under the tier 2 threshold (matching agent type for 'testing' = 'qa')
       const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: oldDate },
-        { status: 'failed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
-        { status: 'failed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'failed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
       ] as any);
 
       await forceSchedulerTick();
@@ -982,11 +986,11 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 runs with latest 30 seconds ago — backoff should be 3 min
+      // 3 runs with latest 30 seconds ago — backoff should be 3 min (matching agent type for 'testing' = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'failed', created_at: new Date(Date.now() - 30_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 30_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -1022,8 +1026,8 @@ describe('scheduler', () => {
       });
       // 2 runs, latest 3 minutes ago — backoff is 2min, so 3min > 2min → should enqueue
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'failed', created_at: new Date(Date.now() - 3 * 60_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 10 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 3 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 10 * 60_000).toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -1057,11 +1061,11 @@ describe('scheduler', () => {
       });
       // 5 runs, latest 11 minutes ago — backoff = min(5*60k, 600k)=300k=5min, 11min > 5min → enqueue
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'failed', created_at: new Date(Date.now() - 11 * 60_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 20 * 60_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 30 * 60_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 40 * 60_000).toISOString() },
-        { status: 'failed', created_at: new Date(Date.now() - 50 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 11 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 20 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 30 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 40 * 60_000).toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date(Date.now() - 50 * 60_000).toISOString() },
       ] as any);
 
       await forceSchedulerTick();
@@ -1092,12 +1096,12 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 completed runs but all older than 30 minutes
+      // 3 completed runs but all older than 30 minutes (matching agent type for 'testing' = 'qa')
       const oldDate = new Date(Date.now() - 31 * 60 * 1000).toISOString();
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
-        { status: 'completed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
-        { status: 'completed', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
+        { status: 'completed', agent_type: 'qa', created_at: oldDate },
       ] as any);
 
       await forceSchedulerTick();

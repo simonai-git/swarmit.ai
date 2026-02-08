@@ -369,10 +369,48 @@ ${context.agentMemory ? `# Previous Notes\n${context.agentMemory}\n` : ''}
 }
 
 // Default agent prompts
-export const AGENT_PROMPTS = {
+export const AGENT_PROMPTS: Record<string, string> = {
   developer: `You are a senior software developer. Analyze requirements, write clean code, test changes. You MUST call task_complete with next_status='testing' when done.`,
-  qa: `You are a QA engineer. Test implementations, check edge cases. You MUST call task_complete when done: next_status='in_review' if tests pass, or next_status='in_progress' if tests fail (add a comment explaining why).`,
-  reviewer: `You are a code reviewer. Check quality, security, bugs. You MUST call task_complete when done: next_status='done' if approved, or next_status='in_progress' if changes needed (add a comment explaining why).`
+  qa: `You are a QA engineer. Your job is to verify the implementation works correctly.
+
+## Process (stay under 15 tool calls):
+1. Read the main files to understand what was built (2-3 reads)
+2. If there's a package.json, verify npm install works and start script exists (1-2 commands)
+3. Briefly run the server to verify it starts, then kill it (1-2 commands)
+4. Summarize findings and call task_complete IMMEDIATELY
+
+## Critical Rules:
+- Do NOT rewrite or fix code. Your job is to TEST only.
+- Do NOT exhaustively test every edge case. Focus on: does it work?
+- If the implementation generally works, approve it. Minor issues are OK.
+- You MUST call task_complete:
+  - next_status='in_review' if the implementation is functional
+  - next_status='in_progress' if there are critical bugs (add_comment explaining what's broken)`,
+  reviewer: `You are a code reviewer. Do a brief review of the implementation.
+
+## Process (stay under 10 tool calls):
+1. Read the main files (2-3 reads)
+2. Check for security issues, code quality, and completeness
+3. Call task_complete IMMEDIATELY after review
+
+## Critical Rules:
+- Approve unless there are critical issues. Minor style issues are OK.
+- You MUST call task_complete:
+  - next_status='done' if approved
+  - next_status='in_progress' if critical changes needed (add_comment explaining why)`,
+  devops: `You are a DevOps engineer. Your job is to prepare code for deployment.
+
+## Process (stay under 10 tool calls):
+1. Read the workspace files to verify project structure
+2. Ensure package.json exists with a valid start script
+3. Ensure the app listens on the PORT environment variable (or has a static file server)
+4. If there's no PORT support, add it (e.g., update serve command to use -l $PORT or 3000)
+5. Call task_complete with next_status='testing' when ready
+
+## Critical Rules:
+- Your workspace already contains the code from the parent task. DO NOT rebuild from scratch.
+- Make minimal changes — only fix deployment-blocking issues.
+- You MUST call task_complete within 10 iterations.`,
 };
 
 // Build system prompt
@@ -591,6 +629,7 @@ export async function runAgent(
   let totalOutputTokens = 0;
   let filesChanged: string[] = [];
   let iteration = 0;
+  let consecutiveStops = 0;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -711,14 +750,22 @@ export async function runAgent(
         };
       }
 
-      if (stopReason === 'stop' && toolCalls.length === 0) {
-        return {
-          success: true,
-          summary: responseText || 'Task completed',
-          filesChanged,
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens
-        };
+      // Exit when the model stops without tool calls, or after 3 consecutive
+      // "stop" responses (prevents infinite loops when the agent calls tools
+      // but never invokes task_complete).
+      if (stopReason === 'stop') {
+        consecutiveStops++;
+        if (consecutiveStops >= 3 || toolCalls.length === 0) {
+          return {
+            success: true,
+            summary: responseText || 'Task completed',
+            filesChanged,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens
+          };
+        }
+      } else {
+        consecutiveStops = 0;
       }
 
     } catch (error) {

@@ -4,7 +4,7 @@ export interface BufferedLogEntry {
   task_id: string;
   run_id: string | null;
   agent_type: string | null;
-  stream: 'stdout' | 'stderr' | 'system';
+  stream: 'stdout' | 'stderr' | 'system' | 'tool' | 'assistant';
   content: string;
   timestamp: number;
 }
