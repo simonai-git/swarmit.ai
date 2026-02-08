@@ -36,11 +36,32 @@ export interface SandboxToolkit {
   envVars: Record<string, string>;
 }
 
+// Map agent types to their specialized Docker image
+export function getAgentImage(agentType: string): string {
+  const registry = process.env.DOCKER_REGISTRY || 'ghcr.io/simonai-git';
+  const tag = process.env.DOCKER_IMAGE_TAG || 'latest';
+  const imageMap: Record<string, string> = {
+    developer: `${registry}/swarmit-developer:${tag}`,
+    frontend: `${registry}/swarmit-frontend:${tag}`,
+    backend: `${registry}/swarmit-backend:${tag}`,
+    devops: `${registry}/swarmit-devops:${tag}`,
+    qa: `${registry}/swarmit-qa:${tag}`,
+    reviewer: `${registry}/swarmit-reviewer:${tag}`,
+  };
+  return imageMap[agentType] || `${registry}/swarmit-developer:${tag}`;
+}
+
+// Get volume name for a task's workspace
+export function getWorkspaceVolumeName(taskId: string): string {
+  return `swarmit-workspace-${taskId}`;
+}
+
 // Pre-configured toolkits per agent specialization
+// Git config is baked into Docker images; only project-level setup remains
 export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   developer: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
     ],
     envVars: {
       NODE_ENV: 'development',
@@ -48,7 +69,7 @@ export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   },
   frontend: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
     ],
     envVars: {
       NODE_ENV: 'development',
@@ -57,7 +78,7 @@ export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   },
   backend: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
     ],
     envVars: {
       NODE_ENV: 'development',
@@ -65,7 +86,7 @@ export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   },
   devops: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
     ],
     envVars: {
       NODE_ENV: 'production',
@@ -74,8 +95,8 @@ export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   },
   qa: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
-      'npm run build 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
+      'npm run build || echo "WARN: npm run build failed"',
     ],
     envVars: {
       NODE_ENV: 'test',
@@ -83,7 +104,7 @@ export const AGENT_TOOLKITS: Record<string, SandboxToolkit> = {
   },
   reviewer: {
     setupCommands: [
-      'npm install --prefer-offline --no-audit 2>/dev/null || true',
+      'npm install --prefer-offline --no-audit || echo "WARN: npm install failed"',
     ],
     envVars: {
       NODE_ENV: 'development',
@@ -193,13 +214,23 @@ export abstract class TaskSandbox {
  */
 export class DockerSandbox extends TaskSandbox {
   private containerId: string = '';
-  private imageName = 'node:20-slim';
+  private imageName: string;
+  private volumeName: string;
+
+  constructor(config: SandboxConfig) {
+    super(config);
+    this.imageName = getAgentImage(config.agentType || 'developer');
+    this.volumeName = getWorkspaceVolumeName(config.taskId);
+  }
 
   async initialize(): Promise<void> {
+    // Ensure named volume exists
+    await execAsync(`docker volume create ${this.volumeName}`);
+
     // Create a unique container name
     const containerName = `swarmit-task-${this.taskId.slice(0, 8)}-${uuidv4().slice(0, 8)}`;
-    
-    // Start container with resource limits
+
+    // Start container with resource limits and named volume
     const { stdout } = await execAsync(`
       docker run -d \
         --name ${containerName} \
@@ -207,20 +238,22 @@ export class DockerSandbox extends TaskSandbox {
         --cpus=1 \
         --network=bridge \
         --workdir=/workspace \
-        -v /tmp:/tmp \
+        -v ${this.volumeName}:/workspace \
         ${this.imageName} \
         tail -f /dev/null
     `);
-    
+
     this.containerId = stdout.trim();
     this.workdir = '/workspace';
 
-    // Install git in container
-    await this.exec('apt-get update && apt-get install -y git');
+    // No need to install git or configure it — baked into base image
 
-    // Clone repo if specified
+    // Clone repo if specified AND workspace is empty (volume may have data from previous run)
     if (this.config.repo) {
-      await this.gitClone(this.config.repo, this.config.branch);
+      const { stdout: fileCheck } = await this.exec('ls -A /workspace 2>/dev/null | head -1');
+      if (!fileCheck.trim()) {
+        await this.gitClone(this.config.repo, this.config.branch);
+      }
     }
   }
 
@@ -340,6 +373,7 @@ export class DockerSandbox extends TaskSandbox {
   }
 
   async cleanup(): Promise<void> {
+    // Remove container but KEEP the volume (workspace persists for future runs)
     if (this.containerId) {
       try {
         await execAsync(`docker rm -f ${this.containerId}`);
@@ -348,6 +382,14 @@ export class DockerSandbox extends TaskSandbox {
       }
     }
   }
+}
+
+/**
+ * Clean up a task's workspace volume when the task is completed or deleted
+ */
+export async function cleanupTaskVolume(taskId: string): Promise<void> {
+  const volumeName = getWorkspaceVolumeName(taskId);
+  await execAsync(`docker volume rm ${volumeName}`).catch(() => {});
 }
 
 /**
@@ -388,8 +430,8 @@ export class SubprocessSandbox extends TaskSandbox {
         env: {
           ...process.env,
           ...this.toolkitEnvVars,
-          // Restrict some capabilities
-          PATH: '/usr/local/bin:/usr/bin:/bin',
+          PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin',
+          HOME: this.workdir,
         }
       });
 

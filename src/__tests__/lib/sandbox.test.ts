@@ -55,7 +55,7 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => 'abcd1234-5678-90ef-ghij-klmnopqrstuv'),
 }));
 
-import { SubprocessSandbox, AGENT_TOOLKITS, isDockerAvailable } from '@/lib/sandbox';
+import { SubprocessSandbox, AGENT_TOOLKITS, isDockerAvailable, getAgentImage, getWorkspaceVolumeName, cleanupTaskVolume } from '@/lib/sandbox';
 import type { SandboxConfig } from '@/lib/sandbox';
 
 describe('AGENT_TOOLKITS', () => {
@@ -187,7 +187,8 @@ describe('SubprocessSandbox', () => {
       expect(spawn).toHaveBeenCalledWith('sh', ['-c', 'echo test'], expect.objectContaining({
         cwd: sandbox.getWorkdir(),
         env: expect.objectContaining({
-          PATH: '/usr/local/bin:/usr/bin:/bin'
+          PATH: expect.any(String),
+          HOME: sandbox.getWorkdir(),
         })
       }));
       expect(result.stdout).toBe('test output');
@@ -217,7 +218,7 @@ describe('SubprocessSandbox', () => {
         env: expect.objectContaining({
           NODE_ENV: 'production',
           CI: 'true',
-          PATH: '/usr/local/bin:/usr/bin:/bin'
+          PATH: expect.any(String)
         })
       }));
     });
@@ -535,6 +536,180 @@ describe('SubprocessSandbox', () => {
       expect(workdir).toMatch(/\/tmp\/swarmit-test-tas-abcd1234/);
     });
   });
+
+  describe('PATH and HOME env vars', () => {
+    it('should inherit system PATH instead of hardcoding', async () => {
+      const { spawn } = await import('child_process');
+      const originalPath = process.env.PATH;
+      process.env.PATH = '/custom/path:/usr/bin';
+
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
+          if (event === 'close') handler(0);
+        }),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as any);
+
+      sandbox = new SubprocessSandbox(config);
+      await sandbox.initialize();
+      await sandbox.exec('echo test');
+
+      expect(spawn).toHaveBeenCalledWith('sh', ['-c', 'echo test'], expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/custom/path:/usr/bin',
+        })
+      }));
+
+      process.env.PATH = originalPath;
+    });
+
+    it('should set HOME to workdir for git config', async () => {
+      const { spawn } = await import('child_process');
+      const mockChild = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
+          if (event === 'close') handler(0);
+        }),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(mockChild as any);
+
+      sandbox = new SubprocessSandbox(config);
+      await sandbox.initialize();
+      await sandbox.exec('git config user.name');
+
+      const spawnCall = vi.mocked(spawn).mock.calls[0];
+      const env = spawnCall[2]?.env as Record<string, string>;
+      expect(env.HOME).toBe(sandbox.getWorkdir());
+    });
+  });
+});
+
+describe('AGENT_TOOLKITS setup commands', () => {
+  it('should include npm install in all toolkit setup commands', () => {
+    for (const [, toolkit] of Object.entries(AGENT_TOOLKITS)) {
+      const hasNpmInstall = toolkit.setupCommands.some(cmd =>
+        cmd.includes('npm install')
+      );
+      expect(hasNpmInstall).toBe(true);
+    }
+  });
+
+  it('should not include git config (baked into Docker images)', () => {
+    for (const [, toolkit] of Object.entries(AGENT_TOOLKITS)) {
+      for (const cmd of toolkit.setupCommands) {
+        expect(cmd).not.toContain('git config');
+      }
+    }
+  });
+
+  it('should not suppress stderr with 2>/dev/null in setup commands', () => {
+    for (const [, toolkit] of Object.entries(AGENT_TOOLKITS)) {
+      for (const cmd of toolkit.setupCommands) {
+        expect(cmd).not.toContain('2>/dev/null');
+      }
+    }
+  });
+
+  it('should not use || true to hide failures in setup commands', () => {
+    for (const [, toolkit] of Object.entries(AGENT_TOOLKITS)) {
+      for (const cmd of toolkit.setupCommands) {
+        expect(cmd).not.toContain('|| true');
+      }
+    }
+  });
+});
+
+describe('getAgentImage', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('should return correct image for each agent type', () => {
+    const types = ['developer', 'frontend', 'backend', 'devops', 'qa', 'reviewer'];
+    for (const type of types) {
+      const image = getAgentImage(type);
+      expect(image).toBe(`ghcr.io/simonai-git/swarmit-${type}:latest`);
+    }
+  });
+
+  it('should default to developer image for unknown agent type', () => {
+    const image = getAgentImage('unknown');
+    expect(image).toBe('ghcr.io/simonai-git/swarmit-developer:latest');
+  });
+
+  it('should use custom registry from env', () => {
+    process.env.DOCKER_REGISTRY = 'docker.io/myuser';
+    const image = getAgentImage('qa');
+    expect(image).toBe('docker.io/myuser/swarmit-qa:latest');
+  });
+
+  it('should use custom tag from env', () => {
+    process.env.DOCKER_IMAGE_TAG = 'v1.2.3';
+    const image = getAgentImage('developer');
+    expect(image).toBe('ghcr.io/simonai-git/swarmit-developer:v1.2.3');
+  });
+
+  it('should use both custom registry and tag', () => {
+    process.env.DOCKER_REGISTRY = 'registry.example.com/org';
+    process.env.DOCKER_IMAGE_TAG = 'abc123';
+    const image = getAgentImage('frontend');
+    expect(image).toBe('registry.example.com/org/swarmit-frontend:abc123');
+  });
+});
+
+describe('getWorkspaceVolumeName', () => {
+  it('should return volume name based on task ID', () => {
+    expect(getWorkspaceVolumeName('task-123')).toBe('swarmit-workspace-task-123');
+  });
+
+  it('should handle UUID task IDs', () => {
+    const taskId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    expect(getWorkspaceVolumeName(taskId)).toBe(`swarmit-workspace-${taskId}`);
+  });
+});
+
+describe('cleanupTaskVolume', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should call docker volume rm with correct volume name', async () => {
+    const { exec } = await import('child_process');
+    vi.mocked(exec).mockImplementation(((cmd: string, callback: any) => {
+      callback(null, { stdout: '', stderr: '' });
+      return {} as any;
+    }) as any);
+
+    await cleanupTaskVolume('task-456');
+
+    expect(exec).toHaveBeenCalledWith(
+      'docker volume rm swarmit-workspace-task-456',
+      expect.any(Function)
+    );
+  });
+
+  it('should not throw when docker volume rm fails', async () => {
+    const { exec } = await import('child_process');
+    vi.mocked(exec).mockImplementation(((cmd: string, callback: any) => {
+      callback(new Error('volume not found'), null);
+      return {} as any;
+    }) as any);
+
+    // Should not throw
+    await expect(cleanupTaskVolume('nonexistent')).resolves.toBeUndefined();
+  });
 });
 
 describe('isDockerAvailable', () => {
@@ -544,7 +719,6 @@ describe('isDockerAvailable', () => {
 
   it('should return true when docker info succeeds', async () => {
     const { exec } = await import('child_process');
-    const { promisify } = await import('util');
 
     // Mock successful docker info
     vi.mocked(exec).mockImplementation(((cmd: string, callback: any) => {

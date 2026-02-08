@@ -53,6 +53,7 @@ describe('Database Module', () => {
             is_blocked: false,
             feedback_id: null,
             blocked_reason: null,
+            current_run_id: null,
             agent_context: 'has_context',
             project_id: 'proj-1',
             worked_by: '[]',
@@ -74,6 +75,7 @@ describe('Database Module', () => {
             is_blocked: false,
             feedback_id: null,
             blocked_reason: null,
+            current_run_id: null,
             agent_context: null,
             project_id: null,
             worked_by: '["Simon"]',
@@ -216,6 +218,7 @@ describe('Database Module', () => {
             is_blocked: false,
             feedback_id: null,
             blocked_reason: null,
+            current_run_id: null,
             agent_context: null,
             project_id: 'proj-1',
             worked_by: '[]',
@@ -267,6 +270,7 @@ describe('Database Module', () => {
           is_blocked: false,
           feedback_id: null,
           blocked_reason: null,
+          current_run_id: null,
           agent_context: null,
           project_id: null,
           worked_by: '[]',
@@ -312,6 +316,7 @@ describe('Database Module', () => {
             is_blocked: false,
             feedback_id: null,
             blocked_reason: null,
+            current_run_id: null,
             agent_context: null,
             project_id: null,
             worked_by: '[]',
@@ -365,6 +370,7 @@ describe('Database Module', () => {
           is_blocked: false,
           feedback_id: null,
           blocked_reason: null,
+          current_run_id: null,
           agent_context: null,
           project_id: null,
           worked_by: '[]',
@@ -405,6 +411,7 @@ describe('Database Module', () => {
           is_blocked: false,
           feedback_id: null,
           blocked_reason: null,
+          current_run_id: null,
           agent_context: null,
           project_id: null,
           worked_by: '[]',
@@ -438,6 +445,7 @@ describe('Database Module', () => {
             is_blocked: false,
             feedback_id: null,
             blocked_reason: null,
+            current_run_id: null,
             agent_context: null,
             project_id: 'proj-1',
             worked_by: '[]',
@@ -488,6 +496,7 @@ describe('Database Module', () => {
           is_blocked: false,
           feedback_id: null,
           blocked_reason: null,
+          current_run_id: null,
           agent_context: null,
           project_id: null,
           worked_by: '[]',
@@ -2699,6 +2708,65 @@ describe('Database Module', () => {
       const result = await db.getAutomationUserEmail();
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('Task Run Claim/Release', () => {
+    describe('claimTaskRun', () => {
+      it('should return true when task has no active run (successful claim)', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [{ id: 'task-1' }], rowCount: 1 });
+
+        const result = await db.claimTaskRun('task-1', 'run-1');
+
+        expect(result).toBe(true);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('current_run_id IS NULL'),
+          ['task-1', 'run-1']
+        );
+      });
+
+      it('should return false when task already has an active run', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.claimTaskRun('task-1', 'run-2');
+
+        expect(result).toBe(false);
+      });
+
+      it('should set current_run_id on the task', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [{ id: 'task-1' }], rowCount: 1 });
+
+        await db.claimTaskRun('task-1', 'run-abc');
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('SET current_run_id = $2'),
+          ['task-1', 'run-abc']
+        );
+      });
+    });
+
+    describe('releaseTaskRun', () => {
+      it('should release the claim when caller owns it', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+        await db.releaseTaskRun('task-1', 'run-1');
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('current_run_id = NULL'),
+          ['task-1', 'run-1']
+        );
+      });
+
+      it('should only release if current_run_id matches the caller', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.releaseTaskRun('task-1', 'wrong-run');
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE id = $1 AND current_run_id = $2'),
+          ['task-1', 'wrong-run']
+        );
+      });
     });
   });
 });

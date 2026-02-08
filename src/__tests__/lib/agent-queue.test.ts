@@ -17,9 +17,14 @@ vi.mock('@/lib/db', () => ({
   getCommentsByTaskId: vi.fn(),
   updateTask: vi.fn(),
   createComment: vi.fn(),
+  getWorkspaceSnapshot: vi.fn(),
+  saveWorkspaceSnapshot: vi.fn(),
+  deleteWorkspaceSnapshot: vi.fn().mockResolvedValue(true),
+  claimTaskRun: vi.fn(),
+  releaseTaskRun: vi.fn(),
 }));
 
-import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun, getDefaultNextStatus, agentQueue } from '@/lib/agent-queue';
+import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun, getDefaultNextStatus, agentQueue, cleanupTaskResources } from '@/lib/agent-queue';
 
 vi.mock('@/lib/claude', () => ({
   runAgent: vi.fn(),
@@ -39,6 +44,10 @@ vi.mock('@/lib/sandbox-executor', () => ({
       cleanup: vi.fn(),
     })),
   },
+}));
+
+vi.mock('@/lib/sandbox', () => ({
+  cleanupTaskVolume: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/redis-queue', () => ({
@@ -597,6 +606,25 @@ describe('agent-queue', () => {
     it('should return false for unknown job id', async () => {
       const cancelled = await agentQueue.cancel('nonexistent-job');
       expect(cancelled).toBe(false);
+    });
+  });
+
+  describe('cleanupTaskResources', () => {
+    it('should call cleanupTaskVolume and deleteWorkspaceSnapshot', async () => {
+      const { cleanupTaskVolume } = await import('@/lib/sandbox');
+      const { deleteWorkspaceSnapshot } = await import('@/lib/db');
+
+      await cleanupTaskResources('task-cleanup-1');
+
+      expect(cleanupTaskVolume).toHaveBeenCalledWith('task-cleanup-1');
+      expect(deleteWorkspaceSnapshot).toHaveBeenCalledWith('task-cleanup-1');
+    });
+
+    it('should not throw when cleanup fails', async () => {
+      const { cleanupTaskVolume } = await import('@/lib/sandbox');
+      vi.mocked(cleanupTaskVolume).mockRejectedValueOnce(new Error('volume error'));
+
+      await expect(cleanupTaskResources('task-cleanup-2')).resolves.toBeUndefined();
     });
   });
 });
