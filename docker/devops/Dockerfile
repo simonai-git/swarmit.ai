@@ -4,6 +4,7 @@ FROM ghcr.io/simonai-git/swarmit-base:latest
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     docker.io \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install kubectl
