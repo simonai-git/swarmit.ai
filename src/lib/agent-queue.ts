@@ -519,7 +519,7 @@ class AgentQueue {
           systemPrompt: AGENT_PROMPTS[job.agentType as keyof typeof AGENT_PROMPTS] || AGENT_PROMPTS.developer,
           model: 'claude-sonnet-4-20250514',
           temperature: 0,
-          maxTokens: 8000,
+          maxTokens: 16000,
         },
       };
 
