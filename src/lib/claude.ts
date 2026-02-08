@@ -563,7 +563,7 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const { maxIterations = 50, onToolUse, onMessage, apiKey } = options;
   const modelId = context.agentConfig?.model || 'claude-sonnet-4-20250514';
-  const maxTokens = context.agentConfig?.maxTokens || 8000;
+  const maxTokens = context.agentConfig?.maxTokens || 16000;
 
   const effectiveKey = getClaudeKey(apiKey);
   const usingOAT = isOATToken(effectiveKey);
