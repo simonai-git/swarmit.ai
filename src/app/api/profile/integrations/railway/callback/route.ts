@@ -70,8 +70,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${redirectBase}?railway=error&message=${encodeURIComponent('Invalid state parameter')}`);
     }
 
-    // Clear the state cookie
+    // Get PKCE verifier from cookie
+    const codeVerifier = cookieStore.get('railway_oauth_verifier')?.value;
+
+    // Clear OAuth cookies
     cookieStore.delete('railway_oauth_state');
+    cookieStore.delete('railway_oauth_verifier');
 
     // Exchange authorization code for tokens
     const clientId = process.env.RAILWAY_CLIENT_ID!;
@@ -79,17 +83,22 @@ export async function GET(request: NextRequest) {
     const redirectUri = `${baseUrl}/api/profile/integrations/railway/callback`;
     const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
+    const tokenBody: Record<string, string> = {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+    };
+    if (codeVerifier) {
+      tokenBody.code_verifier = codeVerifier;
+    }
+
     const tokenResponse = await fetch('https://backboard.railway.com/oauth/token', {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${basicAuth}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-      }),
+      body: new URLSearchParams(tokenBody),
     });
 
     if (!tokenResponse.ok) {

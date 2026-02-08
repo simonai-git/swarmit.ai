@@ -120,6 +120,30 @@ describe('Railway OAuth Initiation - GET /api/profile/integrations/railway/oauth
     );
   });
 
+  it('should set PKCE verifier cookie and include code_challenge in redirect', async () => {
+    mockSession();
+
+    const { GET } = await import('@/app/api/profile/integrations/railway/oauth/route');
+    const response = await GET();
+
+    // Verify PKCE verifier cookie was set
+    expect(mockCookieStore.set).toHaveBeenCalledWith(
+      'railway_oauth_verifier',
+      expect.any(String),
+      expect.objectContaining({
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 600,
+        path: '/',
+      })
+    );
+
+    // Verify code_challenge and method are in the redirect URL
+    const location = response.headers.get('location')!;
+    expect(location).toContain('code_challenge=');
+    expect(location).toContain('code_challenge_method=S256');
+  });
+
   it('should NOT use /oauth/authorize (wrong endpoint)', async () => {
     mockSession();
 
@@ -184,7 +208,11 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
 
   it('should redirect with error when CSRF state does not match', async () => {
     mockSession();
-    mockCookieStore.get.mockReturnValue({ value: 'stored-state' });
+    mockCookieStore.get.mockImplementation((name: string) => {
+      if (name === 'railway_oauth_state') return { value: 'stored-state' };
+      if (name === 'railway_oauth_verifier') return { value: 'test-verifier' };
+      return undefined;
+    });
 
     const { GET } = await import('@/app/api/profile/integrations/railway/callback/route');
     const request = new NextRequest('http://localhost:3000/api/profile/integrations/railway/callback?code=abc&state=wrong-state');
@@ -198,7 +226,11 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
 
   it('should redirect with error when token exchange fails', async () => {
     mockSession();
-    mockCookieStore.get.mockReturnValue({ value: 'valid-state' });
+    mockCookieStore.get.mockImplementation((name: string) => {
+      if (name === 'railway_oauth_state') return { value: 'valid-state' };
+      if (name === 'railway_oauth_verifier') return { value: 'test-verifier' };
+      return undefined;
+    });
 
     (global.fetch as any).mockResolvedValue({
       ok: false,
@@ -217,7 +249,11 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
 
   it('should exchange code for tokens and store in DB on success', async () => {
     mockSession();
-    mockCookieStore.get.mockReturnValue({ value: 'valid-state' });
+    mockCookieStore.get.mockImplementation((name: string) => {
+      if (name === 'railway_oauth_state') return { value: 'valid-state' };
+      if (name === 'railway_oauth_verifier') return { value: 'test-pkce-verifier' };
+      return undefined;
+    });
 
     // Mock token exchange
     (global.fetch as any)
@@ -296,13 +332,23 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
       ])
     );
 
-    // Verify state cookie was deleted
+    // Verify PKCE code_verifier was included in token exchange body
+    const tokenExchangeCall = (global.fetch as any).mock.calls[0];
+    const tokenBody = tokenExchangeCall[1].body as URLSearchParams;
+    expect(tokenBody.get('code_verifier')).toBe('test-pkce-verifier');
+
+    // Verify both OAuth cookies were deleted
     expect(mockCookieStore.delete).toHaveBeenCalledWith('railway_oauth_state');
+    expect(mockCookieStore.delete).toHaveBeenCalledWith('railway_oauth_verifier');
   });
 
   it('should use Basic auth for token exchange', async () => {
     mockSession();
-    mockCookieStore.get.mockReturnValue({ value: 'valid-state' });
+    mockCookieStore.get.mockImplementation((name: string) => {
+      if (name === 'railway_oauth_state') return { value: 'valid-state' };
+      if (name === 'railway_oauth_verifier') return { value: 'test-verifier' };
+      return undefined;
+    });
 
     (global.fetch as any)
       .mockResolvedValueOnce({
