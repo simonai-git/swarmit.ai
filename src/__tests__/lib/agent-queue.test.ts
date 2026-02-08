@@ -50,6 +50,10 @@ vi.mock('@/lib/sandbox', () => ({
   cleanupTaskVolume: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@/lib/railway-deploy', () => ({
+  deployToRailway: vi.fn(),
+}));
+
 vi.mock('@/lib/redis-queue', () => ({
   getQueue: vi.fn(() => ({
     enqueue: vi.fn(),

@@ -6,6 +6,7 @@ import { cleanupTaskVolume } from './sandbox';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 import { taskLogBuffer } from './task-log-buffer';
 import { pushToGitHub } from './github';
+import { deployToRailway } from './railway-deploy';
 
 /**
  * When an agent succeeds without calling task_complete, determine the
@@ -779,9 +780,10 @@ class AgentQueue {
       }
 
       // Push to GitHub only on success
+      let repoName: string | null = null;
       if (result.success) {
         try {
-          const repoName = await pushToGitHub(job, task, executor);
+          repoName = await pushToGitHub(job, task, executor);
           if (repoName) {
             taskLogBuffer.append({
               task_id: job.taskId,
@@ -800,6 +802,35 @@ class AgentQueue {
             agent_type: job.agentType,
             stream: 'system',
             content: `GitHub push failed: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+          });
+        }
+      }
+
+      // Deploy to Railway after successful GitHub push
+      if (result.success && repoName) {
+        try {
+          const railwayResult = await deployToRailway(job.userEmail || '', repoName, job.taskId, task.title);
+          if (railwayResult) {
+            taskLogBuffer.append({
+              task_id: job.taskId,
+              run_id: run.id,
+              agent_type: job.agentType,
+              stream: 'system',
+              content: `Deployed to Railway: ${railwayResult.url}`,
+              timestamp: Date.now(),
+            });
+            // Add a comment with the deployed URL
+            await createComment({ id: uuidv4(), task_id: job.taskId, author: 'system', content: `Railway deployment: ${railwayResult.url}` });
+          }
+        } catch (err) {
+          console.warn('[Agent] Railway deploy failed (non-blocking):', err);
+          taskLogBuffer.append({
+            task_id: job.taskId,
+            run_id: run.id,
+            agent_type: job.agentType,
+            stream: 'system',
+            content: `Railway deploy failed: ${err instanceof Error ? err.message : String(err)}`,
             timestamp: Date.now(),
           });
         }

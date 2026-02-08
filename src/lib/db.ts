@@ -1741,4 +1741,40 @@ export async function clearUserGitHubIntegration(userEmail: string): Promise<voi
   );
 }
 
+// ==================== Railway Integration ====================
+
+export async function getUserRailwayToken(userEmail: string): Promise<{
+  token: string;
+  authMethod: string;
+  refreshToken: string | null;
+  expiresAt: Date | null;
+} | null> {
+  const result = await pool.query(
+    `SELECT railway_token, railway_auth_method, railway_refresh_token, railway_token_expires_at
+     FROM user_integrations WHERE user_email = $1 AND railway_token IS NOT NULL`,
+    [userEmail]
+  );
+  if (result.rows.length === 0 || !result.rows[0].railway_token) return null;
+  return {
+    token: result.rows[0].railway_token,
+    authMethod: result.rows[0].railway_auth_method || 'token',
+    refreshToken: result.rows[0].railway_refresh_token || null,
+    expiresAt: result.rows[0].railway_token_expires_at ? new Date(result.rows[0].railway_token_expires_at) : null,
+  };
+}
+
+export async function updateUserRailwayToken(
+  userEmail: string,
+  token: string,
+  refreshToken: string | null,
+  expiresAt: Date | null
+): Promise<void> {
+  await pool.query(
+    `UPDATE user_integrations
+     SET railway_token = $2, railway_refresh_token = $3, railway_token_expires_at = $4, updated_at = NOW()
+     WHERE user_email = $1`,
+    [userEmail, token, refreshToken, expiresAt]
+  );
+}
+
 export default pool;
