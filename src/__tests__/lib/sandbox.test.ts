@@ -144,7 +144,7 @@ describe('SubprocessSandbox', () => {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn((event: string, handler: (...args: any[]) => void) => {
-          if (event === 'close') handler(0);
+          if (event === 'exit') handler(0);
         }),
         kill: vi.fn(),
       };
@@ -173,7 +173,7 @@ describe('SubprocessSandbox', () => {
           if (event === 'data') handler(Buffer.from(''));
         }) },
         on: vi.fn((event, handler) => {
-          if (event === 'close') handler(0);
+          if (event === 'exit') handler(0);
         }),
         kill: vi.fn(),
       };
@@ -202,7 +202,7 @@ describe('SubprocessSandbox', () => {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn((event, handler) => {
-          if (event === 'close') handler(0);
+          if (event === 'exit') handler(0);
         }),
         kill: vi.fn(),
       };
@@ -231,7 +231,7 @@ describe('SubprocessSandbox', () => {
           if (event === 'data') handler(Buffer.from('command failed'));
         }) },
         on: vi.fn((event, handler) => {
-          if (event === 'close') handler(1);
+          if (event === 'exit') handler(1);
         }),
         kill: vi.fn(),
       };
@@ -547,7 +547,7 @@ describe('SubprocessSandbox', () => {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn((event: string, handler: (...args: any[]) => void) => {
-          if (event === 'close') handler(0);
+          if (event === 'exit') handler(0);
         }),
         kill: vi.fn(),
       };
@@ -572,7 +572,7 @@ describe('SubprocessSandbox', () => {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn((event: string, handler: (...args: any[]) => void) => {
-          if (event === 'close') handler(0);
+          if (event === 'exit') handler(0);
         }),
         kill: vi.fn(),
       };
