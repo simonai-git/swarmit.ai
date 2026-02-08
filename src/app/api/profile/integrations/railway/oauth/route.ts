@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { cookies } from 'next/headers';
+
+// Generate PKCE code verifier and challenge
+function generatePKCE() {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
 
 // GET /api/profile/integrations/railway/oauth - Initiate Railway OAuth flow
 export async function GET() {
@@ -22,13 +29,23 @@ export async function GET() {
     // Generate CSRF state parameter
     const state = randomBytes(32).toString('hex');
 
-    // Store state in a cookie for verification in callback
+    // Generate PKCE challenge
+    const pkce = generatePKCE();
+
+    // Store state and PKCE verifier in cookies for verification in callback
     const cookieStore = await cookies();
     cookieStore.set('railway_oauth_state', state, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 600, // 10 minutes
+      path: '/',
+    });
+    cookieStore.set('railway_oauth_verifier', pkce.verifier, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 600,
       path: '/',
     });
 
@@ -42,6 +59,8 @@ export async function GET() {
       response_type: 'code',
       scope: 'openid email profile',
       state,
+      code_challenge: pkce.challenge,
+      code_challenge_method: 'S256',
     });
 
     const authUrl = `https://backboard.railway.com/oauth/auth?${params.toString()}`;
