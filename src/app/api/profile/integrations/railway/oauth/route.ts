@@ -44,7 +44,7 @@ export async function GET() {
       state,
     });
 
-    const authUrl = `https://backboard.railway.com/oauth/authorize?${params.toString()}`;
+    const authUrl = `https://backboard.railway.com/oauth/auth?${params.toString()}`;
 
     return NextResponse.redirect(authUrl);
   } catch (error) {

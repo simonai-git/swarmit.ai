@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     // Fetch user info from Railway OAuth userinfo endpoint
     let account = { name: '', email: '' };
     try {
-      const userInfoResponse = await fetch('https://backboard.railway.com/oauth/userinfo', {
+      const userInfoResponse = await fetch('https://backboard.railway.com/oauth/me', {
         headers: { 'Authorization': `Bearer ${access_token}` },
       });
       if (userInfoResponse.ok) {
