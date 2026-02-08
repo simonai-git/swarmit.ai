@@ -66,7 +66,15 @@ async function processUserTasks(userEmail: string): Promise<void> {
         .filter(j => ['pending', 'running'].includes(j.status))
         .map(j => j.taskId)
     );
-    activeTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
+    // Check both in-memory active runs AND DB-level current_run_id
+    // DB survives process restarts; in-memory is a fast path
+    const tasksWithDbClaim = allTasks
+      .filter(t => t.current_run_id != null)
+      .map(t => t.id);
+    activeTaskIds = new Set([
+      ...queueStatus.activeRuns.map(r => r.taskId),
+      ...tasksWithDbClaim,
+    ]);
   } catch (error) {
     console.warn(`[Scheduler] Failed to get queue status for ${userEmail}, proceeding without queue dedup:`, error instanceof Error ? error.message : String(error));
   }

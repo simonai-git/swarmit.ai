@@ -473,6 +473,7 @@ export interface Task {
   agent_context: string | null;
   project_id: string | null;
   user_email: string | null;
+  current_run_id: string | null;
   worked_by: string; // JSON array of contributors who worked on this task
   created_at: string;
   updated_at: string;
@@ -1535,7 +1536,8 @@ export async function getTasksByUserEmail(userEmail: string): Promise<Task[]> {
   const result = await pool.query(`
     SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
+           created_at, updated_at, project_id, user_email, current_run_id,
+           COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
     FROM tasks
     WHERE user_email = $1
@@ -1671,6 +1673,35 @@ export async function getWorkspaceSnapshot(taskId: string): Promise<WorkspaceSna
     [taskId]
   );
   return result.rows[0] || null;
+}
+
+// ==================== Task Run Claim/Release ====================
+
+/**
+ * Atomically claim a task for a specific run. Uses compare-and-swap
+ * (current_run_id IS NULL) to prevent concurrent runs on the same task.
+ * Returns true if the claim was successful, false if another run already owns it.
+ */
+export async function claimTaskRun(taskId: string, runId: string): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE tasks SET current_run_id = $2, updated_at = NOW()
+     WHERE id = $1 AND current_run_id IS NULL
+     RETURNING id`,
+    [taskId, runId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Release a task run claim. Only releases if the caller owns the claim
+ * (current_run_id matches), preventing stale runs from releasing another run's claim.
+ */
+export async function releaseTaskRun(taskId: string, runId: string): Promise<void> {
+  await pool.query(
+    `UPDATE tasks SET current_run_id = NULL, updated_at = NOW()
+     WHERE id = $1 AND current_run_id = $2`,
+    [taskId, runId]
+  );
 }
 
 export async function deleteWorkspaceSnapshot(taskId: string): Promise<boolean> {

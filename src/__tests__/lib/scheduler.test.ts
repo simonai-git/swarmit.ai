@@ -19,6 +19,7 @@ vi.mock('@/lib/db', () => ({
   updateTask: vi.fn(),
   getOrphanedTasks: vi.fn(),
   assignOrphanedTasks: vi.fn(),
+  cleanupOldTaskLogs: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -1249,6 +1250,67 @@ describe('scheduler', () => {
         .mockRejectedValueOnce(new Error('Redis timeout'));
 
       await expect(forceSchedulerTick()).resolves.not.toThrow();
+    });
+
+    it('skips tasks with current_run_id set (DB-level dedup)', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Claimed Task',
+          status: 'in_progress',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          current_run_id: 'run-active-123',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('enqueues tasks with null current_run_id', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Free Task',
+          status: 'todo',
+          assignee: 'agent@test.com',
+          priority: 'medium',
+          description: 'Test',
+          current_run_id: null,
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
     });
 
     it('one user error does not affect other users', async () => {
