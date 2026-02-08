@@ -674,8 +674,11 @@ export async function runAgent(
       
       if (toolCalls.length > 0) {
         for (const tc of toolCalls) {
+          const execStart = Date.now();
+          console.log(`[Claude] Executing tool: ${tc.name} (iteration ${iteration})`);
           const result = await executeTool(tc.name, tc.arguments, context, executor, taskApi);
-          
+          console.log(`[Claude] Tool executed: ${tc.name} in ${Date.now() - execStart}ms (result: ${result.length} chars)`);
+
           messages.push({
             role: 'toolResult',
             toolCallId: tc.id,

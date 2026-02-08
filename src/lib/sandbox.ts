@@ -265,12 +265,14 @@ export class DockerSandbox extends TaskSandbox {
       const fullCommand = `docker exec -w ${workdir} ${this.containerId} sh -c "${command.replace(/"/g, '\\"')}"`;
 
       const child = spawn('sh', ['-c', fullCommand], {
+        detached: true,
         timeout: timeoutMs
       });
 
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let resolved = false;
 
       const maxBytes = this.config.maxOutputBytes!;
 
@@ -290,12 +292,9 @@ export class DockerSandbox extends TaskSandbox {
         onOutput?.('stderr', chunk);
       });
 
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGKILL');
-      }, timeoutMs);
-
-      child.on('close', (code) => {
+      const doResolve = (code: number | null) => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         resolve({
           stdout: stdout.trim(),
@@ -303,9 +302,22 @@ export class DockerSandbox extends TaskSandbox {
           exitCode: code ?? (timedOut ? 124 : 1),
           timedOut
         });
+      };
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already dead */ }
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+        setTimeout(() => doResolve(null), 500);
+      }, timeoutMs);
+
+      child.on('exit', (code) => {
+        doResolve(code);
       });
 
       child.on('error', (err) => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         resolve({
           stdout: '',
@@ -425,8 +437,10 @@ export class SubprocessSandbox extends TaskSandbox {
     const timeoutMs = this.config.timeoutMs!;
 
     return new Promise((resolve) => {
+      // Use detached + process group so we can kill all child processes on timeout
       const child = spawn('sh', ['-c', command], {
         cwd: workdir,
+        detached: true,
         env: {
           ...process.env,
           ...this.toolkitEnvVars,
@@ -438,6 +452,7 @@ export class SubprocessSandbox extends TaskSandbox {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let resolved = false;
 
       const maxBytes = this.config.maxOutputBytes!;
 
@@ -457,12 +472,9 @@ export class SubprocessSandbox extends TaskSandbox {
         onOutput?.('stderr', chunk);
       });
 
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGKILL');
-      }, timeoutMs);
-
-      child.on('close', (code) => {
+      const doResolve = (code: number | null) => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         resolve({
           stdout: stdout.trim(),
@@ -470,9 +482,26 @@ export class SubprocessSandbox extends TaskSandbox {
           exitCode: code ?? (timedOut ? 124 : 1),
           timedOut
         });
+      };
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        // Kill entire process group (negative PID) to kill grandchildren too
+        try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already dead */ }
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+        // Force resolve after a short delay in case exit event doesn't fire
+        setTimeout(() => doResolve(null), 500);
+      }, timeoutMs);
+
+      // Use 'exit' instead of 'close' — 'close' waits for stdio drain which
+      // can hang if grandchild processes inherit the file descriptors
+      child.on('exit', (code) => {
+        doResolve(code);
       });
 
       child.on('error', (err) => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         resolve({
           stdout: '',
