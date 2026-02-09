@@ -426,9 +426,27 @@ describe('task-lifecycle', () => {
     it('should set low priority for low priority tasks', async () => {
       const lowPriorityTask = { ...mockTask, priority: 'low' };
       await onTaskCreated(lowPriorityTask as any);
-      
+
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ priority: 1 })
+      );
+    });
+
+    it('should enqueue product_manager agent for Sam-assigned tasks', async () => {
+      const samTask = { ...mockTask, assignee: 'Sam' };
+      await onTaskCreated(samTask as any);
+
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'product_manager' })
+      );
+    });
+
+    it('should enqueue pm agent for Taylor-assigned tasks', async () => {
+      const taylorTask = { ...mockTask, assignee: 'Taylor' };
+      await onTaskCreated(taylorTask as any);
+
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'pm' })
       );
     });
   });
@@ -528,6 +546,30 @@ describe('task-lifecycle', () => {
       
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'reviewer' })
+      );
+    });
+
+    it('should use product_manager type for Sam', async () => {
+      await onTaskAssigned(mockTask as any, 'Simon', 'Sam');
+
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'product_manager' })
+      );
+    });
+
+    it('should use pm type for Taylor', async () => {
+      await onTaskAssigned(mockTask as any, 'Simon', 'Taylor');
+
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'pm' })
+      );
+    });
+
+    it('should use devops type for Jordan', async () => {
+      await onTaskAssigned(mockTask as any, 'Simon', 'Jordan');
+
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: 'devops' })
       );
     });
 

@@ -60,10 +60,10 @@ export async function PATCH(
           if (!result) {
             return NextResponse.json({ error: 'Cannot start project (must be in defined status)' }, { status: 400 });
           }
-          // Create PM planning task for the project
+          // Create PRD task for the Product Manager
           const session = await getServerSession(authOptions);
           const userEmail = session?.user?.email || await getAutomationUserEmail() || null;
-          const pmTaskId = uuidv4();
+          const prdTaskId = uuidv4();
           const deployPrefs: string[] = [];
           if (result.deploy_to_railway) deployPrefs.push('Deploy to Railway is ENABLED - create a deployment task assigned to Jordan.');
           if (result.push_to_github) deployPrefs.push('Push to GitHub is ENABLED - include GitHub push in deployment tasks.');
@@ -76,19 +76,19 @@ export async function PATCH(
             result.tech_stack ? `## Tech Stack\n${result.tech_stack}` : '',
             result.timeline ? `## Timeline\n${result.timeline}` : '',
           ].filter(Boolean).join('\n\n');
-          const pmTask = await createTask({
-            id: pmTaskId,
-            title: `[PM] Plan: ${result.title}`,
-            description: `Analyze project requirements and create all tasks needed to deliver: ${result.title}\n\n${projectContext}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
+          const prdTask = await createTask({
+            id: prdTaskId,
+            title: `[PRD] ${result.title}`,
+            description: `Write a comprehensive PRD for: ${result.title}\n\n${projectContext}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
             status: 'todo',
             assignee: result.product_manager || 'Sam',
             priority: 'high',
             project_id: id,
             user_email: userEmail,
           });
-          // Trigger lifecycle automation (enqueues PM agent)
-          onTaskCreated(pmTask, userEmail || undefined).catch(err =>
-            console.error('[Project] Failed to trigger PM task lifecycle:', err)
+          // Trigger lifecycle automation (enqueues Product Manager agent)
+          onTaskCreated(prdTask, userEmail || undefined).catch(err =>
+            console.error('[Project] Failed to trigger PRD task lifecycle:', err)
           );
           break;
         }

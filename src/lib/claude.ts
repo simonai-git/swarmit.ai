@@ -207,7 +207,7 @@ const AGENT_TOOLS: AnyTool[] = [
       properties: {
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'Detailed task description' },
-        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Simon)' },
+        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Taylor, Simon)' },
         priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
       },
       required: ['title', 'description', 'assignee']
@@ -232,6 +232,17 @@ const AGENT_TOOLS: AnyTool[] = [
       type: 'object',
       properties: {},
       required: []
+    }
+  },
+  {
+    name: 'save_prd',
+    description: 'Save the PRD (Product Requirements Document) to the project',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: 'The full PRD content in markdown format' }
+      },
+      required: ['content']
     }
   },
   {
@@ -371,7 +382,7 @@ const CLAUDE_CODE_TOOLS: AnyTool[] = [
       properties: {
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'Detailed task description' },
-        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Simon)' },
+        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Taylor, Simon)' },
         priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
       },
       required: ['title', 'description', 'assignee']
@@ -396,6 +407,17 @@ const CLAUDE_CODE_TOOLS: AnyTool[] = [
       type: 'object',
       properties: {},
       required: []
+    }
+  },
+  {
+    name: 'save_prd',
+    description: 'Save the PRD (Product Requirements Document) to the project',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: 'The full PRD content in markdown format' }
+      },
+      required: ['content']
     }
   }
 ];
@@ -482,10 +504,33 @@ export const AGENT_PROMPTS: Record<string, string> = {
 - Your workspace already contains the code from the parent task. DO NOT rebuild from scratch.
 - Make minimal changes — only fix deployment-blocking issues.
 - You MUST call task_complete within 10 iterations.`,
-  pm: `You are a Product Manager. Your job is to analyze project requirements and create a comprehensive task plan.
+  product_manager: `You are a Product Manager. Your job is to write a comprehensive PRD (Product Requirements Document) for the project.
+
+## Instructions:
+1. Read the project description, goals, requirements, constraints, and tech stack from the context
+2. Write a detailed PRD covering:
+   - Executive Summary
+   - Problem Statement
+   - Goals & Success Metrics
+   - User Stories / Use Cases
+   - Functional Requirements (prioritized as Must-have / Should-have / Nice-to-have)
+   - Non-Functional Requirements (performance, security, scalability)
+   - Technical Architecture Overview
+   - Out of Scope
+   - Timeline & Milestones
+3. Save the PRD using the save_prd tool
+4. Call task_complete with next_status='done'
+
+## Critical Rules:
+- Be thorough but practical — focus on actionable requirements
+- Prioritize requirements clearly (Must-have / Should-have / Nice-to-have)
+- You MUST call save_prd before task_complete
+- You MUST call task_complete within 20 iterations`,
+
+  pm: `You are a Project Manager. Your job is to analyze the PRD and create a comprehensive task plan.
 
 ## When Planning a Project (task title starts with "[PM] Plan:"):
-1. Read the project PRD, goals, requirements, constraints, and tech stack from the context
+1. Read the project PRD from the context — this is your primary input for understanding what needs to be built
 2. Create all necessary tasks using create_task:
    - Design/UI tasks (assign to Alex - frontend specialist)
    - Frontend development tasks (assign to Alex)
@@ -495,7 +540,7 @@ export const AGENT_PROMPTS: Record<string, string> = {
    - If the project has push_to_github enabled: include GitHub push in the deployment task or create a separate task for Jordan
    - If neither deploy_to_railway nor push_to_github is enabled: skip deployment/GitHub tasks entirely
 3. Set up dependencies using add_dependency (e.g., backend before frontend integration, all dev before testing, testing before deployment)
-4. Create a final verification task: "[PM] Verify: {project title}" assigned to Sam (yourself) that depends on ALL other tasks you created
+4. Create a final verification task: "[PM] Verify: {project title}" assigned to Taylor (yourself) that depends on ALL other tasks you created
 5. Call task_complete with next_status='done'
 
 ## When Verifying a Project (task title starts with "[PM] Verify:"):
@@ -511,7 +556,8 @@ export const AGENT_PROMPTS: Record<string, string> = {
 - Morgan: Backend specialist (APIs, databases, server logic)
 - Jordan: DevOps specialist (deployment, CI/CD, infrastructure)
 - Riley: QA specialist (testing, bug verification)
-- Sam: Product Manager (that's you - for verification tasks)
+- Taylor: Project Manager (that's you - for verification tasks)
+- Sam: Product Manager (PRD creation)
 - Simon: General developer (full-stack, default)
 
 ## Critical Rules:
@@ -594,6 +640,7 @@ export interface TaskAPI {
   createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }): Promise<{ id: string }>;
   addDependency?(taskId: string, dependsOnId: string): Promise<void>;
   listProjectTasks?(projectId: string): Promise<Array<{ id: string; title: string; status: string; assignee: string | null }>>;
+  updateProject?(projectId: string, updates: Partial<Project>): Promise<void>;
 }
 
 // Execute tool (handles both standard and Claude Code tool names)
@@ -732,6 +779,13 @@ async function executeTool(
         if (!projectId) return 'Error: No project context';
         const tasks = await taskApi.listProjectTasks(projectId);
         return JSON.stringify(tasks, null, 2);
+      }
+      case 'save_prd': {
+        if (!taskApi.updateProject) return 'Error: save_prd not available';
+        const projectId = context.project?.id || context.task.project_id;
+        if (!projectId) return 'Error: No project context — save_prd requires a project';
+        await taskApi.updateProject(projectId, { prd: toolInput.content as string });
+        return 'PRD saved successfully to project';
       }
       case 'task_complete':
         return JSON.stringify({ summary: toolInput.summary, files_changed: toolInput.files_changed, next_status: toolInput.next_status });
