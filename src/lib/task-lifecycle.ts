@@ -100,7 +100,8 @@ export async function onTaskCreated(task: Task, userEmail?: string): Promise<voi
     const priority = PRIORITY_MAP[task.priority] || 5;
     const effectiveUserEmail = userEmail || task.user_email || undefined;
     // Map assignee to agent type for correct prompt selection
-    const agentType = task.assignee === 'Sam' ? 'pm'
+    const agentType = task.assignee === 'Sam' ? 'product_manager'
+      : task.assignee === 'Taylor' ? 'pm'
       : task.assignee === 'Riley' ? 'qa'
       : task.assignee === 'Simon' ? 'reviewer'
       : task.assignee === 'Jordan' ? 'devops'
@@ -185,7 +186,8 @@ export async function onTaskAssigned(
 
   // If task is in progress and assigned to a new agent, spawn that agent
   if (task.status === 'in_progress') {
-    const agentType = newAssignee === 'Sam' ? 'pm'
+    const agentType = newAssignee === 'Sam' ? 'product_manager'
+      : newAssignee === 'Taylor' ? 'pm'
       : newAssignee === 'Riley' ? 'qa'
       : newAssignee === 'Simon' ? 'reviewer'
       : newAssignee === 'Jordan' ? 'devops'

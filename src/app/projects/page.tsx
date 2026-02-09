@@ -16,6 +16,7 @@ interface Project {
   owner: string;
   reviewer: string;
   product_manager: string;
+  project_manager: string;
   prd: string | null;
   goals: string | null;
   requirements: string | null;
@@ -80,6 +81,7 @@ export default function ProjectsPage() {
     description: '',
     reviewer: 'Simon',
     product_manager: 'Sam',
+    project_manager: 'Taylor',
     goals: '',
     requirements: '',
     constraints: '',
@@ -176,6 +178,7 @@ export default function ProjectsPage() {
           owner: ownerName,
           reviewer: formData.reviewer,
           product_manager: formData.product_manager,
+          project_manager: formData.project_manager,
           goals: formData.goals || null,
           requirements: formData.requirements || null,
           constraints: formData.constraints || null,
@@ -256,6 +259,7 @@ export default function ProjectsPage() {
       description: '',
       reviewer: 'Simon',
       product_manager: 'Sam',
+      project_manager: 'Taylor',
       goals: '',
       requirements: '',
       constraints: '',
@@ -276,6 +280,7 @@ export default function ProjectsPage() {
       description: project.description || '',
       reviewer: project.reviewer || 'Simon',
       product_manager: project.product_manager || 'Sam',
+      project_manager: project.project_manager || 'Taylor',
       goals: project.goals || '',
       requirements: project.requirements || '',
       constraints: project.constraints || '',
@@ -298,10 +303,16 @@ export default function ProjectsPage() {
     ? projects
     : projects.filter(p => p.status === filterStatus);
 
-  // Filter PM agents (specialization contains "product manager" or "pm")
-  const pmAgents = agents.filter(a => {
+  // Filter Product Manager agents
+  const productManagerAgents = agents.filter(a => {
     const spec = a.specialization?.toLowerCase() || '';
-    return spec.includes('product manager') || spec.includes('pm') || spec === 'product management';
+    return spec.includes('product manager') || spec === 'product management';
+  });
+
+  // Filter Project Manager agents
+  const projectManagerAgents = agents.filter(a => {
+    const spec = a.specialization?.toLowerCase() || '';
+    return spec.includes('project manager') && !spec.includes('product');
   });
 
   const getActionButtons = (project: Project) => {
@@ -612,14 +623,34 @@ export default function ProjectsPage() {
                       onChange={(e) => setFormData({ ...formData, product_manager: e.target.value })}
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
                     >
-                      {pmAgents.length > 0 ? (
-                        pmAgents.map(a => (
+                      {productManagerAgents.length > 0 ? (
+                        productManagerAgents.map(a => (
                           <option key={a.id} value={a.name} className="bg-gray-900">
                             {a.avatar_emoji} {a.name}
                           </option>
                         ))
                       ) : (
                         <option value="Sam" className="bg-gray-900">📋 Sam</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Project Manager */}
+                  <div>
+                    <label className="block text-sm text-white/70 mb-1">Project Manager</label>
+                    <select
+                      value={formData.project_manager}
+                      onChange={(e) => setFormData({ ...formData, project_manager: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
+                    >
+                      {projectManagerAgents.length > 0 ? (
+                        projectManagerAgents.map(a => (
+                          <option key={a.id} value={a.name} className="bg-gray-900">
+                            {a.avatar_emoji} {a.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="Taylor" className="bg-gray-900">📊 Taylor</option>
                       )}
                     </select>
                   </div>

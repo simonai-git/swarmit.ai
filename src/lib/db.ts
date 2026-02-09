@@ -179,11 +179,20 @@ async function initDb() {
       END $$;
     `);
     
-    // Add product_manager to projects table (PM watches feedback and creates tasks)
+    // Add product_manager to projects table (Product Manager writes PRD)
     await client.query(`
-      DO $$ 
+      DO $$
       BEGIN
         ALTER TABLE projects ADD COLUMN IF NOT EXISTS product_manager TEXT DEFAULT 'Simon';
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
+    // Add project_manager to projects table (Project Manager creates tasks from PRD)
+    await client.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_manager TEXT DEFAULT 'Taylor';
       EXCEPTION WHEN OTHERS THEN NULL;
       END $$;
     `);
@@ -917,7 +926,8 @@ export interface Project {
   status: ProjectStatus;
   owner: string;
   reviewer: string;  // Who reviews completed tasks (defaults to owner)
-  product_manager: string;  // PM watches feedback and creates tasks
+  product_manager: string;  // Product Manager writes PRD
+  project_manager: string;  // Project Manager creates tasks from PRD
   prd: string | null;
   goals: string | null;
   requirements: string | null;
@@ -1001,8 +1011,8 @@ export async function getProjectsByStatus(status: ProjectStatus): Promise<Projec
 
 export async function createProject(project: Partial<Project> & { id: string; title: string }): Promise<Project> {
   const result = await pool.query(
-    `INSERT INTO projects (id, title, description, status, owner, reviewer, product_manager, prd, goals, requirements, constraints, tech_stack, timeline, deadline, github_repo, deploy_to_railway, push_to_github)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    `INSERT INTO projects (id, title, description, status, owner, reviewer, product_manager, project_manager, prd, goals, requirements, constraints, tech_stack, timeline, deadline, github_repo, deploy_to_railway, push_to_github)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       project.id,
@@ -1012,6 +1022,7 @@ export async function createProject(project: Partial<Project> & { id: string; ti
       project.owner || 'Bogdan',
       project.reviewer || 'Bogdan',
       project.product_manager || 'Sam',
+      project.project_manager || 'Taylor',
       project.prd || null,
       project.goals || null,
       project.requirements || null,
@@ -2086,7 +2097,8 @@ const DEFAULT_AGENTS = [
   { name: 'Riley', specialization: 'QA/Test Engineer', description: 'Quality assurance specialist for testing and bug detection.', emoji: '🧪', color: 'from-emerald-500 to-teal-500' },
   { name: 'Jordan', specialization: 'DevOps Engineer', description: 'Infrastructure and deployment specialist.', emoji: '🔧', color: 'from-violet-500 to-purple-500' },
   { name: 'Casey', specialization: 'AI/ML Engineer', description: 'AI and machine learning integration specialist.', emoji: '🤖', color: 'from-blue-500 to-purple-500' },
-  { name: 'Sam', specialization: 'Project Manager', description: 'Project planning, task breakdown, and delivery coordination.', emoji: '📋', color: 'from-lime-500 to-green-500' },
+  { name: 'Sam', specialization: 'Product Manager', description: 'Product requirements, PRD creation, and stakeholder alignment.', emoji: '📋', color: 'from-lime-500 to-green-500' },
+  { name: 'Taylor', specialization: 'Project Manager', description: 'Task planning, breakdown, dependency management, and delivery coordination.', emoji: '📊', color: 'from-yellow-500 to-orange-500' },
 ];
 
 export async function seedDefaultAgents(userEmail: string): Promise<void> {

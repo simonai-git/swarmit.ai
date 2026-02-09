@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
@@ -37,7 +37,7 @@ function getAgentTypeForNewStatus(status: string): 'developer' | 'qa' | 'reviewe
 export interface AgentJob {
   id: string;
   taskId: string;
-  agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops';
+  agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager';
   priority: number;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: Date;
@@ -192,7 +192,7 @@ class AgentQueue {
   }
 
   // Enqueue a job
-  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
     if (this.shouldUseRedis()) {
@@ -688,6 +688,9 @@ class AgentQueue {
           const tasks = await getTasksByProjectId(projectId);
           return tasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee }));
         },
+        updateProject: async (projectId: string, updates: Partial<Project>) => {
+          await updateProject(projectId, updates);
+        },
       };
 
       // Get user's Claude API key if available
@@ -807,6 +810,50 @@ class AgentQueue {
               });
             } catch (err) {
               console.warn(`[Agent] Failed to complete project:`, err);
+            }
+          }
+
+          // If this is a PRD task, auto-create the PM Plan task for the Project Manager
+          if (task.title.startsWith('[PRD]') && task.project_id) {
+            try {
+              const project = await getProject(task.project_id);
+              if (project && project.prd) {
+                const pmPlanTaskId = uuidv4();
+                const pmPlanTask = await createTask({
+                  id: pmPlanTaskId,
+                  title: `[PM] Plan: ${project.title}`,
+                  description: `Create all tasks needed to deliver: ${project.title}\n\nRefer to the PRD in the project context for detailed requirements.`,
+                  status: 'todo',
+                  assignee: project.project_manager || 'Taylor',
+                  priority: 'high',
+                  project_id: task.project_id,
+                  user_email: task.user_email,
+                });
+                // Trigger lifecycle to enqueue PM agent
+                const { onTaskCreated } = await import('./task-lifecycle');
+                await onTaskCreated(pmPlanTask, task.user_email || undefined);
+                console.log(`[Agent] PRD complete → created PM Plan task ${pmPlanTaskId.slice(0, 8)} for project ${task.project_id}`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `PRD saved. Created PM Plan task for Project Manager (${project.project_manager || 'Taylor'}).`,
+                  timestamp: Date.now(),
+                });
+              } else {
+                console.warn(`[Agent] PRD task completed but no PRD content found in project ${task.project_id}`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `WARNING: PRD task completed but no PRD content was saved to the project.`,
+                  timestamp: Date.now(),
+                });
+              }
+            } catch (err) {
+              console.warn(`[Agent] Failed to create PM Plan task after PRD:`, err);
             }
           }
         }
