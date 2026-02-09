@@ -28,6 +28,9 @@ import type {
   AgentRun,
   TaskDependency,
   TaskDependencyWithTitle,
+  Specialization,
+  InstalledSkill,
+  AgentSkill,
 } from '../../lib/db';
 
 describe('Database Module', () => {
@@ -827,6 +830,7 @@ describe('Database Module', () => {
             avatar_color: 'from-orange-500 to-amber-500',
             is_active: true,
             tasks_completed: 5,
+            user_email: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
           },
@@ -865,6 +869,7 @@ describe('Database Module', () => {
             avatar_color: 'from-blue-500 to-purple-500',
             is_active: true,
             tasks_completed: 0,
+            user_email: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
           },
@@ -894,6 +899,7 @@ describe('Database Module', () => {
           avatar_color: 'from-orange-500 to-amber-500',
           is_active: true,
           tasks_completed: 5,
+          user_email: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -931,6 +937,7 @@ describe('Database Module', () => {
           avatar_color: 'from-orange-500 to-amber-500',
           is_active: true,
           tasks_completed: 5,
+          user_email: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -975,6 +982,7 @@ describe('Database Module', () => {
           avatar_color: 'from-blue-500 to-purple-500',
           is_active: true,
           tasks_completed: 0,
+          user_email: null,
           created_at: '2026-02-05T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -1009,6 +1017,7 @@ describe('Database Module', () => {
           avatar_color: 'from-orange-500 to-amber-500',
           is_active: false,
           tasks_completed: 5,
+          user_email: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -1071,6 +1080,7 @@ describe('Database Module', () => {
           avatar_color: 'from-orange-500 to-amber-500',
           is_active: true,
           tasks_completed: 6,
+          user_email: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -2787,6 +2797,486 @@ describe('Database Module', () => {
           ['task-1', 'wrong-run']
         );
       });
+    });
+  });
+
+  // ==================== Agents multi-tenancy ====================
+
+  describe('Agents Multi-Tenancy', () => {
+    describe('getAllAgents with userEmail', () => {
+      it('should filter agents by user_email when provided', async () => {
+        const mockAgents: Agent[] = [
+          {
+            id: 'agent-1', name: 'Simon', specialization: 'Full Stack',
+            description: null, system_prompt: null, memory: null,
+            avatar_emoji: '🦊', avatar_color: 'from-orange-500 to-amber-500',
+            is_active: true, tasks_completed: 0, user_email: 'user@test.com',
+            created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
+          },
+        ];
+        mockQuery.mockResolvedValueOnce({ rows: mockAgents, rowCount: 1 });
+
+        const result = await db.getAllAgents('user@test.com');
+
+        expect(result).toEqual(mockAgents);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE user_email = $1'),
+          ['user@test.com']
+        );
+      });
+
+      it('should return all agents when no userEmail provided', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.getAllAgents();
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('ORDER BY created_at DESC')
+        );
+      });
+    });
+
+    describe('getActiveAgents with userEmail', () => {
+      it('should filter active agents by user_email', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.getActiveAgents('user@test.com');
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE is_active = TRUE AND user_email = $1'),
+          ['user@test.com']
+        );
+      });
+
+      it('should return all active agents when no userEmail', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.getActiveAgents();
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE is_active = TRUE ORDER BY name ASC')
+        );
+      });
+    });
+
+    describe('createAgent with user_email', () => {
+      it('should store user_email when creating agent', async () => {
+        const createdAgent: Agent = {
+          id: 'agent-new', name: 'NewAgent', specialization: 'Testing',
+          description: null, system_prompt: null, memory: null,
+          avatar_emoji: '🤖', avatar_color: 'from-blue-500 to-purple-500',
+          is_active: true, tasks_completed: 0, user_email: 'owner@test.com',
+          created_at: '2026-02-05T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
+        };
+        mockQuery.mockResolvedValueOnce({ rows: [createdAgent], rowCount: 1 });
+
+        const result = await db.createAgent({
+          id: 'agent-new', name: 'NewAgent', specialization: 'Testing',
+          user_email: 'owner@test.com',
+        });
+
+        expect(result.user_email).toBe('owner@test.com');
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO agents'),
+          expect.arrayContaining(['owner@test.com'])
+        );
+      });
+    });
+  });
+
+  // ==================== Specializations ====================
+
+  describe('Specializations', () => {
+    describe('getSpecializations', () => {
+      it('should return specializations for a user', async () => {
+        const mockSpecs: Specialization[] = [
+          {
+            id: 'spec-1', name: 'Full Stack Developer', description: 'General dev',
+            system_prompt: null, icon: '🚀', user_email: 'user@test.com',
+            is_default: true, created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-01T00:00:00Z',
+          },
+        ];
+        mockQuery.mockResolvedValueOnce({ rows: mockSpecs, rowCount: 1 });
+
+        const result = await db.getSpecializations('user@test.com');
+
+        expect(result).toEqual(mockSpecs);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE user_email = $1'),
+          ['user@test.com']
+        );
+      });
+
+      it('should return empty array when no specializations', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.getSpecializations('new@user.com');
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('getSpecialization', () => {
+      it('should return a single specialization by id', async () => {
+        const mockSpec: Specialization = {
+          id: 'spec-1', name: 'Backend Developer', description: 'APIs and servers',
+          system_prompt: 'You are a backend dev.', icon: '⚙️', user_email: 'user@test.com',
+          is_default: false, created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-01T00:00:00Z',
+        };
+        mockQuery.mockResolvedValueOnce({ rows: [mockSpec], rowCount: 1 });
+
+        const result = await db.getSpecialization('spec-1');
+
+        expect(result).toEqual(mockSpec);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE id = $1'),
+          ['spec-1']
+        );
+      });
+
+      it('should return null when not found', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.getSpecialization('nonexistent');
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('createSpecialization', () => {
+      it('should create and return a specialization', async () => {
+        const mockSpec: Specialization = {
+          id: 'spec-new', name: 'Blockchain Dev', description: 'Web3 specialist',
+          system_prompt: 'You build smart contracts.', icon: '🔗',
+          user_email: 'user@test.com', is_default: false,
+          created_at: '2026-02-05T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
+        };
+        mockQuery.mockResolvedValueOnce({ rows: [mockSpec], rowCount: 1 });
+
+        const result = await db.createSpecialization({
+          name: 'Blockchain Dev', description: 'Web3 specialist',
+          system_prompt: 'You build smart contracts.', icon: '🔗',
+          user_email: 'user@test.com',
+        });
+
+        expect(result).toEqual(mockSpec);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO specializations'),
+          expect.arrayContaining(['Blockchain Dev', 'user@test.com'])
+        );
+      });
+    });
+
+    describe('updateSpecialization', () => {
+      it('should update and return specialization', async () => {
+        const updated: Specialization = {
+          id: 'spec-1', name: 'Updated Name', description: 'Updated desc',
+          system_prompt: null, icon: '🎯', user_email: 'user@test.com',
+          is_default: false, created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
+        };
+        mockQuery.mockResolvedValueOnce({ rows: [updated], rowCount: 1 });
+
+        const result = await db.updateSpecialization('spec-1', { name: 'Updated Name', description: 'Updated desc' });
+
+        expect(result).toEqual(updated);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('UPDATE specializations SET'),
+          expect.arrayContaining(['Updated Name', 'Updated desc', 'spec-1'])
+        );
+      });
+
+      it('should return null when no fields to update', async () => {
+        const result = await db.updateSpecialization('spec-1', {});
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('deleteSpecialization', () => {
+      it('should delete and return true', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+        const result = await db.deleteSpecialization('spec-1');
+        expect(result).toBe(true);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('DELETE FROM specializations WHERE id = $1'),
+          ['spec-1']
+        );
+      });
+
+      it('should return false when not found', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.deleteSpecialization('nonexistent');
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('getSpecializationAgentCount', () => {
+      it('should return count of agents using a specialization', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [{ count: '3' }] });
+
+        const result = await db.getSpecializationAgentCount('Full Stack Developer', 'user@test.com');
+
+        expect(result).toBe(3);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE specialization = $1'),
+          ['Full Stack Developer', 'user@test.com']
+        );
+      });
+
+      it('should return 0 when none found', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [{ count: '0' }] });
+
+        const result = await db.getSpecializationAgentCount('Nonexistent', 'user@test.com');
+        expect(result).toBe(0);
+      });
+    });
+
+    describe('seedDefaultSpecializations', () => {
+      it('should insert default specializations for a user', async () => {
+        // Each INSERT is ON CONFLICT DO NOTHING
+        mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+        await db.seedDefaultSpecializations('newuser@test.com');
+
+        // 12 default specializations
+        expect(mockQuery).toHaveBeenCalledTimes(12);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO specializations'),
+          expect.arrayContaining(['newuser@test.com'])
+        );
+      });
+    });
+  });
+
+  // ==================== Installed Skills ====================
+
+  describe('Installed Skills', () => {
+    describe('getInstalledSkills', () => {
+      it('should return installed skills for a user', async () => {
+        const mockSkills: InstalledSkill[] = [
+          {
+            id: 'iskill-1', skill_id: 'sk-1', skill_name: 'Code Review',
+            skill_description: 'Review code', skill_content: 'Review the code carefully.',
+            source_url: 'https://example.com', category: 'dev', author: 'TestAuthor',
+            user_email: 'user@test.com', installed_at: '2026-02-01T00:00:00Z',
+          },
+        ];
+        mockQuery.mockResolvedValueOnce({ rows: mockSkills, rowCount: 1 });
+
+        const result = await db.getInstalledSkills('user@test.com');
+
+        expect(result).toEqual(mockSkills);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE user_email = $1'),
+          ['user@test.com']
+        );
+      });
+    });
+
+    describe('installSkill', () => {
+      it('should install a skill and return it', async () => {
+        const mockSkill: InstalledSkill = {
+          id: 'iskill-new', skill_id: 'sk-2', skill_name: 'Testing',
+          skill_description: 'Write tests', skill_content: 'Always test edge cases.',
+          source_url: null, category: 'qa', author: 'Author',
+          user_email: 'user@test.com', installed_at: '2026-02-05T00:00:00Z',
+        };
+        mockQuery.mockResolvedValueOnce({ rows: [mockSkill], rowCount: 1 });
+
+        const result = await db.installSkill({
+          skill_id: 'sk-2', skill_name: 'Testing', skill_description: 'Write tests',
+          skill_content: 'Always test edge cases.', source_url: null,
+          category: 'qa', author: 'Author', user_email: 'user@test.com',
+        });
+
+        expect(result).toEqual(mockSkill);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO installed_skills'),
+          expect.arrayContaining(['sk-2', 'Testing', 'user@test.com'])
+        );
+      });
+
+      it('should use ON CONFLICT DO NOTHING for duplicate installs', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.installSkill({
+          skill_id: 'sk-dup', skill_name: 'Dup', skill_description: null,
+          skill_content: null, source_url: null, category: null, author: null,
+          user_email: 'user@test.com',
+        });
+
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('ON CONFLICT'),
+          expect.any(Array)
+        );
+      });
+    });
+
+    describe('uninstallSkill', () => {
+      it('should delete skill and remove from agent_skills', async () => {
+        // First call: delete from agent_skills
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+        // Second call: delete from installed_skills
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+        const result = await db.uninstallSkill('sk-1', 'user@test.com');
+
+        expect(result).toBe(true);
+        expect(mockQuery).toHaveBeenCalledTimes(2);
+        // First: agent_skills cleanup
+        expect(mockQuery).toHaveBeenNthCalledWith(1,
+          expect.stringContaining('DELETE FROM agent_skills'),
+          ['sk-1', 'user@test.com']
+        );
+        // Second: installed_skills delete
+        expect(mockQuery).toHaveBeenNthCalledWith(2,
+          expect.stringContaining('DELETE FROM installed_skills'),
+          ['sk-1', 'user@test.com']
+        );
+      });
+
+      it('should return false when skill not found', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.uninstallSkill('nonexistent', 'user@test.com');
+        expect(result).toBe(false);
+      });
+    });
+  });
+
+  // ==================== Agent Skills ====================
+
+  describe('Agent Skills', () => {
+    describe('getAgentSkills', () => {
+      it('should return skills assigned to an agent', async () => {
+        const mockSkills = [
+          { id: 'as-1', agent_id: 'agent-1', skill_id: 'sk-1', user_email: 'user@test.com', assigned_at: '2026-02-01T00:00:00Z', skill_name: 'Code Review' },
+        ];
+        mockQuery.mockResolvedValueOnce({ rows: mockSkills, rowCount: 1 });
+
+        const result = await db.getAgentSkills('agent-1');
+
+        expect(result).toEqual(mockSkills);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE ags.agent_id = $1'),
+          ['agent-1']
+        );
+      });
+
+      it('should return empty array when no skills assigned', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.getAgentSkills('agent-1');
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('getAgentSkillContents', () => {
+      it('should return skill contents for an agent', async () => {
+        const mockContents = [
+          { skill_name: 'Code Review', skill_content: 'Always check for edge cases.' },
+          { skill_name: 'Testing', skill_content: 'Write unit tests first.' },
+        ];
+        mockQuery.mockResolvedValueOnce({ rows: mockContents, rowCount: 2 });
+
+        const result = await db.getAgentSkillContents('agent-1');
+
+        expect(result).toHaveLength(2);
+        expect(result[0].skill_name).toBe('Code Review');
+        expect(result[0].skill_content).toBe('Always check for edge cases.');
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('JOIN installed_skills'),
+          ['agent-1']
+        );
+      });
+
+      it('should only return skills with non-empty content', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        const result = await db.getAgentSkillContents('agent-1');
+        expect(result).toEqual([]);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining("skill_content IS NOT NULL AND isk.skill_content != ''"),
+          ['agent-1']
+        );
+      });
+    });
+
+    describe('setAgentSkills', () => {
+      it('should remove old skills and insert new ones', async () => {
+        // First call: DELETE old skills
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+        // Second and third: INSERT new skills
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+        await db.setAgentSkills('agent-1', ['sk-1', 'sk-2'], 'user@test.com');
+
+        expect(mockQuery).toHaveBeenCalledTimes(3);
+        expect(mockQuery).toHaveBeenNthCalledWith(1,
+          expect.stringContaining('DELETE FROM agent_skills WHERE agent_id = $1'),
+          ['agent-1']
+        );
+        expect(mockQuery).toHaveBeenNthCalledWith(2,
+          expect.stringContaining('INSERT INTO agent_skills'),
+          expect.arrayContaining(['agent-1', 'sk-1', 'user@test.com'])
+        );
+        expect(mockQuery).toHaveBeenNthCalledWith(3,
+          expect.stringContaining('INSERT INTO agent_skills'),
+          expect.arrayContaining(['agent-1', 'sk-2', 'user@test.com'])
+        );
+      });
+
+      it('should only delete when empty skill list', async () => {
+        mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+        await db.setAgentSkills('agent-1', [], 'user@test.com');
+
+        expect(mockQuery).toHaveBeenCalledTimes(1);
+        expect(mockQuery).toHaveBeenCalledWith(
+          expect.stringContaining('DELETE FROM agent_skills'),
+          ['agent-1']
+        );
+      });
+    });
+  });
+
+  // ==================== Default Agent Seeding ====================
+
+  describe('seedDefaultAgents', () => {
+    it('should insert 7 default agents for a user', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      await db.seedDefaultAgents('newuser@test.com');
+
+      // 7 default agents
+      expect(mockQuery).toHaveBeenCalledTimes(7);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO agents'),
+        expect.arrayContaining(['newuser@test.com'])
+      );
+    });
+
+    it('should include Simon agent', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      await db.seedDefaultAgents('user@test.com');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO agents'),
+        expect.arrayContaining(['Simon', 'Full Stack Developer'])
+      );
+    });
+
+    it('should include Sam agent as Project Manager', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      await db.seedDefaultAgents('user@test.com');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO agents'),
+        expect.arrayContaining(['Sam', 'Project Manager'])
+      );
     });
   });
 });

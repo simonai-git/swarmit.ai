@@ -1,0 +1,53 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSpecializations, seedDefaultSpecializations, createSpecialization } from '@/lib/db';
+import { getServerSession } from 'next-auth';
+
+// GET /api/specializations - List specializations for current user (auto-seed on first access)
+export async function GET(_request: NextRequest) {
+  try {
+    const session = await getServerSession();
+    const userEmail = session?.user?.email || 'default';
+
+    let specs = await getSpecializations(userEmail);
+
+    // Auto-seed defaults on first access
+    if (specs.length === 0) {
+      await seedDefaultSpecializations(userEmail);
+      specs = await getSpecializations(userEmail);
+    }
+
+    return NextResponse.json(specs);
+  } catch (error) {
+    console.error('Error fetching specializations:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// POST /api/specializations - Create a new specialization
+export async function POST(request: NextRequest) {
+  try {
+    const session = await getServerSession();
+    const userEmail = session?.user?.email || 'default';
+    const body = await request.json();
+
+    if (!body.name) {
+      return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+
+    const spec = await createSpecialization({
+      name: body.name,
+      description: body.description || null,
+      system_prompt: body.system_prompt || null,
+      icon: body.icon || '🤖',
+      user_email: userEmail,
+    });
+
+    return NextResponse.json(spec, { status: 201 });
+  } catch (error: unknown) {
+    console.error('Error creating specialization:', error);
+    if ((error as { code?: string }).code === '23505') {
+      return NextResponse.json({ error: 'A specialization with this name already exists' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

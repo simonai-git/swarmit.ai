@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useTaskLogs, LogEntry } from '@/hooks/useTaskLogs';
+import { useTaskLogs, LogEntry, consolidateLogs } from '@/hooks/useTaskLogs';
 
 interface TaskLogsPanelProps {
   taskId: string;
@@ -80,7 +80,9 @@ export default function TaskLogsPanel({ taskId, isActive }: TaskLogsPanelProps) 
     return () => { cancelled = true; };
   }, [taskId, isActive]);
 
-  const filteredLogs = filter === 'all' ? logs : logs.filter(l => l.stream === filter);
+  // Consolidate consecutive log entries from the same stream within 200ms window
+  const rawFiltered = filter === 'all' ? logs : logs.filter(l => l.stream === filter);
+  const filteredLogs = consolidateLogs(rawFiltered);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -201,11 +203,11 @@ export default function TaskLogsPanel({ taskId, isActive }: TaskLogsPanelProps) 
         ) : (
           filteredLogs.map((entry, i) => (
             <div key={entry.id || `buf-${i}`} className="flex gap-2 hover:bg-white/5 px-1 -mx-1 rounded">
-              <span className="text-white/25 select-none flex-shrink-0 w-16 text-right">
+              <span className="text-white/25 select-none flex-shrink-0 whitespace-nowrap w-20 text-right">
                 {formatTimestamp(entry)}
               </span>
-              <span className={`flex-shrink-0 w-12 text-right ${streamColors[entry.stream] || 'text-white/50'}`}>
-                [{entry.stream === 'system' ? 'sys' : entry.stream}]
+              <span className={`flex-shrink-0 w-14 text-right ${streamColors[entry.stream] || 'text-white/50'}`}>
+                [{entry.stream === 'assistant' ? 'ai' : entry.stream === 'tool' ? 'fn' : entry.stream === 'stdout' ? 'out' : entry.stream === 'stderr' ? 'err' : entry.stream === 'system' ? 'sys' : entry.stream}]
               </span>
               <span className={`whitespace-pre-wrap break-all ${
                 entry.stream === 'stderr' ? 'text-red-300' :

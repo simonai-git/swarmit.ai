@@ -459,6 +459,68 @@ async function initDb() {
       ) WHERE user_email IS NULL;
     `);
 
+    // Add user_email to agents for multi-tenancy
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS user_email TEXT;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_agents_user_email ON agents(user_email);
+    `);
+
+    // Create specializations table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS specializations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        system_prompt TEXT,
+        icon TEXT DEFAULT '🤖',
+        user_email TEXT NOT NULL,
+        is_default BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(name, user_email)
+      )
+    `);
+
+    // Create installed_skills table (user-level skill library)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS installed_skills (
+        id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        skill_description TEXT,
+        skill_content TEXT,
+        source_url TEXT,
+        category TEXT,
+        author TEXT,
+        user_email TEXT NOT NULL,
+        installed_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(skill_id, user_email)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_installed_skills_user ON installed_skills(user_email);
+    `);
+
+    // Create agent_skills junction table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_skills (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL,
+        user_email TEXT,
+        assigned_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(agent_id, skill_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_agent_skills_agent ON agent_skills(agent_id);
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -762,16 +824,25 @@ export interface Agent {
   avatar_color: string;
   is_active: boolean;
   tasks_completed: number;
+  user_email: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export async function getAllAgents(): Promise<Agent[]> {
+export async function getAllAgents(userEmail?: string): Promise<Agent[]> {
+  if (userEmail) {
+    const result = await pool.query('SELECT * FROM agents WHERE user_email = $1 ORDER BY created_at DESC', [userEmail]);
+    return result.rows;
+  }
   const result = await pool.query('SELECT * FROM agents ORDER BY created_at DESC');
   return result.rows;
 }
 
-export async function getActiveAgents(): Promise<Agent[]> {
+export async function getActiveAgents(userEmail?: string): Promise<Agent[]> {
+  if (userEmail) {
+    const result = await pool.query('SELECT * FROM agents WHERE is_active = TRUE AND user_email = $1 ORDER BY name ASC', [userEmail]);
+    return result.rows;
+  }
   const result = await pool.query('SELECT * FROM agents WHERE is_active = TRUE ORDER BY name ASC');
   return result.rows;
 }
@@ -788,8 +859,8 @@ export async function getAgentByName(name: string): Promise<Agent | null> {
 
 export async function createAgent(agent: Partial<Agent> & { id: string; name: string; specialization: string }): Promise<Agent> {
   const result = await pool.query(
-    `INSERT INTO agents (id, name, specialization, description, system_prompt, memory, avatar_emoji, avatar_color, is_active, tasks_completed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO agents (id, name, specialization, description, system_prompt, memory, avatar_emoji, avatar_color, is_active, tasks_completed, user_email)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       agent.id,
@@ -801,7 +872,8 @@ export async function createAgent(agent: Partial<Agent> & { id: string; name: st
       agent.avatar_emoji || '🤖',
       agent.avatar_color || 'from-blue-500 to-purple-500',
       agent.is_active !== false,
-      agent.tasks_completed || 0
+      agent.tasks_completed || 0,
+      agent.user_email || null
     ]
   );
   return result.rows[0];
@@ -1589,7 +1661,7 @@ export interface TaskLog {
   task_id: string;
   run_id: string | null;
   agent_type: string | null;
-  stream: 'stdout' | 'stderr' | 'system' | 'tool' | 'assistant';
+  stream: string;
   content: string;
   created_at: string;
 }
@@ -1816,6 +1888,217 @@ export async function updateUserRailwayToken(
      WHERE user_email = $1`,
     [userEmail, token, refreshToken, expiresAt]
   );
+}
+
+// ==================== Specializations ====================
+
+export interface Specialization {
+  id: string;
+  name: string;
+  description: string | null;
+  system_prompt: string | null;
+  icon: string;
+  user_email: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+const DEFAULT_SPECIALIZATIONS = [
+  { name: 'Full Stack Developer', icon: '🚀', description: 'General-purpose developer handling frontend, backend, and infrastructure' },
+  { name: 'Frontend/UI Developer', icon: '🎨', description: 'Specialist in user interfaces, React, CSS, and design systems' },
+  { name: 'Backend Developer', icon: '⚙️', description: 'Focused on APIs, databases, and server-side architecture' },
+  { name: 'DevOps Engineer', icon: '🔧', description: 'Infrastructure, CI/CD, deployments, and monitoring' },
+  { name: 'AI/ML Engineer', icon: '🤖', description: 'Machine learning, LLM integrations, and data pipelines' },
+  { name: 'Graphic Designer', icon: '✨', description: 'Visual design, branding, and creative assets' },
+  { name: 'QA/Test Engineer', icon: '🧪', description: 'Quality assurance, test automation, and bug hunting' },
+  { name: 'Data Engineer', icon: '📊', description: 'Data pipelines, ETL, warehousing, and analytics' },
+  { name: 'Security Engineer', icon: '🔒', description: 'Security audits, vulnerability testing, and hardening' },
+  { name: 'Mobile Developer', icon: '📱', description: 'iOS, Android, and cross-platform mobile development' },
+  { name: 'Technical Writer', icon: '📝', description: 'Documentation, API references, and knowledge bases' },
+  { name: 'Project Manager', icon: '📋', description: 'Planning, coordination, task breakdown, and delivery oversight' },
+];
+
+export async function seedDefaultSpecializations(userEmail: string): Promise<void> {
+  for (const spec of DEFAULT_SPECIALIZATIONS) {
+    const id = `spec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await pool.query(
+      `INSERT INTO specializations (id, name, description, icon, user_email, is_default)
+       VALUES ($1, $2, $3, $4, $5, TRUE)
+       ON CONFLICT (name, user_email) DO NOTHING`,
+      [id, spec.name, spec.description, spec.icon, userEmail]
+    );
+  }
+}
+
+export async function getSpecializations(userEmail: string): Promise<Specialization[]> {
+  const result = await pool.query(
+    'SELECT * FROM specializations WHERE user_email = $1 ORDER BY is_default DESC, name ASC',
+    [userEmail]
+  );
+  return result.rows;
+}
+
+export async function getSpecialization(id: string): Promise<Specialization | null> {
+  const result = await pool.query('SELECT * FROM specializations WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+export async function createSpecialization(spec: Omit<Specialization, 'id' | 'created_at' | 'updated_at' | 'is_default'>): Promise<Specialization> {
+  const id = `spec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(
+    `INSERT INTO specializations (id, name, description, system_prompt, icon, user_email, is_default)
+     VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+     RETURNING *`,
+    [id, spec.name, spec.description || null, spec.system_prompt || null, spec.icon || '🤖', spec.user_email]
+  );
+  return result.rows[0];
+}
+
+export async function updateSpecialization(id: string, updates: Partial<Specialization>): Promise<Specialization | null> {
+  const fields = Object.keys(updates).filter(k => k !== 'id' && k !== 'created_at' && k !== 'user_email');
+  if (fields.length === 0) return null;
+
+  const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+  const values = fields.map(f => updates[f as keyof Specialization]);
+
+  const result = await pool.query(
+    `UPDATE specializations SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1} RETURNING *`,
+    [...values, id]
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteSpecialization(id: string): Promise<boolean> {
+  const result = await pool.query('DELETE FROM specializations WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function getSpecializationAgentCount(specName: string, userEmail: string): Promise<number> {
+  const result = await pool.query(
+    'SELECT COUNT(*) as count FROM agents WHERE specialization = $1 AND (user_email = $2 OR user_email IS NULL)',
+    [specName, userEmail]
+  );
+  return parseInt(result.rows[0].count) || 0;
+}
+
+// ==================== Installed Skills ====================
+
+export interface InstalledSkill {
+  id: string;
+  skill_id: string;
+  skill_name: string;
+  skill_description: string | null;
+  skill_content: string | null;
+  source_url: string | null;
+  category: string | null;
+  author: string | null;
+  user_email: string;
+  installed_at: string;
+}
+
+export async function getInstalledSkills(userEmail: string): Promise<InstalledSkill[]> {
+  const result = await pool.query(
+    'SELECT * FROM installed_skills WHERE user_email = $1 ORDER BY installed_at DESC',
+    [userEmail]
+  );
+  return result.rows;
+}
+
+export async function installSkill(skill: Omit<InstalledSkill, 'id' | 'installed_at'>): Promise<InstalledSkill> {
+  const id = `iskill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(
+    `INSERT INTO installed_skills (id, skill_id, skill_name, skill_description, skill_content, source_url, category, author, user_email)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (skill_id, user_email) DO NOTHING
+     RETURNING *`,
+    [id, skill.skill_id, skill.skill_name, skill.skill_description || null, skill.skill_content || null, skill.source_url || null, skill.category || null, skill.author || null, skill.user_email]
+  );
+  return result.rows[0];
+}
+
+export async function uninstallSkill(skillId: string, userEmail: string): Promise<boolean> {
+  // Also remove from any agent_skills
+  await pool.query('DELETE FROM agent_skills WHERE skill_id = $1 AND user_email = $2', [skillId, userEmail]);
+  const result = await pool.query('DELETE FROM installed_skills WHERE skill_id = $1 AND user_email = $2', [skillId, userEmail]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+// ==================== Agent Skills ====================
+
+export interface AgentSkill {
+  id: string;
+  agent_id: string;
+  skill_id: string;
+  user_email: string | null;
+  assigned_at: string;
+}
+
+export async function getAgentSkills(agentId: string): Promise<(AgentSkill & { skill_name: string })[]> {
+  const result = await pool.query(
+    `SELECT ags.*, COALESCE(isk.skill_name, ags.skill_id) as skill_name
+     FROM agent_skills ags
+     LEFT JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_email = ags.user_email
+     WHERE ags.agent_id = $1
+     ORDER BY ags.assigned_at ASC`,
+    [agentId]
+  );
+  return result.rows;
+}
+
+/**
+ * Get the content of all skills assigned to an agent.
+ * Returns an array of { skill_name, skill_content } for skills that have content.
+ */
+export async function getAgentSkillContents(agentId: string): Promise<Array<{ skill_name: string; skill_content: string }>> {
+  const result = await pool.query(
+    `SELECT isk.skill_name, isk.skill_content
+     FROM agent_skills ags
+     JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_email = ags.user_email
+     WHERE ags.agent_id = $1 AND isk.skill_content IS NOT NULL AND isk.skill_content != ''
+     ORDER BY ags.assigned_at ASC`,
+    [agentId]
+  );
+  return result.rows;
+}
+
+export async function setAgentSkills(agentId: string, skillIds: string[], userEmail: string): Promise<void> {
+  // Remove old skills
+  await pool.query('DELETE FROM agent_skills WHERE agent_id = $1', [agentId]);
+  // Insert new
+  for (const skillId of skillIds) {
+    const id = `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await pool.query(
+      `INSERT INTO agent_skills (id, agent_id, skill_id, user_email)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (agent_id, skill_id) DO NOTHING`,
+      [id, agentId, skillId, userEmail]
+    );
+  }
+}
+
+// ==================== Default Agent Seeding ====================
+
+const DEFAULT_AGENTS = [
+  { name: 'Simon', specialization: 'Full Stack Developer', description: 'General-purpose AI agent capable of handling various development tasks.', emoji: '🦊', color: 'from-orange-500 to-amber-500' },
+  { name: 'Alex', specialization: 'Frontend/UI Developer', description: 'Frontend specialist focusing on React, CSS, and user experience.', emoji: '🎨', color: 'from-pink-500 to-rose-500' },
+  { name: 'Morgan', specialization: 'Backend Developer', description: 'Backend expert handling APIs, databases, and server architecture.', emoji: '⚙️', color: 'from-cyan-500 to-blue-500' },
+  { name: 'Riley', specialization: 'QA/Test Engineer', description: 'Quality assurance specialist for testing and bug detection.', emoji: '🧪', color: 'from-emerald-500 to-teal-500' },
+  { name: 'Jordan', specialization: 'DevOps Engineer', description: 'Infrastructure and deployment specialist.', emoji: '🔧', color: 'from-violet-500 to-purple-500' },
+  { name: 'Casey', specialization: 'AI/ML Engineer', description: 'AI and machine learning integration specialist.', emoji: '🤖', color: 'from-blue-500 to-purple-500' },
+  { name: 'Sam', specialization: 'Project Manager', description: 'Project planning, task breakdown, and delivery coordination.', emoji: '📋', color: 'from-lime-500 to-green-500' },
+];
+
+export async function seedDefaultAgents(userEmail: string): Promise<void> {
+  for (const agent of DEFAULT_AGENTS) {
+    const id = `agent-${agent.name.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    await pool.query(
+      `INSERT INTO agents (id, name, specialization, description, avatar_emoji, avatar_color, user_email)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (name) DO NOTHING`,
+      [id, agent.name, agent.specialization, agent.description, agent.emoji, agent.color, userEmail]
+    );
+  }
 }
 
 export default pool;

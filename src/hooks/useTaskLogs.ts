@@ -7,7 +7,7 @@ export interface LogEntry {
   task_id: string;
   run_id: string | null;
   agent_type: string | null;
-  stream: 'stdout' | 'stderr' | 'system';
+  stream: 'stdout' | 'stderr' | 'system' | 'assistant' | 'tool';
   content: string;
   created_at?: string;
   timestamp?: number;
@@ -23,6 +23,23 @@ interface UseTaskLogsResult {
   logs: LogEntry[];
   isConnected: boolean;
   isLoading: boolean;
+}
+
+/**
+ * Merge consecutive log entries from the same stream + run_id within a 200ms window.
+ */
+export function consolidateLogs(logs: LogEntry[]): LogEntry[] {
+  return logs.reduce<LogEntry[]>((acc, entry) => {
+    if (acc.length === 0) return [entry];
+    const prev = acc[acc.length - 1];
+    const prevTime = prev.created_at ? new Date(prev.created_at).getTime() : (prev.timestamp || 0);
+    const entryTime = entry.created_at ? new Date(entry.created_at).getTime() : (entry.timestamp || 0);
+    if (prev.stream === entry.stream && prev.run_id === entry.run_id && Math.abs(entryTime - prevTime) < 200) {
+      acc[acc.length - 1] = { ...prev, content: prev.content + entry.content };
+      return acc;
+    }
+    return [...acc, entry];
+  }, []);
 }
 
 export function useTaskLogs({ taskId, runId, enabled }: UseTaskLogsOptions): UseTaskLogsResult {
