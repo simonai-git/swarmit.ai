@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
@@ -7,6 +7,7 @@ import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 import { taskLogBuffer } from './task-log-buffer';
 import { pushToGitHub } from './github';
 import { deployToRailway } from './railway-deploy';
+import { searchAgentMemory, addAgentMemory } from './supermemory';
 
 /**
  * When an agent succeeds without calling task_complete, determine the
@@ -526,6 +527,37 @@ class AgentQueue {
         },
       };
 
+      // Inject assigned skill content into agent context
+      {
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        if (agentRecord) {
+          try {
+            const skillContents = await getAgentSkillContents(agentRecord.id);
+            if (skillContents.length > 0) {
+              const skillsSection = skillContents
+                .map(s => `### ${s.skill_name}\n${s.skill_content}`)
+                .join('\n\n');
+              context.agentMemory = (context.agentMemory || '') + '\n\n## Installed Skills\n' + skillsSection;
+              console.log(`[Agent] Injected ${skillContents.length} skill(s) for ${task.assignee}`);
+            }
+          } catch (err) {
+            console.warn('[Agent] Failed to load agent skills (non-blocking):', err);
+          }
+
+          // Read lessons from Supermemory for this agent
+          if (process.env.SUPERMEMORY_API_KEY) {
+            try {
+              const memories = await searchAgentMemory(agentRecord.id, `${task.title} ${task.description || ''}`);
+              if (memories) {
+                context.agentMemory = (context.agentMemory || '') + '\n\n## Lessons from Previous Runs\n' + memories;
+              }
+            } catch (err) {
+              console.warn('[Agent] Supermemory read failed (non-blocking):', err);
+            }
+          }
+        }
+      }
+
       // Create onOutput callback that feeds TaskLogBuffer
       const onOutput = (stream: 'stdout' | 'stderr', data: string) => {
         taskLogBuffer.append({
@@ -820,6 +852,29 @@ class AgentQueue {
           author: context.agentConfig?.name || 'Agent',
           content: `✅ ${result.summary}\n\nFiles changed: ${result.filesChanged.join(', ') || 'none'}`,
         });
+      }
+
+      // Save lessons to Supermemory
+      if (result.success && process.env.SUPERMEMORY_API_KEY) {
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        if (agentRecord) {
+          try {
+            const memContent = [
+              `## Run Summary for Task: ${task.title}`,
+              `Agent: ${task.assignee} (${job.agentType})`,
+              `Result: ${result.summary}`,
+              `Files changed: ${result.filesChanged.join(', ') || 'none'}`,
+              result.error ? `Error: ${result.error}` : '',
+            ].filter(Boolean).join('\n');
+            await addAgentMemory(agentRecord.id, memContent, {
+              taskId: task.id,
+              projectId: task.project_id || '',
+              agentType: job.agentType,
+            });
+          } catch (err) {
+            console.warn('[Agent] Supermemory write failed (non-blocking):', err);
+          }
+        }
       }
 
       run.transcript.push({

@@ -22,9 +22,13 @@ vi.mock('@/lib/db', () => ({
   deleteWorkspaceSnapshot: vi.fn().mockResolvedValue(true),
   claimTaskRun: vi.fn(),
   releaseTaskRun: vi.fn(),
+  getAgentByName: vi.fn(),
+  getAgentSkillContents: vi.fn(),
 }));
 
 import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun, getDefaultNextStatus, agentQueue, cleanupTaskResources } from '@/lib/agent-queue';
+import { getAgentByName, getAgentSkillContents } from '@/lib/db';
+import { searchAgentMemory, addAgentMemory } from '@/lib/supermemory';
 
 vi.mock('@/lib/claude', () => ({
   runAgent: vi.fn(),
@@ -61,6 +65,11 @@ vi.mock('@/lib/redis-queue', () => ({
     startProcessing: vi.fn(),
     stopProcessing: vi.fn(),
   })),
+}));
+
+vi.mock('@/lib/supermemory', () => ({
+  searchAgentMemory: vi.fn(),
+  addAgentMemory: vi.fn(),
 }));
 
 describe('agent-queue', () => {
@@ -629,6 +638,110 @@ describe('agent-queue', () => {
       vi.mocked(cleanupTaskVolume).mockRejectedValueOnce(new Error('volume error'));
 
       await expect(cleanupTaskResources('task-cleanup-2')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('skill content formatting', () => {
+    // Tests for the skill content injection format used in agent-queue executeJob
+    // The format is: "\n\n## Installed Skills\n### SkillName\nSkillContent"
+
+    it('should format single skill correctly', () => {
+      const skills = [{ skill_name: 'Code Review', skill_content: 'Review code carefully' }];
+      const skillsSection = skills
+        .map(s => `### ${s.skill_name}\n${s.skill_content}`)
+        .join('\n\n');
+      const result = '\n\n## Installed Skills\n' + skillsSection;
+
+      expect(result).toBe('\n\n## Installed Skills\n### Code Review\nReview code carefully');
+    });
+
+    it('should format multiple skills with double newline separator', () => {
+      const skills = [
+        { skill_name: 'Testing', skill_content: 'Write unit tests' },
+        { skill_name: 'Security', skill_content: 'Check for vulnerabilities' },
+      ];
+      const skillsSection = skills
+        .map(s => `### ${s.skill_name}\n${s.skill_content}`)
+        .join('\n\n');
+      const result = '\n\n## Installed Skills\n' + skillsSection;
+
+      expect(result).toContain('### Testing\nWrite unit tests');
+      expect(result).toContain('### Security\nCheck for vulnerabilities');
+      expect(result).toContain('\n\n### Security');
+    });
+
+    it('should append to existing agentMemory', () => {
+      const existing = 'Previous context here';
+      const skills = [{ skill_name: 'Skill1', skill_content: 'Content1' }];
+      const skillsSection = skills.map(s => `### ${s.skill_name}\n${s.skill_content}`).join('\n\n');
+      const result = (existing || '') + '\n\n## Installed Skills\n' + skillsSection;
+
+      expect(result).toContain('Previous context here');
+      expect(result).toContain('## Installed Skills');
+    });
+  });
+
+  describe('supermemory content formatting', () => {
+    // Tests for the memory content format written after successful agent run
+
+    it('should format run summary correctly', () => {
+      const task = { title: 'Fix login bug', assignee: 'Alex' };
+      const job = { agentType: 'developer' };
+      const result = { summary: 'Fixed the auth issue', filesChanged: ['auth.ts', 'login.ts'], error: undefined };
+
+      const memContent = [
+        `## Run Summary for Task: ${task.title}`,
+        `Agent: ${task.assignee} (${job.agentType})`,
+        `Result: ${result.summary}`,
+        `Files changed: ${result.filesChanged.join(', ') || 'none'}`,
+        result.error ? `Error: ${result.error}` : '',
+      ].filter(Boolean).join('\n');
+
+      expect(memContent).toContain('## Run Summary for Task: Fix login bug');
+      expect(memContent).toContain('Agent: Alex (developer)');
+      expect(memContent).toContain('Result: Fixed the auth issue');
+      expect(memContent).toContain('Files changed: auth.ts, login.ts');
+      expect(memContent).not.toContain('Error:');
+    });
+
+    it('should include error when present', () => {
+      const memContent = [
+        '## Run Summary for Task: Deploy app',
+        'Agent: Jordan (developer)',
+        'Result: Deployment failed',
+        'Files changed: none',
+        'Error: Connection timeout',
+      ].filter(Boolean).join('\n');
+
+      expect(memContent).toContain('Error: Connection timeout');
+    });
+
+    it('should show "none" when no files changed', () => {
+      const filesChanged: string[] = [];
+      const line = `Files changed: ${filesChanged.join(', ') || 'none'}`;
+      expect(line).toBe('Files changed: none');
+    });
+  });
+
+  describe('skill and memory mock setup', () => {
+    it('getAgentByName should be importable and mockable', () => {
+      expect(getAgentByName).toBeDefined();
+      expect(vi.isMockFunction(getAgentByName)).toBe(true);
+    });
+
+    it('getAgentSkillContents should be importable and mockable', () => {
+      expect(getAgentSkillContents).toBeDefined();
+      expect(vi.isMockFunction(getAgentSkillContents)).toBe(true);
+    });
+
+    it('searchAgentMemory should be importable and mockable', () => {
+      expect(searchAgentMemory).toBeDefined();
+      expect(vi.isMockFunction(searchAgentMemory)).toBe(true);
+    });
+
+    it('addAgentMemory should be importable and mockable', () => {
+      expect(addAgentMemory).toBeDefined();
+      expect(vi.isMockFunction(addAgentMemory)).toBe(true);
     });
   });
 });

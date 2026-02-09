@@ -1,10 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
-import UserMenu from '@/components/UserMenu';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 
 interface Agent {
   id: string;
@@ -17,8 +13,24 @@ interface Agent {
   avatar_color: string;
   is_active: boolean;
   tasks_completed: number;
+  user_email: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface Specialization {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string;
+}
+
+interface InstalledSkill {
+  id: string;
+  skill_id: string;
+  skill_name: string;
+  skill_description: string | null;
+  category: string | null;
 }
 
 interface ReportData {
@@ -33,15 +45,6 @@ interface ReportData {
   velocity_per_day: number;
   overdue_count: number;
   blocked_count: number;
-}
-
-interface WatcherData {
-  id: string;
-  is_running: boolean;
-  last_run: string | null;
-  current_task_id: string | null;
-  updated_at: string;
-  active_task_ids: string;
 }
 
 interface Task {
@@ -59,21 +62,6 @@ interface AgentMetrics {
   activeTaskTitle?: string;
 }
 
-const SPECIALIZATIONS = [
-  { value: 'Full Stack Developer', label: 'Full Stack Developer', emoji: '🚀' },
-  { value: 'Frontend Developer', label: 'Frontend / UI Developer', emoji: '🎨' },
-  { value: 'Backend Developer', label: 'Backend Developer', emoji: '⚙️' },
-  { value: 'DevOps Engineer', label: 'DevOps Engineer', emoji: '🔧' },
-  { value: 'AI Engineer', label: 'AI / ML Engineer', emoji: '🤖' },
-  { value: 'Graphic Designer', label: 'Graphic Designer', emoji: '✨' },
-  { value: 'QA Engineer', label: 'QA / Test Engineer', emoji: '🧪' },
-  { value: 'Data Engineer', label: 'Data Engineer', emoji: '📊' },
-  { value: 'Security Engineer', label: 'Security Engineer', emoji: '🔒' },
-  { value: 'Mobile Developer', label: 'Mobile Developer', emoji: '📱' },
-  { value: 'Technical Writer', label: 'Technical Writer', emoji: '📝' },
-  { value: 'Project Manager', label: 'Project Manager', emoji: '📋' },
-];
-
 const AVATAR_COLORS = [
   'from-blue-500 to-purple-500',
   'from-orange-500 to-amber-500',
@@ -88,15 +76,15 @@ const AVATAR_COLORS = [
 const AVATAR_EMOJIS = ['🤖', '🦊', '🐙', '🦾', '🧠', '⚡', '🔮', '🎯', '🛠️', '💡', '🚀', '🎨'];
 
 export default function AgentsPage() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [specializations, setSpecializations] = useState<Specialization[]>([]);
+  const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
   const [reportData, setReportData] = useState<ReportData | null>(null);
-  const [watcherData, setWatcherData] = useState<WatcherData | null>(null);
   const [inProgressTasks, setInProgressTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     specialization: 'Full Stack Developer',
@@ -109,42 +97,26 @@ export default function AgentsPage() {
   });
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-    }
-  }, [status, router]);
-
-  useEffect(() => {
     fetchAllData();
   }, []);
 
   const fetchAllData = async () => {
     try {
-      const [agentsRes, reportsRes, watcherRes, tasksRes] = await Promise.all([
+      const [agentsRes, reportsRes, tasksRes, specsRes, skillsRes] = await Promise.all([
         fetch('/api/agents'),
         fetch('/api/reports'),
-        fetch('/api/watcher'),
         fetch('/api/tasks?status=in_progress'),
+        fetch('/api/specializations'),
+        fetch('/api/skills/installed'),
       ]);
-      
-      if (agentsRes.ok) {
-        const data = await agentsRes.json();
-        setAgents(data);
-      }
-      
-      if (reportsRes.ok) {
-        const data = await reportsRes.json();
-        setReportData(data);
-      }
-      
-      if (watcherRes.ok) {
-        const data = await watcherRes.json();
-        setWatcherData(data);
-      }
-      
-      if (tasksRes.ok) {
-        const data = await tasksRes.json();
-        setInProgressTasks(data);
+
+      if (agentsRes.ok) setAgents(await agentsRes.json());
+      if (reportsRes.ok) setReportData(await reportsRes.json());
+      if (tasksRes.ok) setInProgressTasks(await tasksRes.json());
+      if (specsRes.ok) setSpecializations(await specsRes.json());
+      if (skillsRes.ok) {
+        const data = await skillsRes.json();
+        setInstalledSkills(data.skills || data || []);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -153,50 +125,51 @@ export default function AgentsPage() {
     }
   };
 
-  // Get metrics for a specific agent by name
   const getAgentMetrics = (agentName: string): AgentMetrics => {
     const assigned = reportData?.by_assignee[agentName] || 0;
     const worked = reportData?.by_contributor[agentName] || 0;
     const completed = reportData?.completed_by_contributor[agentName] || 0;
-    
-    // Check if agent is currently working on any in-progress task
     const agentActiveTask = inProgressTasks.find(task => task.assignee === agentName);
-    const isWorking = !!agentActiveTask;
-    const activeTaskTitle = agentActiveTask?.title;
-    
-    return { assigned, worked, completed, isWorking, activeTaskTitle };
+    return {
+      assigned,
+      worked,
+      completed,
+      isWorking: !!agentActiveTask,
+      activeTaskTitle: agentActiveTask?.title,
+    };
   };
 
   const fetchAgents = async () => {
     try {
       const res = await fetch('/api/agents');
-      if (res.ok) {
-        const data = await res.json();
-        setAgents(data);
-      }
+      if (res.ok) setAgents(await res.json());
     } catch (error) {
       console.error('Error fetching agents:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     try {
       const url = editingAgent ? `/api/agents/${editingAgent.id}` : '/api/agents';
       const method = editingAgent ? 'PATCH' : 'POST';
-      
+
       const res = await fetch(url, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, skill_ids: selectedSkillIds }),
       });
 
       if (res.ok) {
+        const savedAgent = await res.json();
+        // Save skills assignment
+        if (selectedSkillIds.length > 0 || editingAgent) {
+          await fetch(`/api/agents/${savedAgent.id}/skills`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ skill_ids: selectedSkillIds }),
+          });
+        }
         fetchAgents();
         closeModal();
       } else {
@@ -211,12 +184,8 @@ export default function AgentsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this agent?')) return;
-    
     try {
-      const res = await fetch(`/api/agents/${id}`, {
-        method: 'DELETE',
-      });
-
+      const res = await fetch(`/api/agents/${id}`, { method: 'DELETE' });
       if (res.ok) {
         fetchAgents();
       } else {
@@ -230,9 +199,10 @@ export default function AgentsPage() {
 
   const openCreateModal = () => {
     setEditingAgent(null);
+    setSelectedSkillIds([]);
     setFormData({
       name: '',
-      specialization: 'Full Stack Developer',
+      specialization: specializations[0]?.name || 'Full Stack Developer',
       description: '',
       system_prompt: '',
       memory: '',
@@ -243,7 +213,7 @@ export default function AgentsPage() {
     setShowModal(true);
   };
 
-  const openEditModal = (agent: Agent) => {
+  const openEditModal = async (agent: Agent) => {
     setEditingAgent(agent);
     setFormData({
       name: agent.name,
@@ -255,6 +225,16 @@ export default function AgentsPage() {
       avatar_color: agent.avatar_color,
       is_active: agent.is_active,
     });
+    // Fetch current skills for this agent
+    try {
+      const res = await fetch(`/api/agents/${agent.id}/skills`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedSkillIds((data.skills || []).map((s: { skill_id: string }) => s.skill_id));
+      }
+    } catch {
+      setSelectedSkillIds([]);
+    }
     setShowModal(true);
   };
 
@@ -263,9 +243,15 @@ export default function AgentsPage() {
     setEditingAgent(null);
   };
 
-  if (status === 'loading' || loading) {
+  const toggleSkill = (skillId: string) => {
+    setSelectedSkillIds(prev =>
+      prev.includes(skillId) ? prev.filter(id => id !== skillId) : [...prev, skillId]
+    );
+  };
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center py-20">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
           <span className="text-white/60">Loading agents...</span>
@@ -275,59 +261,18 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="glass rounded-2xl p-4 sm:p-6 mb-4 sm:mb-8 animate-fade-in">
-        {/* Row 1: Title left, User info right */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold gradient-text truncate">
-              AI Agent Team
-            </h1>
-            <p className="text-white/50 text-xs sm:text-sm hidden md:block">
-              Create and manage specialized AI agents for your team
-            </p>
-          </div>
-          
-          {/* User menu */}
-          {session && <UserMenu session={session} />}
-        </div>
-        
-        {/* Row 2: Navigation + Actions */}
-        <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
-          <div className="flex items-center gap-2">
-            {/* New Agent Button - First */}
-            <button
-              onClick={openCreateModal}
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg sm:rounded-xl font-medium hover:shadow-lg hover:shadow-purple-500/25 hover:scale-105 active:scale-95 text-xs sm:text-sm"
-            >
-              <span className="text-base sm:text-lg group-hover:rotate-90 transition-transform duration-200">+</span>
-              <span className="hidden sm:inline">New Agent</span>
-            </button>
-            
-            {/* Tasks */}
-            <Link
-              href="/"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">📋</span>
-              <span className="hidden sm:inline">Tasks</span>
-            </Link>
-            
-            {/* Projects */}
-            <Link
-              href="/projects"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">📁</span>
-              <span className="hidden sm:inline">Projects</span>
-            </Link>
-          </div>
-          
-          {/* Agent count */}
-          <div className="text-white/50 text-sm">
-            <span className="font-medium text-white">{agents.filter(a => a.is_active).length}</span> active agents
-          </div>
+    <>
+      {/* Actions bar */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={openCreateModal}
+          className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg sm:rounded-xl font-medium hover:shadow-lg hover:shadow-purple-500/25 hover:scale-105 active:scale-95 text-xs sm:text-sm"
+        >
+          <span className="text-base sm:text-lg group-hover:rotate-90 transition-transform duration-200">+</span>
+          <span>New Agent</span>
+        </button>
+        <div className="text-white/50 text-sm">
+          <span className="font-medium text-white">{agents.filter(a => a.is_active).length}</span> active agents
         </div>
       </div>
 
@@ -347,9 +292,8 @@ export default function AgentsPage() {
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${agent.avatar_color} flex items-center justify-center text-2xl shadow-lg flex-shrink-0`}>
                     {agent.avatar_emoji}
                   </div>
-                  {/* Availability indicator */}
                   {agent.is_active && (
-                    <div 
+                    <div
                       className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-900 ${
                         metrics.isWorking ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
                       }`}
@@ -373,35 +317,30 @@ export default function AgentsPage() {
                   <p className="text-sm text-white/60">{agent.specialization}</p>
                 </div>
               </div>
-              
+
               {agent.description && !metrics.isWorking && (
                 <p className="mt-3 text-sm text-white/50 line-clamp-2">{agent.description}</p>
               )}
-              
-              {/* Active task indicator */}
+
               {metrics.isWorking && metrics.activeTaskTitle && (
                 <div className="mt-3 p-2 bg-amber-500/10 rounded-lg border border-amber-500/20">
                   <div className="text-[10px] text-amber-400/60 uppercase tracking-wider mb-0.5">Working on</div>
                   <div className="text-xs text-white/70 line-clamp-1">{metrics.activeTaskTitle}</div>
                 </div>
               )}
-              
-              {/* Metrics row */}
+
               <div className="mt-3 flex items-center gap-3 text-xs">
                 <div className="flex items-center gap-1 text-white/50" title="Tasks assigned">
-                  <span>📋</span>
-                  <span>{metrics.assigned}</span>
+                  <span>📋</span><span>{metrics.assigned}</span>
                 </div>
                 <div className="flex items-center gap-1 text-white/50" title="Tasks worked on">
-                  <span>🔧</span>
-                  <span>{metrics.worked}</span>
+                  <span>🔧</span><span>{metrics.worked}</span>
                 </div>
                 <div className="flex items-center gap-1 text-emerald-400" title="Tasks completed">
-                  <span>✅</span>
-                  <span>{metrics.completed}</span>
+                  <span>✅</span><span>{metrics.completed}</span>
                 </div>
               </div>
-              
+
               <div className="mt-3 flex items-center justify-between pt-3 border-t border-white/10">
                 <div className="flex items-center gap-2 text-xs text-white/40">
                   {metrics.completed > 0 ? (
@@ -420,21 +359,19 @@ export default function AgentsPage() {
                   >
                     ✏️
                   </button>
-                  {agent.id !== 'agent-simon' && (
-                    <button
-                      onClick={() => handleDelete(agent.id)}
-                      className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/50 hover:text-red-400 transition-colors"
-                      title="Delete agent"
-                    >
-                      🗑️
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDelete(agent.id)}
+                    className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/50 hover:text-red-400 transition-colors"
+                    title="Delete agent"
+                  >
+                    🗑️
+                  </button>
                 </div>
               </div>
             </div>
           );
         })}
-        
+
         {agents.length === 0 && (
           <div className="col-span-full text-center py-12 text-white/40">
             <p className="text-4xl mb-4">🤖</p>
@@ -451,47 +388,39 @@ export default function AgentsPage() {
             <h2 className="text-xl font-bold text-white mb-4">
               {editingAgent ? 'Edit Agent' : 'Create New Agent'}
             </h2>
-            
+
             {/* Metrics Section - Only show when editing */}
             {editingAgent && (
               <div className="mb-6 p-4 bg-white/5 rounded-xl border border-white/10">
-                <h3 className="text-sm font-medium text-white/70 mb-3">📊 Performance Metrics</h3>
+                <h3 className="text-sm font-medium text-white/70 mb-3">Performance Metrics</h3>
                 {(() => {
                   const metrics = getAgentMetrics(editingAgent.name);
                   return (
                     <div className="space-y-3">
-                      {/* Availability Status */}
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-white/50">Status</span>
                         {editingAgent.is_active ? (
                           metrics.isWorking ? (
                             <span className="flex items-center gap-1.5 text-sm text-amber-400">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                              Working
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />Working
                             </span>
                           ) : (
                             <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                              Available for work
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />Available
                             </span>
                           )
                         ) : (
                           <span className="flex items-center gap-1.5 text-sm text-white/40">
-                            <span className="w-2 h-2 rounded-full bg-white/30" />
-                            Inactive
+                            <span className="w-2 h-2 rounded-full bg-white/30" />Inactive
                           </span>
                         )}
                       </div>
-                      
-                      {/* Current Task - only show when working */}
                       {metrics.isWorking && metrics.activeTaskTitle && (
                         <div className="p-2 bg-amber-500/10 rounded-lg border border-amber-500/20">
                           <div className="text-[10px] text-amber-400/60 uppercase tracking-wider mb-1">Currently Working On</div>
                           <div className="text-sm text-white/80 line-clamp-2">{metrics.activeTaskTitle}</div>
                         </div>
                       )}
-                      
-                      {/* Stats Grid */}
                       <div className="grid grid-cols-3 gap-3">
                         <div className="text-center p-2 bg-white/5 rounded-lg">
                           <div className="text-lg font-bold text-white">{metrics.assigned}</div>
@@ -506,8 +435,6 @@ export default function AgentsPage() {
                           <div className="text-[10px] text-emerald-400/60 uppercase tracking-wider">Done</div>
                         </div>
                       </div>
-                      
-                      {/* Completion Rate Bar */}
                       {metrics.worked > 0 && (
                         <div>
                           <div className="flex justify-between text-xs text-white/40 mb-1">
@@ -515,7 +442,7 @@ export default function AgentsPage() {
                             <span>{Math.round((metrics.completed / metrics.worked) * 100)}%</span>
                           </div>
                           <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div 
+                            <div
                               className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
                               style={{ width: `${Math.round((metrics.completed / metrics.worked) * 100)}%` }}
                             />
@@ -527,7 +454,7 @@ export default function AgentsPage() {
                 })()}
               </div>
             )}
-            
+
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Avatar Preview & Selection */}
               <div className="flex items-center gap-4">
@@ -577,7 +504,7 @@ export default function AgentsPage() {
                 />
               </div>
 
-              {/* Specialization */}
+              {/* Specialization - from DB */}
               <div>
                 <label className="block text-sm text-white/70 mb-1">Specialization *</label>
                 <select
@@ -585,9 +512,9 @@ export default function AgentsPage() {
                   onChange={(e) => setFormData({ ...formData, specialization: e.target.value })}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
                 >
-                  {SPECIALIZATIONS.map((spec) => (
-                    <option key={spec.value} value={spec.value} className="bg-slate-800">
-                      {spec.emoji} {spec.label}
+                  {specializations.map((spec) => (
+                    <option key={spec.id} value={spec.name} className="bg-slate-800">
+                      {spec.icon} {spec.name}
                     </option>
                   ))}
                 </select>
@@ -629,6 +556,32 @@ export default function AgentsPage() {
                 />
               </div>
 
+              {/* Skills Multi-Select */}
+              {installedSkills.length > 0 && (
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">Skills</label>
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-white/5 border border-white/10 rounded-lg max-h-32 overflow-y-auto">
+                    {installedSkills.map((skill) => (
+                      <button
+                        key={skill.skill_id}
+                        type="button"
+                        onClick={() => toggleSkill(skill.skill_id)}
+                        className={`px-2 py-1 rounded-md text-xs transition-all ${
+                          selectedSkillIds.includes(skill.skill_id)
+                            ? 'bg-blue-500/30 text-blue-300 border border-blue-500/40'
+                            : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        {skill.skill_name}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-white/30 mt-1">
+                    {selectedSkillIds.length} skill{selectedSkillIds.length !== 1 ? 's' : ''} selected
+                  </p>
+                </div>
+              )}
+
               {/* Active Toggle */}
               <div className="flex items-center gap-3">
                 <button
@@ -667,6 +620,6 @@ export default function AgentsPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
