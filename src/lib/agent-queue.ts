@@ -507,6 +507,11 @@ class AgentQueue {
       // Skip blocked tasks — they'll be re-enqueued when unblocked
       if (task.is_blocked) {
         console.log(`[Agent] Task ${job.taskId.slice(0, 8)} is blocked, skipping`);
+        // If task was set to in_progress by a previous failed run, revert it
+        if (task.status === 'in_progress') {
+          await updateTask(job.taskId, { status: 'todo' });
+          console.log(`[Agent] Reverted blocked task ${job.taskId.slice(0, 8)} status to 'todo'`);
+        }
         run.status = 'cancelled' as AgentRun['status'];
         run.error = 'Task is blocked by dependencies';
         run.completedAt = new Date();
@@ -688,8 +693,10 @@ class AgentQueue {
             status: 'todo',
             project_id: params.projectId,
             user_email: params.userEmail,
+            is_blocked: true,
+            blocked_reason: 'Waiting on: PM plan finalization',
           });
-          console.log(`[Agent] PM created task ${id.slice(0, 8)}: "${params.title}" (assigned to ${params.assignee})`);
+          console.log(`[Agent] PM created task ${id.slice(0, 8)}: "${params.title}" (assigned to ${params.assignee}, blocked until plan finalized)`);
           return { id };
         },
         addDependency: async (taskId: string, dependsOnId: string) => {
@@ -821,6 +828,17 @@ class AgentQueue {
                   content: `WARNING: No [PM] Verify task was created. The project will not auto-complete.`,
                   timestamp: Date.now(),
                 });
+              }
+
+              // Unblock and enqueue root tasks now that PM plan is finalized
+              for (const ct of createdTasks) {
+                await recalculateBlockedStatus(ct.id);
+                const refreshed = await getTask(ct.id);
+                if (refreshed && !refreshed.is_blocked && refreshed.status === 'todo') {
+                  const { onTaskCreated } = await import('./task-lifecycle');
+                  await onTaskCreated(refreshed, job.userEmail);
+                  console.log(`[Agent] Root task ${ct.id.slice(0, 8)} unblocked → enqueued agent`);
+                }
               }
             } catch (err) {
               console.warn(`[Agent] Failed to validate PM plan task count:`, err);
@@ -1091,6 +1109,17 @@ class AgentQueue {
       run.status = 'failed';
       run.error = error instanceof Error ? error.message : String(error);
       run.completedAt = new Date();
+
+      // Revert task status to 'todo' if agent changed it during this run
+      try {
+        const currentTask = await getTask(job.taskId);
+        if (currentTask && currentTask.status === 'in_progress') {
+          await updateTask(job.taskId, { status: 'todo' });
+          console.log(`[Agent] Reverted task ${job.taskId.slice(0, 8)} status to 'todo' after failure`);
+        }
+      } catch (revertErr) {
+        console.warn(`[Agent] Failed to revert task status after failure:`, revertErr);
+      }
 
       taskLogBuffer.append({
         task_id: job.taskId,
