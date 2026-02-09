@@ -597,8 +597,8 @@ ${p.constraints ? `\n### Constraints\n${p.constraints}` : ''}
 ${p.tech_stack ? `\n### Tech Stack\n${p.tech_stack}` : ''}
 ${p.timeline ? `\n### Timeline\n${p.timeline}` : ''}
 ${p.github_repo ? `- **GitHub Repo:** ${p.github_repo}` : ''}
-${p.deploy_to_railway ? `- **Deploy to Railway:** Yes` : ''}
-${p.push_to_github ? `- **Push to GitHub:** Yes` : ''}
+- **Deploy to Railway:** ${p.deploy_to_railway ? 'Yes' : 'No'}
+- **Push to GitHub:** ${p.push_to_github ? 'Yes' : 'No'}
 `;
   }
 

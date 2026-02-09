@@ -890,29 +890,37 @@ class AgentQueue {
             try {
               const project = await getProject(task.project_id);
               if (project && project.prd) {
-                const pmPlanTaskId = uuidv4();
-                const pmPlanTask = await createTask({
-                  id: pmPlanTaskId,
-                  title: `[PM] Plan: ${project.title}`,
-                  description: `Create all tasks needed to deliver: ${project.title}\n\nRefer to the PRD in the project context for detailed requirements.`,
-                  status: 'todo',
-                  assignee: project.project_manager || 'Taylor',
-                  priority: 'high',
-                  project_id: task.project_id,
-                  user_email: task.user_email,
-                });
-                // Trigger lifecycle to enqueue PM agent
-                const { onTaskCreated } = await import('./task-lifecycle');
-                await onTaskCreated(pmPlanTask, task.user_email || undefined);
-                console.log(`[Agent] PRD complete → created PM Plan task ${pmPlanTaskId.slice(0, 8)} for project ${task.project_id}`);
-                taskLogBuffer.append({
-                  task_id: job.taskId,
-                  run_id: run.id,
-                  agent_type: job.agentType,
-                  stream: 'system',
-                  content: `PRD saved. Created PM Plan task for Project Manager (${project.project_manager || 'Taylor'}).`,
-                  timestamp: Date.now(),
-                });
+                // Dedup: check if PM Plan task already exists for this project
+                const existingTasks = await getTasksByProjectId(task.project_id);
+                const pmPlanTitle = `[PM] Plan: ${project.title}`;
+                const existingPmPlan = existingTasks.find(t => t.title === pmPlanTitle);
+                if (existingPmPlan) {
+                  console.log(`[Agent] PM Plan task already exists (${existingPmPlan.id.slice(0, 8)}) for project ${task.project_id}, skipping creation`);
+                } else {
+                  const pmPlanTaskId = uuidv4();
+                  const pmPlanTask = await createTask({
+                    id: pmPlanTaskId,
+                    title: pmPlanTitle,
+                    description: `Create all tasks needed to deliver: ${project.title}\n\nRefer to the PRD in the project context for detailed requirements.`,
+                    status: 'todo',
+                    assignee: project.project_manager || 'Taylor',
+                    priority: 'high',
+                    project_id: task.project_id,
+                    user_email: task.user_email,
+                  });
+                  // Trigger lifecycle to enqueue PM agent
+                  const { onTaskCreated } = await import('./task-lifecycle');
+                  await onTaskCreated(pmPlanTask, task.user_email || undefined);
+                  console.log(`[Agent] PRD complete → created PM Plan task ${pmPlanTaskId.slice(0, 8)} for project ${task.project_id}`);
+                  taskLogBuffer.append({
+                    task_id: job.taskId,
+                    run_id: run.id,
+                    agent_type: job.agentType,
+                    stream: 'system',
+                    content: `PRD saved. Created PM Plan task for Project Manager (${project.project_manager || 'Taylor'}).`,
+                    timestamp: Date.now(),
+                  });
+                }
               } else {
                 console.warn(`[Agent] PRD task completed but no PRD content found in project ${task.project_id}`);
                 taskLogBuffer.append({

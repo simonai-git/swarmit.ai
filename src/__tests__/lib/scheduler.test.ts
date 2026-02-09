@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { startScheduler, stopScheduler, getSchedulerStatus, forceSchedulerTick } from '@/lib/scheduler';
-import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks } from '@/lib/db';
+import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, getProject } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 import cron from 'node-cron';
 
@@ -20,6 +20,7 @@ vi.mock('@/lib/db', () => ({
   getOrphanedTasks: vi.fn(),
   assignOrphanedTasks: vi.fn(),
   cleanupOldTaskLogs: vi.fn().mockResolvedValue(0),
+  getProject: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -36,6 +37,8 @@ describe('scheduler', () => {
     vi.mocked(getOrphanedTasks).mockResolvedValue([]);
     vi.mocked(assignOrphanedTasks).mockResolvedValue(0);
     vi.mocked(updateTask).mockResolvedValue(null);
+    // Default: projects are active (not cancelled/completed)
+    vi.mocked(getProject).mockResolvedValue({ status: 'in_progress' } as any);
   });
 
   afterEach(() => {
