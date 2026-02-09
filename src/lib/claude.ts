@@ -361,6 +361,42 @@ const CLAUDE_CODE_TOOLS: AnyTool[] = [
       },
       required: ['summary', 'next_status']
     }
+  },
+  // PM tools - needed for project planning and verification
+  {
+    name: 'create_task',
+    description: 'Create a new task in the current project',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Task title' },
+        description: { type: 'string', description: 'Detailed task description' },
+        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Simon)' },
+        priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
+      },
+      required: ['title', 'description', 'assignee']
+    }
+  },
+  {
+    name: 'add_dependency',
+    description: 'Make one task depend on another (task cannot start until dependency is done)',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The task that should wait' },
+        depends_on_id: { type: 'string', description: 'The task that must complete first' },
+      },
+      required: ['task_id', 'depends_on_id']
+    }
+  },
+  {
+    name: 'list_project_tasks',
+    description: 'List all tasks in the current project with their status',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
   }
 ];
 

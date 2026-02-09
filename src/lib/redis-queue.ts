@@ -32,7 +32,7 @@ export interface QueueJob {
   id: string;
   tenantId: string;           // Organization/user ID for multi-tenancy
   taskId: string;
-  agentType: 'developer' | 'qa' | 'reviewer' | 'pm';
+  agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops';
   priority: number;           // Higher = more urgent (1-10)
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
@@ -103,7 +103,7 @@ export class RedisQueue {
   async enqueue(params: {
     tenantId: string;
     taskId: string;
-    agentType: 'developer' | 'qa' | 'reviewer' | 'pm';
+    agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops';
     priority?: number;
     maxRetries?: number;
     userEmail?: string;

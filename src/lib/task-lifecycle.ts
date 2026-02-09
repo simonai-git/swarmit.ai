@@ -99,8 +99,12 @@ export async function onTaskCreated(task: Task, userEmail?: string): Promise<voi
   if (settings.autoSpawnOnCreate && task.status === 'todo') {
     const priority = PRIORITY_MAP[task.priority] || 5;
     const effectiveUserEmail = userEmail || task.user_email || undefined;
-    // PM tasks (assigned to Sam) get 'pm' agent type, devops (Jordan) get 'developer' with devops prompt
-    const agentType = task.assignee === 'Sam' ? 'pm' : 'developer';
+    // Map assignee to agent type for correct prompt selection
+    const agentType = task.assignee === 'Sam' ? 'pm'
+      : task.assignee === 'Riley' ? 'qa'
+      : task.assignee === 'Simon' ? 'reviewer'
+      : task.assignee === 'Jordan' ? 'devops'
+      : 'developer';
     await agentQueue.enqueue({
       taskId: task.id,
       agentType,
@@ -184,6 +188,7 @@ export async function onTaskAssigned(
     const agentType = newAssignee === 'Sam' ? 'pm'
       : newAssignee === 'Riley' ? 'qa'
       : newAssignee === 'Simon' ? 'reviewer'
+      : newAssignee === 'Jordan' ? 'devops'
       : 'developer';
 
     const priority = PRIORITY_MAP[task.priority] || 5;

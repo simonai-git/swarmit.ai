@@ -68,10 +68,18 @@ export async function PATCH(
           if (result.deploy_to_railway) deployPrefs.push('Deploy to Railway is ENABLED - create a deployment task assigned to Jordan.');
           if (result.push_to_github) deployPrefs.push('Push to GitHub is ENABLED - include GitHub push in deployment tasks.');
           if (!result.deploy_to_railway && !result.push_to_github) deployPrefs.push('No deployment or GitHub integration requested - skip deployment tasks.');
+          const projectContext = [
+            result.description ? `## Description\n${result.description}` : '',
+            result.goals ? `## Goals\n${result.goals}` : '',
+            result.requirements ? `## Requirements\n${result.requirements}` : '',
+            result.constraints ? `## Constraints\n${result.constraints}` : '',
+            result.tech_stack ? `## Tech Stack\n${result.tech_stack}` : '',
+            result.timeline ? `## Timeline\n${result.timeline}` : '',
+          ].filter(Boolean).join('\n\n');
           const pmTask = await createTask({
             id: pmTaskId,
             title: `[PM] Plan: ${result.title}`,
-            description: `Analyze project requirements and create all tasks needed to deliver: ${result.title}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
+            description: `Analyze project requirements and create all tasks needed to deliver: ${result.title}\n\n${projectContext}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
             status: 'todo',
             assignee: result.product_manager || 'Sam',
             priority: 'high',

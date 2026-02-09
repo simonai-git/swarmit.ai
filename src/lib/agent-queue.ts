@@ -36,7 +36,7 @@ function getAgentTypeForNewStatus(status: string): 'developer' | 'qa' | 'reviewe
 export interface AgentJob {
   id: string;
   taskId: string;
-  agentType: 'developer' | 'qa' | 'reviewer' | 'pm';
+  agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops';
   priority: number;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: Date;
@@ -191,7 +191,7 @@ class AgentQueue {
   }
 
   // Enqueue a job
-  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
     if (this.shouldUseRedis()) {
@@ -506,12 +506,8 @@ class AgentQueue {
       const project = task.project_id ? await getProject(task.project_id) : null;
       const comments = await getCommentsByTaskId(job.taskId);
 
-      // Select prompt based on assignee specialization or agent type
-      const effectivePrompt = task.assignee === 'Sam'
-        ? AGENT_PROMPTS.pm
-        : task.assignee === 'Jordan'
-          ? AGENT_PROMPTS.devops
-          : (AGENT_PROMPTS[job.agentType as keyof typeof AGENT_PROMPTS] || AGENT_PROMPTS.developer);
+      // Select prompt based on agent type (determined at enqueue time in task-lifecycle.ts)
+      const effectivePrompt = AGENT_PROMPTS[job.agentType as keyof typeof AGENT_PROMPTS] || AGENT_PROMPTS.developer;
 
       // Build agent context
       const context: AgentContext = {
@@ -738,6 +734,30 @@ class AgentQueue {
             }
           } catch (err) {
             console.warn(`[Agent] Failed to recalculate blocked status for dependents:`, err);
+          }
+
+          // If this is a PM planning task, validate that tasks were actually created
+          if (task.title.startsWith('[PM] Plan:') && task.project_id) {
+            try {
+              const projectTasks = await getTasksByProjectId(task.project_id);
+              // Exclude the PM plan task itself from the count
+              const createdTasks = projectTasks.filter(t => t.id !== job.taskId);
+              if (createdTasks.length < 2) {
+                console.error(`[Agent] PM plan task completed but only created ${createdTasks.length} tasks (expected >= 2). PM tools may not have been available.`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `WARNING: PM agent completed but only created ${createdTasks.length} tasks. The plan may be incomplete.`,
+                  timestamp: Date.now(),
+                });
+              } else {
+                console.log(`[Agent] PM plan created ${createdTasks.length} tasks for project ${task.project_id}`);
+              }
+            } catch (err) {
+              console.warn(`[Agent] Failed to validate PM plan task count:`, err);
+            }
           }
 
           // If this is a PM verification task, complete the project
