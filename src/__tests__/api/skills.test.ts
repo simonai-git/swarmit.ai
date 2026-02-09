@@ -164,11 +164,17 @@ describe('Skills API', () => {
       expect(response.status).toBe(503);
     });
 
-    it('should proxy search to SkillsMP keyword endpoint', async () => {
+    it('should normalize keyword search response from SkillsMP', async () => {
       process.env.SKILLSMP_API_KEY = 'test-key';
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ skills: [{ id: 'sk-1', name: 'React' }] }),
+        json: async () => ({
+          success: true,
+          data: {
+            skills: [{ id: 'sk-1', name: 'React', stars: 100 }],
+            pagination: { page: 1, total: 1, hasNext: false },
+          },
+        }),
       });
 
       const request = new NextRequest('http://localhost/api/skills/search?q=react');
@@ -177,8 +183,10 @@ describe('Skills API', () => {
 
       expect(response.status).toBe(200);
       expect(data.skills).toHaveLength(1);
+      expect(data.skills[0].name).toBe('React');
+      expect(data.pagination).toEqual({ page: 1, total: 1, hasNext: false });
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('skills/search?q=react'),
+        expect.stringContaining('skills/search?'),
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: 'Bearer test-key',
@@ -189,11 +197,63 @@ describe('Skills API', () => {
       delete process.env.SKILLSMP_API_KEY;
     });
 
+    it('should forward page, limit, sortBy params to SkillsMP', async () => {
+      process.env.SKILLSMP_API_KEY = 'test-key';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, data: { skills: [], pagination: {} } }),
+      });
+
+      const request = new NextRequest('http://localhost/api/skills/search?q=test&page=2&limit=10&sortBy=stars');
+      await GET_SEARCH(request);
+
+      const calledUrl = mockFetch.mock.calls[0][0] as string;
+      expect(calledUrl).toContain('page=2');
+      expect(calledUrl).toContain('limit=10');
+      expect(calledUrl).toContain('sortBy=stars');
+
+      delete process.env.SKILLSMP_API_KEY;
+    });
+
+    it('should normalize AI search response', async () => {
+      process.env.SKILLSMP_API_KEY = 'test-key';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            object: 'list',
+            search_query: 'testing',
+            data: [
+              { file_id: 'f1', score: 0.9, skill: { id: 'sk-ai-1', name: 'Testing', author: 'dev', description: 'Test skill', stars: 5 } },
+            ],
+            has_more: true,
+          },
+        }),
+      });
+
+      const request = new NextRequest('http://localhost/api/skills/search?q=testing&ai=true');
+      const response = await GET_SEARCH(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.skills).toHaveLength(1);
+      expect(data.skills[0].name).toBe('Testing');
+      expect(data.skills[0].score).toBe(0.9);
+      expect(data.pagination.hasMore).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('skills/ai-search'),
+        expect.any(Object)
+      );
+
+      delete process.env.SKILLSMP_API_KEY;
+    });
+
     it('should use ai-search endpoint when ai=true', async () => {
       process.env.SKILLSMP_API_KEY = 'test-key';
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ results: [] }),
+        json: async () => ({ success: true, data: { data: [], has_more: false } }),
       });
 
       const request = new NextRequest('http://localhost/api/skills/search?q=testing&ai=true');
@@ -219,6 +279,30 @@ describe('Skills API', () => {
       const response = await GET_SEARCH(request);
 
       expect(response.status).toBe(429);
+
+      delete process.env.SKILLSMP_API_KEY;
+    });
+
+    it('should support wildcard search for browsing', async () => {
+      process.env.SKILLSMP_API_KEY = 'test-key';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            skills: [{ id: 'sk-pop', name: 'Popular', stars: 50000 }],
+            pagination: { total: 5000, hasNext: true },
+          },
+        }),
+      });
+
+      const request = new NextRequest('http://localhost/api/skills/search?q=*&sortBy=stars');
+      const response = await GET_SEARCH(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.skills[0].stars).toBe(50000);
+      expect(data.pagination.total).toBe(5000);
 
       delete process.env.SKILLSMP_API_KEY;
     });
