@@ -504,6 +504,18 @@ class AgentQueue {
       const task = await getTask(job.taskId);
       if (!task) throw new Error('Task not found');
 
+      // Skip blocked tasks — they'll be re-enqueued when unblocked
+      if (task.is_blocked) {
+        console.log(`[Agent] Task ${job.taskId.slice(0, 8)} is blocked, skipping`);
+        run.status = 'cancelled' as AgentRun['status'];
+        run.error = 'Task is blocked by dependencies';
+        run.completedAt = new Date();
+        await releaseTaskRun(job.taskId, run.id);
+        await saveAgentRun(run);
+        this.running.delete(run.id);
+        return;
+      }
+
       const project = task.project_id ? await getProject(task.project_id) : null;
       const comments = await getCommentsByTaskId(job.taskId);
 
@@ -760,12 +772,19 @@ class AgentQueue {
       if (result.success && newStatus) {
         await updateTask(job.taskId, { status: newStatus });
 
-        // When task reaches 'done', unblock dependent tasks
+        // When task reaches 'done', unblock dependent tasks and auto-enqueue agents
         if (newStatus === 'done') {
           try {
             const dependents = await getTaskDependents(job.taskId);
             for (const dep of dependents) {
               await recalculateBlockedStatus(dep.task_id);
+              // If the dependent task was just unblocked, enqueue an agent for it
+              const depTask = await getTask(dep.task_id);
+              if (depTask && !depTask.is_blocked && depTask.status === 'todo') {
+                const { onTaskCreated } = await import('./task-lifecycle');
+                await onTaskCreated(depTask, job.userEmail);
+                console.log(`[Agent] Task ${dep.task_id.slice(0, 8)} unblocked → enqueued agent`);
+              }
             }
           } catch (err) {
             console.warn(`[Agent] Failed to recalculate blocked status for dependents:`, err);
@@ -775,8 +794,8 @@ class AgentQueue {
           if (task.title.startsWith('[PM] Plan:') && task.project_id) {
             try {
               const projectTasks = await getTasksByProjectId(task.project_id);
-              // Exclude the PM plan task itself from the count
-              const createdTasks = projectTasks.filter(t => t.id !== job.taskId);
+              // Exclude PM plan and PRD tasks from the count
+              const createdTasks = projectTasks.filter(t => t.id !== job.taskId && !t.title.startsWith('[PRD]') && !t.title.startsWith('[PM] Plan:'));
               if (createdTasks.length < 2) {
                 console.error(`[Agent] PM plan task completed but only created ${createdTasks.length} tasks (expected >= 2). PM tools may not have been available.`);
                 taskLogBuffer.append({
@@ -790,6 +809,19 @@ class AgentQueue {
               } else {
                 console.log(`[Agent] PM plan created ${createdTasks.length} tasks for project ${task.project_id}`);
               }
+              // Validate that a [PM] Verify task was created
+              const hasVerifyTask = projectTasks.some(t => t.title.startsWith('[PM] Verify:'));
+              if (!hasVerifyTask) {
+                console.error(`[Agent] PM plan completed but no [PM] Verify task was created for project ${task.project_id}`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `WARNING: No [PM] Verify task was created. The project will not auto-complete.`,
+                  timestamp: Date.now(),
+                });
+              }
             } catch (err) {
               console.warn(`[Agent] Failed to validate PM plan task count:`, err);
             }
@@ -798,6 +830,20 @@ class AgentQueue {
           // If this is a PM verification task, complete the project
           if (task.title.startsWith('[PM] Verify:') && task.project_id) {
             try {
+              // Check if all project tasks are done before completing
+              const allProjectTasks = await getTasksByProjectId(task.project_id);
+              const incompleteTasks = allProjectTasks.filter(t => t.id !== job.taskId && t.status !== 'done');
+              if (incompleteTasks.length > 0) {
+                console.warn(`[Agent] Project ${task.project_id} has ${incompleteTasks.length} incomplete tasks: ${incompleteTasks.map(t => t.title).join(', ')}`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `WARNING: ${incompleteTasks.length} tasks still incomplete. Completing project anyway per PM verification.`,
+                  timestamp: Date.now(),
+                });
+              }
               await completeProject(task.project_id);
               console.log(`[Agent] Project ${task.project_id} marked as completed`);
               taskLogBuffer.append({
