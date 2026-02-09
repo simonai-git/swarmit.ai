@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const SKILLSMP_API_KEY = process.env.SKILLSMP_API_KEY;
 const SKILLSMP_BASE_URL = 'https://skillsmp.com/api/v1';
 
 // GET /api/skills/search?q=query&ai=true
@@ -13,6 +12,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Query parameter q is required' }, { status: 400 });
     }
 
+    const SKILLSMP_API_KEY = process.env.SKILLSMP_API_KEY;
     if (!SKILLSMP_API_KEY) {
       return NextResponse.json({ error: 'SkillsMP API key not configured' }, { status: 503 });
     }
