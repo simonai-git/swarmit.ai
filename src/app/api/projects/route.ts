@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       owner: body.owner || 'Bogdan',
       reviewer: body.reviewer || 'Bogdan',
       product_manager: body.product_manager || 'Sam',
+      project_manager: body.project_manager || 'Taylor',
       prd: body.prd || null,
       goals: body.goals || null,
       requirements: body.requirements || null,
