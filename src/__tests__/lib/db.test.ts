@@ -3254,13 +3254,13 @@ describe('Database Module', () => {
   // ==================== Default Agent Seeding ====================
 
   describe('seedDefaultAgents', () => {
-    it('should insert 7 default agents for a user', async () => {
+    it('should insert 8 default agents for a user', async () => {
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       await db.seedDefaultAgents('newuser@test.com');
 
-      // 7 default agents
-      expect(mockQuery).toHaveBeenCalledTimes(7);
+      // 8 default agents (Simon, Alex, Morgan, Riley, Jordan, Casey, Sam, Taylor)
+      expect(mockQuery).toHaveBeenCalledTimes(8);
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO agents'),
         expect.arrayContaining(['newuser@test.com'])
@@ -3278,14 +3278,25 @@ describe('Database Module', () => {
       );
     });
 
-    it('should include Sam agent as Project Manager', async () => {
+    it('should include Sam agent as Product Manager', async () => {
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       await db.seedDefaultAgents('user@test.com');
 
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO agents'),
-        expect.arrayContaining(['Sam', 'Project Manager'])
+        expect.arrayContaining(['Sam', 'Product Manager'])
+      );
+    });
+
+    it('should include Taylor agent as Project Manager', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      await db.seedDefaultAgents('user@test.com');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO agents'),
+        expect.arrayContaining(['Taylor', 'Project Manager'])
       );
     });
   });
