@@ -15,7 +15,7 @@ const STALE_THRESHOLD_MS = 120000; // 2 minutes — if no tick for this long, sc
 const recentlyEnqueued = new Map<string, Set<string>>();
 
 // Stuck-task detection: skip tasks with too many completed runs in a window
-const MAX_RECENT_RUNS = 3;
+const MAX_RECENT_RUNS = 5;
 const STUCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_LIFETIME_RUNS = 10; // Runs per agent type before permanent block
 
@@ -127,7 +127,24 @@ async function processUserTasks(userEmail: string): Promise<void> {
     }
     if (userRecentlyEnqueued.has(task.id)) continue;
     if (!['todo', 'in_progress', 'testing', 'in_review'].includes(task.status)) continue;
-    if (task.is_blocked) continue;
+    if (task.is_blocked) {
+      // Auto-unblock throttle-blocked tasks after 60 minutes cooldown
+      if (task.blocked_reason?.includes('Manual intervention needed')) {
+        const cooldownRuns = await getAgentRunsByTask(task.id);
+        const lastFinished = cooldownRuns.find(r => ['completed', 'failed'].includes(r.status));
+        const lastRunTime = lastFinished ? new Date(lastFinished.created_at).getTime() : 0;
+        const cooldownMs = 60 * 60 * 1000; // 60 minutes
+        if (lastRunTime > 0 && Date.now() - lastRunTime > cooldownMs) {
+          await updateTask(task.id, { is_blocked: false, blocked_reason: null });
+          console.log(`[Scheduler] Auto-unblocked throttle-blocked task ${task.id.slice(0, 8)} after cooldown`);
+          // Fall through — let it be processed this tick
+        } else {
+          continue;
+        }
+      } else {
+        continue; // Dependency-blocked — skip
+      }
+    }
 
     // Stuck detection: check both windowed and lifetime metrics
     // Count only runs matching the agent type we'd spawn for this task

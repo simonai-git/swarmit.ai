@@ -619,8 +619,10 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 completed runs in the last 30 minutes (matching the expected agent type for 'testing' status = 'qa')
+      // 5 completed runs in the last 30 minutes (matching the expected agent type for 'testing' status = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
@@ -631,11 +633,11 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('stuck-task', {
         is_blocked: true,
-        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 5 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
-    it('skips already blocked tasks without checking runs', async () => {
+    it('skips dependency-blocked tasks without checking runs', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -646,7 +648,7 @@ describe('scheduler', () => {
           priority: 'high',
           description: 'Test',
           is_blocked: true,
-          blocked_reason: 'Already blocked',
+          blocked_reason: 'Waiting on: Some other task',
           user_email: 'user@test.com',
           created_at: new Date(),
           updated_at: new Date(),
@@ -664,12 +666,91 @@ describe('scheduler', () => {
       await forceSchedulerTick();
 
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
-      // Should not even check runs since task is skipped early
+      // Should not check runs since dependency-blocked tasks are skipped
       expect(getAgentRunsByTask).not.toHaveBeenCalled();
       expect(updateTask).not.toHaveBeenCalled();
     });
 
-    it('allows tasks with fewer than 3 recent runs', async () => {
+    it('auto-unblocks throttle-blocked tasks after 60 minute cooldown', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'throttle-blocked',
+          title: 'Throttle Blocked Task',
+          status: 'in_progress',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: true,
+          blocked_reason: 'developer agent ran 5 times in 30 minutes without advancing status. Manual intervention needed.',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // Last run was 2 hours ago — well past the 60-minute cooldown
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', agent_type: 'developer', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      // Should unblock the task
+      expect(updateTask).toHaveBeenCalledWith('throttle-blocked', {
+        is_blocked: false,
+        blocked_reason: null,
+      });
+    });
+
+    it('keeps throttle-blocked tasks blocked during cooldown period', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'cooling-down',
+          title: 'Cooling Down Task',
+          status: 'in_progress',
+          assignee: 'agent@test.com',
+          priority: 'high',
+          description: 'Test',
+          is_blocked: true,
+          blocked_reason: 'developer agent ran 5 times in 30 minutes without advancing status. Manual intervention needed.',
+          user_email: 'user@test.com',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      // Last run was only 10 minutes ago — still within cooldown
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', agent_type: 'developer', created_at: new Date(Date.now() - 10 * 60 * 1000).toISOString() },
+      ] as any);
+
+      await forceSchedulerTick();
+
+      // Should NOT unblock or enqueue
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+      // updateTask should NOT be called to unblock
+      expect(updateTask).not.toHaveBeenCalledWith('cooling-down', expect.objectContaining({
+        is_blocked: false,
+      }));
+    });
+
+    it('allows tasks with fewer than 5 recent runs', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -797,7 +878,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
     });
 
-    it('marks tasks with 3+ failed runs in 30min as stuck', async () => {
+    it('marks tasks with 5+ failed runs in 30min as stuck', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
       vi.mocked(getTasksByUserEmail).mockResolvedValue([
         {
@@ -821,8 +902,10 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 failed runs in the last 30 minutes (matching agent type for 'testing' = 'qa')
+      // 5 failed runs in the last 30 minutes (matching agent type for 'testing' = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
@@ -833,7 +916,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('failing-task', {
         is_blocked: true,
-        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 5 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
@@ -861,8 +944,10 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // Mix of completed and failed runs totaling 3 (matching agent type for 'testing' = 'qa')
+      // Mix of completed and failed runs totaling 5 (matching agent type for 'testing' = 'qa')
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
+        { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
+        { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'failed', agent_type: 'qa', created_at: new Date().toISOString() },
         { status: 'completed', agent_type: 'qa', created_at: new Date().toISOString() },
@@ -873,7 +958,7 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).not.toHaveBeenCalled();
       expect(updateTask).toHaveBeenCalledWith('mixed-task', {
         is_blocked: true,
-        blocked_reason: 'qa agent ran 3 times in 30 minutes without advancing status. Manual intervention needed.',
+        blocked_reason: 'qa agent ran 5 times in 30 minutes without advancing status. Manual intervention needed.',
       });
     });
 
@@ -1099,7 +1184,7 @@ describe('scheduler', () => {
         completed: 0,
         failed: 0,
       });
-      // 3 completed runs but all older than 30 minutes (matching agent type for 'testing' = 'qa')
+      // Completed runs all older than 30 minutes (matching agent type for 'testing' = 'qa')
       const oldDate = new Date(Date.now() - 31 * 60 * 1000).toISOString();
       vi.mocked(getAgentRunsByTask).mockResolvedValue([
         { status: 'completed', agent_type: 'qa', created_at: oldDate },
