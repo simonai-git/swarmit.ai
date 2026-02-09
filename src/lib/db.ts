@@ -398,10 +398,12 @@ async function initDb() {
       END $$;
     `);
 
-    // Add github_repo to projects
+    // Add github_repo, deploy_to_railway, push_to_github to projects
     await client.query(`
       DO $$ BEGIN
         ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_repo TEXT;
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS deploy_to_railway BOOLEAN DEFAULT FALSE;
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS push_to_github BOOLEAN DEFAULT FALSE;
       EXCEPTION WHEN OTHERS THEN NULL;
       END $$;
     `);
@@ -852,6 +854,8 @@ export interface Project {
   timeline: string | null;
   deadline: string | null;
   github_repo: string | null;
+  deploy_to_railway: boolean;
+  push_to_github: boolean;
   started_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
@@ -925,8 +929,8 @@ export async function getProjectsByStatus(status: ProjectStatus): Promise<Projec
 
 export async function createProject(project: Partial<Project> & { id: string; title: string }): Promise<Project> {
   const result = await pool.query(
-    `INSERT INTO projects (id, title, description, status, owner, prd, goals, requirements, constraints, tech_stack, timeline, deadline)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    `INSERT INTO projects (id, title, description, status, owner, reviewer, product_manager, prd, goals, requirements, constraints, tech_stack, timeline, deadline, github_repo, deploy_to_railway, push_to_github)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [
       project.id,
@@ -934,13 +938,18 @@ export async function createProject(project: Partial<Project> & { id: string; ti
       project.description || null,
       project.status || 'defined',
       project.owner || 'Bogdan',
+      project.reviewer || 'Bogdan',
+      project.product_manager || 'Sam',
       project.prd || null,
       project.goals || null,
       project.requirements || null,
       project.constraints || null,
       project.tech_stack || null,
       project.timeline || null,
-      project.deadline || null
+      project.deadline || null,
+      project.github_repo || null,
+      project.deploy_to_railway || false,
+      project.push_to_github || false,
     ]
   );
   return result.rows[0];

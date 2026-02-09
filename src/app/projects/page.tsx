@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import UserMenu from '@/components/UserMenu';
 import { useRouter } from 'next/navigation';
@@ -23,6 +23,9 @@ interface Project {
   tech_stack: string | null;
   timeline: string | null;
   deadline: string | null;
+  deploy_to_railway: boolean;
+  push_to_github: boolean;
+  github_repo: string | null;
   started_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
@@ -33,6 +36,19 @@ interface Project {
   completed_task_count: number;
 }
 
+interface Agent {
+  id: string;
+  name: string;
+  specialization: string;
+  avatar_emoji: string;
+  is_active: boolean;
+}
+
+interface IntegrationStatus {
+  railway: { connected: boolean; account?: { name: string } | null };
+  github: { connected: boolean; username?: string | null };
+}
+
 const STATUS_CONFIG: Record<ProjectStatus, { label: string; emoji: string; color: string; bgColor: string }> = {
   defined: { label: 'Defined', emoji: '📋', color: 'text-blue-400', bgColor: 'bg-blue-500/20' },
   in_progress: { label: 'In Progress', emoji: '🚀', color: 'text-emerald-400', bgColor: 'bg-emerald-500/20' },
@@ -41,6 +57,14 @@ const STATUS_CONFIG: Record<ProjectStatus, { label: string; emoji: string; color
   completed: { label: 'Completed', emoji: '✅', color: 'text-purple-400', bgColor: 'bg-purple-500/20' },
 };
 
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+}
+
 export default function ProjectsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -48,32 +72,24 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [activeTab, setActiveTab] = useState<'details' | 'prd'>('details');
   const [filterStatus, setFilterStatus] = useState<ProjectStatus | 'all'>('all');
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    owner: 'Bogdan',
-    reviewer: 'Bogdan',
-    product_manager: 'Simon',
-    prd: '',
+    reviewer: 'Simon',
+    product_manager: 'Sam',
     goals: '',
     requirements: '',
     constraints: '',
     tech_stack: '',
     timeline: '',
     deadline: '',
+    deploy_to_railway: false,
+    push_to_github: false,
+    github_repo_name: '',
   });
-
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-    }
-  }, [status, router]);
-
-  useEffect(() => {
-    fetchProjects();
-  }, []);
 
   const fetchProjects = async () => {
     try {
@@ -89,19 +105,88 @@ export default function ProjectsPage() {
     }
   };
 
+  const fetchAgents = async () => {
+    try {
+      const res = await fetch('/api/agents?active=true');
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(data);
+      }
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+    }
+  };
+
+  const fetchIntegrations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/profile/integrations');
+      if (res.ok) {
+        const data = await res.json();
+        setIntegrations(data);
+      }
+    } catch (error) {
+      console.error('Error fetching integrations:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login');
+    }
+  }, [status, router]);
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  // Fetch agents when modal opens
+  useEffect(() => {
+    if (showModal) {
+      fetchAgents();
+      fetchIntegrations();
+    }
+  }, [showModal, fetchIntegrations]);
+
+  // Poll integrations when needed (toggle on but not connected)
+  useEffect(() => {
+    const needsPoll =
+      (formData.deploy_to_railway && !integrations?.railway?.connected) ||
+      (formData.push_to_github && !integrations?.github?.connected);
+    if (!needsPoll || !showModal) return;
+
+    const interval = setInterval(fetchIntegrations, 3000);
+    return () => clearInterval(interval);
+  }, [showModal, formData.deploy_to_railway, formData.push_to_github, integrations, fetchIntegrations]);
+
+  const ownerName = session?.user?.name || session?.user?.email || 'Bogdan';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       const url = editingProject ? `/api/projects/${editingProject.id}` : '/api/projects';
       const method = editingProject ? 'PATCH' : 'POST';
-      
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          title: formData.title,
+          description: formData.description || null,
+          owner: ownerName,
+          reviewer: formData.reviewer,
+          product_manager: formData.product_manager,
+          goals: formData.goals || null,
+          requirements: formData.requirements || null,
+          constraints: formData.constraints || null,
+          tech_stack: formData.tech_stack || null,
+          timeline: formData.timeline || null,
           deadline: formData.deadline || null,
+          deploy_to_railway: formData.deploy_to_railway,
+          push_to_github: formData.push_to_github,
+          github_repo: formData.push_to_github && formData.github_repo_name
+            ? formData.github_repo_name
+            : null,
         }),
       });
 
@@ -126,9 +211,9 @@ export default function ProjectsPage() {
       cancel: 'Cancel this project? This action cannot be undone easily.',
       complete: 'Mark this project as completed?',
     };
-    
+
     if (!confirm(confirmMessages[action])) return;
-    
+
     try {
       const res = await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
@@ -149,7 +234,7 @@ export default function ProjectsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this project? Tasks will be unlinked but not deleted.')) return;
-    
+
     try {
       const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
 
@@ -169,18 +254,18 @@ export default function ProjectsPage() {
     setFormData({
       title: '',
       description: '',
-      owner: 'Bogdan',
-      reviewer: 'Bogdan',
-      product_manager: 'Simon',
-      prd: '',
+      reviewer: 'Simon',
+      product_manager: 'Sam',
       goals: '',
       requirements: '',
       constraints: '',
       tech_stack: '',
       timeline: '',
       deadline: '',
+      deploy_to_railway: false,
+      push_to_github: false,
+      github_repo_name: '',
     });
-    setActiveTab('details');
     setShowModal(true);
   };
 
@@ -189,18 +274,18 @@ export default function ProjectsPage() {
     setFormData({
       title: project.title,
       description: project.description || '',
-      owner: project.owner,
-      reviewer: project.reviewer || 'Bogdan',
-      product_manager: project.product_manager || 'Simon',
-      prd: project.prd || '',
+      reviewer: project.reviewer || 'Simon',
+      product_manager: project.product_manager || 'Sam',
       goals: project.goals || '',
       requirements: project.requirements || '',
       constraints: project.constraints || '',
       tech_stack: project.tech_stack || '',
       timeline: project.timeline || '',
       deadline: project.deadline ? project.deadline.split('T')[0] : '',
+      deploy_to_railway: project.deploy_to_railway || false,
+      push_to_github: project.push_to_github || false,
+      github_repo_name: project.github_repo || '',
     });
-    setActiveTab('details');
     setShowModal(true);
   };
 
@@ -209,13 +294,19 @@ export default function ProjectsPage() {
     setEditingProject(null);
   };
 
-  const filteredProjects = filterStatus === 'all' 
-    ? projects 
+  const filteredProjects = filterStatus === 'all'
+    ? projects
     : projects.filter(p => p.status === filterStatus);
+
+  // Filter PM agents (specialization contains "product manager" or "pm")
+  const pmAgents = agents.filter(a => {
+    const spec = a.specialization?.toLowerCase() || '';
+    return spec.includes('product manager') || spec.includes('pm') || spec === 'product management';
+  });
 
   const getActionButtons = (project: Project) => {
     const buttons: React.ReactElement[] = [];
-    
+
     switch (project.status) {
       case 'defined':
         buttons.push(
@@ -258,7 +349,7 @@ export default function ProjectsPage() {
         );
         break;
     }
-    
+
     if (!['completed', 'canceled'].includes(project.status)) {
       buttons.push(
         <button
@@ -270,7 +361,7 @@ export default function ProjectsPage() {
         </button>
       );
     }
-    
+
     return buttons;
   };
 
@@ -298,10 +389,10 @@ export default function ProjectsPage() {
               Define, plan, and manage projects from inception to delivery
             </p>
           </div>
-          
+
           {session && <UserMenu session={session} />}
         </div>
-        
+
         <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
           <div className="flex items-center gap-2">
             {/* New Project Button - First */}
@@ -312,7 +403,7 @@ export default function ProjectsPage() {
               <span className="text-base sm:text-lg group-hover:rotate-90 transition-transform duration-200">+</span>
               <span className="hidden sm:inline">New Project</span>
             </button>
-            
+
             <Link
               href="/"
               className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
@@ -320,7 +411,7 @@ export default function ProjectsPage() {
               <span className="text-base sm:text-lg">📋</span>
               <span className="hidden sm:inline">Tasks</span>
             </Link>
-            
+
             <Link
               href="/agents"
               className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
@@ -329,7 +420,7 @@ export default function ProjectsPage() {
               <span className="hidden sm:inline">Agents</span>
             </Link>
           </div>
-          
+
           {/* Status Filter */}
           <div className="flex items-center gap-1 overflow-x-auto">
             <button
@@ -363,10 +454,10 @@ export default function ProjectsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {filteredProjects.map((project) => {
           const statusConfig = STATUS_CONFIG[project.status];
-          const progress = project.task_count > 0 
-            ? Math.round((project.completed_task_count / project.task_count) * 100) 
+          const progress = project.task_count > 0
+            ? Math.round((project.completed_task_count / project.task_count) * 100)
             : 0;
-          
+
           return (
             <div
               key={project.id}
@@ -391,7 +482,7 @@ export default function ProjectsPage() {
                     <p className="text-sm text-white/50 line-clamp-2 mt-1">{project.description}</p>
                   )}
                 </div>
-                
+
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => openEditModal(project)}
@@ -418,7 +509,7 @@ export default function ProjectsPage() {
                     <span>{project.completed_task_count}/{project.task_count} tasks ({progress}%)</span>
                   </div>
                   <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
                       style={{ width: `${progress}%` }}
                     />
@@ -450,7 +541,7 @@ export default function ProjectsPage() {
             </div>
           );
         })}
-        
+
         {filteredProjects.length === 0 && (
           <div className="col-span-full text-center py-12 text-white/40">
             <p className="text-4xl mb-4">📁</p>
@@ -472,199 +563,264 @@ export default function ProjectsPage() {
                 {editingProject ? 'Edit Project' : 'Create New Project'}
               </h2>
             </div>
-            
-            {/* Tabs */}
-            <div className="flex gap-2 mb-4 border-b border-white/10 pb-2">
-              <button
-                onClick={() => setActiveTab('details')}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  activeTab === 'details' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white/70'
-                }`}
-              >
-                📋 Details
-              </button>
-              <button
-                onClick={() => setActiveTab('prd')}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  activeTab === 'prd' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white/70'
-                }`}
-              >
-                📄 PRD
-              </button>
-            </div>
-            
+
             <form onSubmit={handleSubmit} className="space-y-4">
-              {activeTab === 'details' && (
-                <>
-                  {/* Title */}
+              {/* Title */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Project Title *</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => {
+                    const newTitle = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      title: newTitle,
+                      // Auto-update repo name if user hasn't manually changed it
+                      github_repo_name: prev.github_repo_name === slugify(prev.title) || prev.github_repo_name === ''
+                        ? slugify(newTitle)
+                        : prev.github_repo_name,
+                    }));
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                  placeholder="e.g., Task Management System v2"
+                  required
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
+                  placeholder="High-level description of the project..."
+                  rows={3}
+                />
+              </div>
+
+              {/* Team Section */}
+              <div>
+                <label className="block text-sm text-white/50 mb-2 uppercase tracking-wider text-xs font-medium">Team</label>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Product Manager */}
                   <div>
-                    <label className="block text-sm text-white/70 mb-1">Project Title *</label>
-                    <input
-                      type="text"
-                      value={formData.title}
-                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                      placeholder="e.g., Task Management System v2"
-                      required
-                    />
+                    <label className="block text-sm text-white/70 mb-1">Product Manager</label>
+                    <select
+                      value={formData.product_manager}
+                      onChange={(e) => setFormData({ ...formData, product_manager: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
+                    >
+                      {pmAgents.length > 0 ? (
+                        pmAgents.map(a => (
+                          <option key={a.id} value={a.name} className="bg-gray-900">
+                            {a.avatar_emoji} {a.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="Sam" className="bg-gray-900">📋 Sam</option>
+                      )}
+                    </select>
                   </div>
 
-                  {/* Description */}
+                  {/* Reviewer */}
                   <div>
-                    <label className="block text-sm text-white/70 mb-1">Description</label>
-                    <textarea
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
-                      placeholder="High-level description of the project..."
-                      rows={3}
-                    />
+                    <label className="block text-sm text-white/70 mb-1">Reviewer</label>
+                    <select
+                      value={formData.reviewer}
+                      onChange={(e) => setFormData({ ...formData, reviewer: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
+                    >
+                      {agents.length > 0 ? (
+                        agents.map(a => (
+                          <option key={a.id} value={a.name} className="bg-gray-900">
+                            {a.avatar_emoji} {a.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="Simon" className="bg-gray-900">🤖 Simon</option>
+                      )}
+                    </select>
                   </div>
+                </div>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Owner */}
-                    <div>
-                      <label className="block text-sm text-white/70 mb-1">Owner</label>
-                      <input
-                        type="text"
-                        value={formData.owner}
-                        onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                        placeholder="Bogdan"
-                      />
-                    </div>
-
-                    {/* Reviewer */}
-                    <div>
-                      <label className="block text-sm text-white/70 mb-1">Reviewer</label>
-                      <input
-                        type="text"
-                        value={formData.reviewer}
-                        onChange={(e) => setFormData({ ...formData, reviewer: e.target.value })}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                        placeholder="Who reviews completed tasks"
-                      />
-                    </div>
-                    
-                    {/* Product Manager */}
-                    <div>
-                      <label className="block text-sm text-white/70 mb-1">Product Manager</label>
-                      <input
-                        type="text"
-                        value={formData.product_manager}
-                        onChange={(e) => setFormData({ ...formData, product_manager: e.target.value })}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                        placeholder="Who monitors feedback & creates tasks"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Deadline */}
-                    <div>
-                      <label className="block text-sm text-white/70 mb-1">Deadline</label>
-                      <input
-                        type="date"
-                        value={formData.deadline}
-                        onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
-                      />
-                    </div>
-                    <div></div>
-                  </div>
-
-                  {/* Goals */}
-                  <div>
-                    <label className="block text-sm text-white/70 mb-1">Goals & Objectives</label>
-                    <textarea
-                      value={formData.goals}
-                      onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
-                      placeholder="What are the main goals of this project?"
-                      rows={2}
-                    />
-                  </div>
-
-                  {/* Tech Stack */}
-                  <div>
-                    <label className="block text-sm text-white/70 mb-1">Tech Stack</label>
-                    <input
-                      type="text"
-                      value={formData.tech_stack}
-                      onChange={(e) => setFormData({ ...formData, tech_stack: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                      placeholder="e.g., Next.js, PostgreSQL, Tailwind"
-                    />
-                  </div>
-
-                  {/* Timeline */}
-                  <div>
-                    <label className="block text-sm text-white/70 mb-1">Timeline</label>
-                    <input
-                      type="text"
-                      value={formData.timeline}
-                      onChange={(e) => setFormData({ ...formData, timeline: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
-                      placeholder="e.g., 2 weeks, Q1 2025"
-                    />
-                  </div>
-
-                  {/* Requirements */}
-                  <div>
-                    <label className="block text-sm text-white/70 mb-1">Requirements</label>
-                    <textarea
-                      value={formData.requirements}
-                      onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
-                      placeholder="Key requirements and features..."
-                      rows={3}
-                    />
-                  </div>
-
-                  {/* Constraints */}
-                  <div>
-                    <label className="block text-sm text-white/70 mb-1">Constraints</label>
-                    <textarea
-                      value={formData.constraints}
-                      onChange={(e) => setFormData({ ...formData, constraints: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
-                      placeholder="Any limitations, budget constraints, or technical constraints..."
-                      rows={2}
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeTab === 'prd' && (
+              <div className="grid grid-cols-2 gap-4">
+                {/* Deadline */}
                 <div>
-                  <label className="block text-sm text-white/70 mb-1">
-                    Product Requirements Document (PRD)
-                  </label>
-                  <p className="text-xs text-white/40 mb-2">
-                    Write or paste the full PRD here. Supports Markdown formatting.
-                  </p>
-                  <textarea
-                    value={formData.prd}
-                    onChange={(e) => setFormData({ ...formData, prd: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none font-mono text-sm"
-                    placeholder="# Product Requirements Document
-
-## Overview
-...
-
-## Features
-1. ...
-2. ...
-
-## Technical Requirements
-...
-
-## User Stories
-- As a user, I want to..."
-                    rows={20}
+                  <label className="block text-sm text-white/70 mb-1">Deadline</label>
+                  <input
+                    type="date"
+                    value={formData.deadline}
+                    onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
                   />
                 </div>
-              )}
+
+                {/* Tech Stack */}
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">Tech Stack</label>
+                  <input
+                    type="text"
+                    value={formData.tech_stack}
+                    onChange={(e) => setFormData({ ...formData, tech_stack: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                    placeholder="e.g., Next.js, PostgreSQL"
+                  />
+                </div>
+              </div>
+
+              {/* Goals */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Goals & Objectives</label>
+                <textarea
+                  value={formData.goals}
+                  onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
+                  placeholder="What are the main goals of this project?"
+                  rows={2}
+                />
+              </div>
+
+              {/* Timeline */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Timeline</label>
+                <input
+                  type="text"
+                  value={formData.timeline}
+                  onChange={(e) => setFormData({ ...formData, timeline: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                  placeholder="e.g., 2 weeks, Q1 2025"
+                />
+              </div>
+
+              {/* Requirements */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Requirements</label>
+                <textarea
+                  value={formData.requirements}
+                  onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
+                  placeholder="Key requirements and features..."
+                  rows={3}
+                />
+              </div>
+
+              {/* Constraints */}
+              <div>
+                <label className="block text-sm text-white/70 mb-1">Constraints</label>
+                <textarea
+                  value={formData.constraints}
+                  onChange={(e) => setFormData({ ...formData, constraints: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 resize-none"
+                  placeholder="Any limitations, budget constraints, or technical constraints..."
+                  rows={2}
+                />
+              </div>
+
+              {/* Deployment & Integrations Section */}
+              <div className="border-t border-white/10 pt-4">
+                <label className="block text-sm text-white/50 mb-3 uppercase tracking-wider text-xs font-medium">Deployment & Integrations</label>
+
+                {/* Railway Toggle */}
+                <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🚂</span>
+                      <span className="text-sm text-white">Deploy to Railway</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={formData.deploy_to_railway}
+                        onChange={(e) => setFormData({ ...formData, deploy_to_railway: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/50 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 peer-checked:after:bg-white"></div>
+                    </div>
+                  </label>
+                  {formData.deploy_to_railway && (
+                    <div className="mt-2 text-xs">
+                      {integrations?.railway?.connected ? (
+                        <div className="flex items-center gap-1.5 text-emerald-400">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                          Connected{integrations.railway.account?.name ? ` (${integrations.railway.account.name})` : ''}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-amber-400">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                          Not connected —{' '}
+                          <a
+                            href="/profile/integrations"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline hover:text-amber-300"
+                          >
+                            Connect Railway
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* GitHub Toggle */}
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🐙</span>
+                      <span className="text-sm text-white">Push to GitHub</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={formData.push_to_github}
+                        onChange={(e) => setFormData({ ...formData, push_to_github: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/50 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 peer-checked:after:bg-white"></div>
+                    </div>
+                  </label>
+                  {formData.push_to_github && (
+                    <div className="mt-2">
+                      {integrations?.github?.connected ? (
+                        <>
+                          <div className="flex items-center gap-1.5 text-emerald-400 text-xs mb-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                            Connected as {integrations.github.username}
+                          </div>
+                          <input
+                            type="text"
+                            value={formData.github_repo_name}
+                            onChange={(e) => setFormData({ ...formData, github_repo_name: e.target.value })}
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                            placeholder="repository-name"
+                          />
+                          {formData.github_repo_name && integrations.github.username && (
+                            <p className="text-xs text-white/30 mt-1">
+                              {integrations.github.username}/{formData.github_repo_name}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-amber-400 text-xs">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                          Not connected —{' '}
+                          <a
+                            href="/profile/integrations"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline hover:text-amber-300"
+                          >
+                            Connect GitHub
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Actions */}
               <div className="flex gap-3 pt-4 border-t border-white/10">

@@ -1,11 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, createTask, createComment, Task, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
 import { getQueue, QueueJob, RedisQueue } from './redis-queue';
 import { taskLogBuffer } from './task-log-buffer';
-import { pushToGitHub, enableGitHubPages } from './github';
+import { pushToGitHub } from './github';
 import { deployToRailway } from './railway-deploy';
 
 /**
@@ -36,7 +36,7 @@ function getAgentTypeForNewStatus(status: string): 'developer' | 'qa' | 'reviewe
 export interface AgentJob {
   id: string;
   taskId: string;
-  agentType: 'developer' | 'qa' | 'reviewer';
+  agentType: 'developer' | 'qa' | 'reviewer' | 'pm';
   priority: number;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: Date;
@@ -191,7 +191,7 @@ class AgentQueue {
   }
 
   // Enqueue a job
-  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
     if (this.shouldUseRedis()) {
@@ -506,31 +506,23 @@ class AgentQueue {
       const project = task.project_id ? await getProject(task.project_id) : null;
       const comments = await getCommentsByTaskId(job.taskId);
 
-      // Detect deployment tasks (have parentTaskId in agent_context)
-      let parentTaskId: string | null = null;
-      if (task.agent_context) {
-        try {
-          const ctx = JSON.parse(task.agent_context);
-          parentTaskId = ctx.parentTaskId || null;
-        } catch { /* not JSON agent_context */ }
-      }
-      const isDeploymentTask = !!parentTaskId;
-
-      // Use devops prompt for deployment tasks
-      const effectivePrompt = isDeploymentTask
-        ? AGENT_PROMPTS.devops
-        : (AGENT_PROMPTS[job.agentType as keyof typeof AGENT_PROMPTS] || AGENT_PROMPTS.developer);
+      // Select prompt based on assignee specialization or agent type
+      const effectivePrompt = task.assignee === 'Sam'
+        ? AGENT_PROMPTS.pm
+        : task.assignee === 'Jordan'
+          ? AGENT_PROMPTS.devops
+          : (AGENT_PROMPTS[job.agentType as keyof typeof AGENT_PROMPTS] || AGENT_PROMPTS.developer);
 
       // Build agent context
       const context: AgentContext = {
         task: task as Task,
         project,
         recentComments: comments.slice(-10),
-        agentMemory: isDeploymentTask ? '' : (task.agent_context || ''),
+        agentMemory: task.agent_context || '',
         agentConfig: {
-          id: `config-${isDeploymentTask ? 'devops' : job.agentType}`,
-          name: isDeploymentTask ? 'DevOps' : (job.agentType.charAt(0).toUpperCase() + job.agentType.slice(1)),
-          specialization: isDeploymentTask ? 'devops' : job.agentType,
+          id: `config-${job.agentType}`,
+          name: job.agentType.charAt(0).toUpperCase() + job.agentType.slice(1),
+          specialization: job.agentType,
           systemPrompt: effectivePrompt,
           model: 'claude-sonnet-4-20250514',
           temperature: 0,
@@ -593,28 +585,8 @@ class AgentQueue {
         });
       }
 
-      // For deployment tasks, copy parent's workspace snapshot so devops agent has the code
-      const isDockerMode = process.env.SANDBOX_MODE === 'docker';
-      if (!isDockerMode && parentTaskId) {
-        try {
-          const parentSnapshot = await getWorkspaceSnapshot(parentTaskId);
-          if (parentSnapshot) {
-            await saveWorkspaceSnapshot(job.taskId, run.id, job.agentType, parentSnapshot.snapshot, parentSnapshot.file_count, parentSnapshot.size_bytes);
-            taskLogBuffer.append({
-              task_id: job.taskId,
-              run_id: run.id,
-              agent_type: job.agentType,
-              stream: 'system',
-              content: `Copied workspace from parent task (${(parentSnapshot.size_bytes / 1024).toFixed(0)}KB, ${parentSnapshot.file_count} files)`,
-              timestamp: Date.now(),
-            });
-          }
-        } catch (err) {
-          console.warn('[Agent] Failed to copy parent workspace:', err);
-        }
-      }
-
       // Restore workspace snapshot if one exists for this task
+      const isDockerMode = process.env.SANDBOX_MODE === 'docker';
       // Docker mode uses named volumes for persistence, so snapshots are only needed in subprocess mode
       if (!isDockerMode) {
         try {
@@ -664,6 +636,29 @@ class AgentQueue {
         },
         addComment: async (taskId: string, author: string, content: string) => {
           await createComment({ id: uuidv4(), task_id: taskId, author, content });
+        },
+        createTask: async (params: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }) => {
+          const id = uuidv4();
+          await createTask({
+            id,
+            title: params.title,
+            description: params.description,
+            assignee: params.assignee,
+            priority: (params.priority as 'low' | 'medium' | 'high') || 'medium',
+            status: 'todo',
+            project_id: params.projectId,
+            user_email: params.userEmail,
+          });
+          console.log(`[Agent] PM created task ${id.slice(0, 8)}: "${params.title}" (assigned to ${params.assignee})`);
+          return { id };
+        },
+        addDependency: async (taskId: string, dependsOnId: string) => {
+          await addTaskDependency(taskId, dependsOnId);
+          console.log(`[Agent] PM added dependency: ${taskId.slice(0, 8)} depends on ${dependsOnId.slice(0, 8)}`);
+        },
+        listProjectTasks: async (projectId: string) => {
+          const tasks = await getTasksByProjectId(projectId);
+          return tasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee }));
         },
       };
 
@@ -730,51 +725,39 @@ class AgentQueue {
         }
       }
 
-      // Intercept: when reviewer approves a non-deployment task, create a
-      // deployment child task instead of marking the original as 'done'.
-      if (result.success && newStatus === 'done' && job.agentType === 'reviewer' && !isDeploymentTask) {
-        const deployTaskId = uuidv4();
-        await createTask({
-          id: deployTaskId,
-          title: `Deploy: ${task.title}`,
-          description: `Auto-created deployment task for "${task.title}" (parent: ${task.id}).\n\nPush workspace to GitHub, enable GitHub Pages, and post the public URL as a comment on the parent task.`,
-          status: 'todo',
-          assignee: task.assignee,
-          priority: task.priority,
-          user_email: job.userEmail || null,
-          agent_context: JSON.stringify({ parentTaskId: task.id }),
-        });
-
-        await createComment({
-          id: uuidv4(),
-          task_id: task.id,
-          author: 'System',
-          content: `Deployment task created (${deployTaskId.slice(0, 8)}). Original task will be marked done when deployment completes.`,
-        });
-
-        console.log(`[Agent] Created deployment task ${deployTaskId.slice(0, 8)} for parent ${job.taskId.slice(0, 8)}`);
-
-        // Enqueue devops agent for the deployment task
-        await this.enqueue({
-          taskId: deployTaskId,
-          agentType: 'developer', // Will use devops prompt via parentTaskId detection
-          priority: job.priority,
-          tenantId: job.tenantId,
-          userEmail: job.userEmail,
-        });
-
-        // Don't progress original task to 'done' — leave at in_review
-        taskLogBuffer.append({
-          task_id: job.taskId,
-          run_id: run.id,
-          agent_type: job.agentType,
-          stream: 'system',
-          content: `Deployment task created: ${deployTaskId.slice(0, 8)}. Waiting for deployment before marking done.`,
-          timestamp: Date.now(),
-        });
-      } else if (result.success && newStatus) {
-        // Normal status progression
+      // Status progression
+      if (result.success && newStatus) {
         await updateTask(job.taskId, { status: newStatus });
+
+        // When task reaches 'done', unblock dependent tasks
+        if (newStatus === 'done') {
+          try {
+            const dependents = await getTaskDependents(job.taskId);
+            for (const dep of dependents) {
+              await recalculateBlockedStatus(dep.task_id);
+            }
+          } catch (err) {
+            console.warn(`[Agent] Failed to recalculate blocked status for dependents:`, err);
+          }
+
+          // If this is a PM verification task, complete the project
+          if (task.title.startsWith('[PM] Verify:') && task.project_id) {
+            try {
+              await completeProject(task.project_id);
+              console.log(`[Agent] Project ${task.project_id} marked as completed`);
+              taskLogBuffer.append({
+                task_id: job.taskId,
+                run_id: run.id,
+                agent_type: job.agentType,
+                stream: 'system',
+                content: `Project completed! All tasks verified.`,
+                timestamp: Date.now(),
+              });
+            } catch (err) {
+              console.warn(`[Agent] Failed to complete project:`, err);
+            }
+          }
+        }
       }
 
       // Safety: warn if agent succeeded but task status didn't change
@@ -786,8 +769,7 @@ class AgentQueue {
       }
 
       // Immediately enqueue the next agent for the new status
-      // (skip if we just created a deployment task — that has its own enqueue above)
-      if (result.success && !(newStatus === 'done' && job.agentType === 'reviewer' && !isDeploymentTask)) {
+      if (result.success) {
         try {
           const updatedTask = await getTask(job.taskId);
           if (updatedTask && updatedTask.status !== task.status) {
@@ -905,66 +887,8 @@ class AgentQueue {
         }
       }
 
-      // For deployment tasks: enable GitHub Pages and post URL on parent task
-      if (result.success && repoName && isDeploymentTask && parentTaskId) {
-        try {
-          // Get GitHub token to enable Pages
-          const githubInfo = job.userEmail ? await getUserGitHubToken(job.userEmail) : null;
-          let pagesUrl = `https://github.com/${repoName}`;
-          if (githubInfo) {
-            pagesUrl = await enableGitHubPages(githubInfo.token, repoName);
-          }
-
-          // Make repo public so GitHub Pages works
-          if (githubInfo) {
-            await fetch(`https://api.github.com/repos/${repoName}`, {
-              method: 'PATCH',
-              headers: {
-                Authorization: `Bearer ${githubInfo.token}`,
-                Accept: 'application/vnd.github+json',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ private: false }),
-            });
-          }
-
-          // Post deployment URL on parent task
-          await createComment({
-            id: uuidv4(),
-            task_id: parentTaskId,
-            author: 'DevOps',
-            content: `Deployed! Public URL: ${pagesUrl}\nGitHub repo: https://github.com/${repoName}`,
-          });
-
-          // Mark parent task as done
-          await updateTask(parentTaskId, { status: 'done' });
-
-          // Mark deployment task as done
-          await updateTask(job.taskId, { status: 'done' });
-
-          taskLogBuffer.append({
-            task_id: job.taskId,
-            run_id: run.id,
-            agent_type: job.agentType,
-            stream: 'system',
-            content: `Deployment complete! Pages URL: ${pagesUrl} — parent task ${parentTaskId.slice(0, 8)} marked done`,
-            timestamp: Date.now(),
-          });
-        } catch (err) {
-          console.error('[Agent] Failed to complete deployment:', err);
-          taskLogBuffer.append({
-            task_id: job.taskId,
-            run_id: run.id,
-            agent_type: job.agentType,
-            stream: 'system',
-            content: `Deployment finalization failed: ${err instanceof Error ? err.message : String(err)}`,
-            timestamp: Date.now(),
-          });
-        }
-      }
-
-      // Deploy to Railway after successful GitHub push (non-deployment tasks only)
-      if (result.success && repoName && !isDeploymentTask) {
+      // Deploy to Railway for devops-assigned tasks after successful GitHub push
+      if (result.success && repoName && task.assignee === 'Jordan') {
         try {
           const railwayResult = await deployToRailway(job.userEmail || '', repoName, job.taskId, task.title);
           if (railwayResult) {
