@@ -95,18 +95,20 @@ export async function onTaskCreated(task: Task, userEmail?: string): Promise<voi
     console.log(`[Lifecycle] Auto-assigned to ${assignee}`);
   }
 
-  // Auto-spawn developer agent for new tasks
+  // Auto-spawn agent for new tasks
   if (settings.autoSpawnOnCreate && task.status === 'todo') {
     const priority = PRIORITY_MAP[task.priority] || 5;
     const effectiveUserEmail = userEmail || task.user_email || undefined;
+    // PM tasks (assigned to Sam) get 'pm' agent type, devops (Jordan) get 'developer' with devops prompt
+    const agentType = task.assignee === 'Sam' ? 'pm' : 'developer';
     await agentQueue.enqueue({
       taskId: task.id,
-      agentType: 'developer',
+      agentType,
       priority,
       tenantId: effectiveUserEmail,
       userEmail: effectiveUserEmail,
     });
-    console.log(`[Lifecycle] Enqueued developer agent for task ${task.id}`);
+    console.log(`[Lifecycle] Enqueued ${agentType} agent for task ${task.id}`);
   }
 }
 
@@ -179,7 +181,8 @@ export async function onTaskAssigned(
 
   // If task is in progress and assigned to a new agent, spawn that agent
   if (task.status === 'in_progress') {
-    const agentType = newAssignee === 'Riley' ? 'qa'
+    const agentType = newAssignee === 'Sam' ? 'pm'
+      : newAssignee === 'Riley' ? 'qa'
       : newAssignee === 'Simon' ? 'reviewer'
       : 'developer';
 

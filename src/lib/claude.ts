@@ -200,6 +200,41 @@ const AGENT_TOOLS: AnyTool[] = [
     }
   },
   {
+    name: 'create_task',
+    description: 'Create a new task in the current project',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Task title' },
+        description: { type: 'string', description: 'Detailed task description' },
+        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Simon)' },
+        priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
+      },
+      required: ['title', 'description', 'assignee']
+    }
+  },
+  {
+    name: 'add_dependency',
+    description: 'Make one task depend on another (task cannot start until dependency is done)',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The task that should wait' },
+        depends_on_id: { type: 'string', description: 'The task that must complete first' },
+      },
+      required: ['task_id', 'depends_on_id']
+    }
+  },
+  {
+    name: 'list_project_tasks',
+    description: 'List all tasks in the current project with their status',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
     name: 'task_complete',
     description: 'Signal task completion',
     parameters: {
@@ -411,6 +446,39 @@ export const AGENT_PROMPTS: Record<string, string> = {
 - Your workspace already contains the code from the parent task. DO NOT rebuild from scratch.
 - Make minimal changes — only fix deployment-blocking issues.
 - You MUST call task_complete within 10 iterations.`,
+  pm: `You are a Product Manager. Your job is to analyze project requirements and create a comprehensive task plan.
+
+## When Planning a Project (task title starts with "[PM] Plan:"):
+1. Read the project PRD, goals, requirements, constraints, and tech stack from the context
+2. Create all necessary tasks using create_task:
+   - Design/UI tasks (assign to Alex - frontend specialist)
+   - Frontend development tasks (assign to Alex)
+   - Backend development tasks (assign to Morgan - backend specialist)
+   - Testing tasks (assign to Riley - QA specialist)
+   - DevOps/deployment tasks (assign to Jordan - devops specialist)
+3. Set up dependencies using add_dependency (e.g., backend before frontend integration, all dev before testing, testing before deployment)
+4. Create a final verification task: "[PM] Verify: {project title}" assigned to Sam (yourself) that depends on ALL other tasks you created
+5. Call task_complete with next_status='done'
+
+## When Verifying a Project (task title starts with "[PM] Verify:"):
+1. Use list_project_tasks to check all task statuses
+2. Review completion status of each task
+3. If all tasks are done and quality is acceptable: call task_complete with next_status='done'
+4. If issues found: create fix tasks with appropriate assignees and dependencies, then call task_complete with next_status='done'
+
+## Available Agents:
+- Alex: Frontend specialist (React, CSS, UI/UX)
+- Morgan: Backend specialist (APIs, databases, server logic)
+- Jordan: DevOps specialist (deployment, CI/CD, infrastructure)
+- Riley: QA specialist (testing, bug verification)
+- Sam: Product Manager (that's you - for verification tasks)
+- Simon: General developer (full-stack, default)
+
+## Critical Rules:
+- Create focused, well-scoped tasks (not too broad, not too granular)
+- Always set proper dependencies to ensure correct execution order
+- The verification task MUST depend on all other project tasks
+- You MUST call task_complete within 20 iterations`,
 };
 
 // Build system prompt
@@ -422,6 +490,23 @@ function buildSystemPrompt(context: AgentContext, usingOAT: boolean): string {
 
   const identityPrefix = usingOAT ? `${CLAUDE_CODE_IDENTITY}\n\n` : '';
 
+  let projectSection = '';
+  if (context.project) {
+    const p = context.project;
+    projectSection = `\n## Project Context
+- **Project:** ${p.title}
+- **Status:** ${p.status}
+${p.description ? `- **Description:** ${p.description}` : ''}
+${p.prd ? `\n### PRD\n${p.prd}` : ''}
+${p.goals ? `\n### Goals\n${p.goals}` : ''}
+${p.requirements ? `\n### Requirements\n${p.requirements}` : ''}
+${p.constraints ? `\n### Constraints\n${p.constraints}` : ''}
+${p.tech_stack ? `\n### Tech Stack\n${p.tech_stack}` : ''}
+${p.timeline ? `\n### Timeline\n${p.timeline}` : ''}
+${p.github_repo ? `- **GitHub Repo:** ${p.github_repo}` : ''}
+`;
+  }
+
   return `${identityPrefix}${basePrompt}
 
 ## Current Task
@@ -429,7 +514,7 @@ function buildSystemPrompt(context: AgentContext, usingOAT: boolean): string {
 - **Title:** ${context.task.title}
 - **Status:** ${context.task.status}
 ${context.task.description ? `- **Description:** ${context.task.description}` : ''}
-
+${projectSection}
 ${context.agentMemory ? `## Previous Notes\n${context.agentMemory}\n` : ''}
 
 Call task_complete when done.`;
@@ -464,6 +549,9 @@ export interface ToolExecutor {
 export interface TaskAPI {
   updateTask(taskId: string, updates: Partial<Task>): Promise<void>;
   addComment(taskId: string, author: string, content: string): Promise<void>;
+  createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }): Promise<{ id: string }>;
+  addDependency?(taskId: string, dependsOnId: string): Promise<void>;
+  listProjectTasks?(projectId: string): Promise<Array<{ id: string; title: string; status: string; assignee: string | null }>>;
 }
 
 // Execute tool (handles both standard and Claude Code tool names)
@@ -577,6 +665,32 @@ async function executeTool(
       case 'add_comment':
         await taskApi.addComment(context.task.id, context.agentConfig?.name || 'Agent', toolInput.content as string);
         return 'Comment added';
+      case 'create_task': {
+        if (!taskApi.createTask) return 'Error: create_task not available';
+        const projectId = context.project?.id || context.task.project_id;
+        if (!projectId) return 'Error: No project context — create_task requires a project';
+        const created = await taskApi.createTask({
+          title: toolInput.title as string,
+          description: toolInput.description as string,
+          assignee: toolInput.assignee as string,
+          priority: (toolInput.priority as string) || 'medium',
+          projectId,
+          userEmail: context.task.user_email,
+        });
+        return `Task created: ${created.id} — "${toolInput.title}"`;
+      }
+      case 'add_dependency': {
+        if (!taskApi.addDependency) return 'Error: add_dependency not available';
+        await taskApi.addDependency(toolInput.task_id as string, toolInput.depends_on_id as string);
+        return `Dependency added: ${toolInput.task_id} depends on ${toolInput.depends_on_id}`;
+      }
+      case 'list_project_tasks': {
+        if (!taskApi.listProjectTasks) return 'Error: list_project_tasks not available';
+        const projectId = context.project?.id || context.task.project_id;
+        if (!projectId) return 'Error: No project context';
+        const tasks = await taskApi.listProjectTasks(projectId);
+        return JSON.stringify(tasks, null, 2);
+      }
       case 'task_complete':
         return JSON.stringify({ summary: toolInput.summary, files_changed: toolInput.files_changed, next_status: toolInput.next_status });
       default:
