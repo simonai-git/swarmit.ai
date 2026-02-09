@@ -1405,6 +1405,112 @@ describe('scheduler', () => {
       expect(agentQueue.enqueue).toHaveBeenCalledTimes(1);
     });
 
+    it('releases stale current_run_id when no in-memory run exists', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      // Task has current_run_id but updated_at is 15 min ago (stale)
+      const staleTime = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'stale-task',
+          title: 'Stale Task',
+          status: 'in_progress',
+          assignee: 'Simon',
+          priority: 'medium',
+          description: 'Test',
+          current_run_id: 'run-dead-123',
+          user_email: 'user@test.com',
+          created_at: staleTime,
+          updated_at: staleTime,
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],  // No in-memory active run for this task
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+      vi.mocked(getAgentRunsByTask).mockResolvedValue([]);
+
+      await forceSchedulerTick();
+
+      // Should release the stale claim
+      expect(updateTask).toHaveBeenCalledWith('stale-task', { current_run_id: null });
+      // Should then enqueue the task since it's now free
+      expect(agentQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'stale-task' })
+      );
+    });
+
+    it('does not release current_run_id when in-memory run exists', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'active-task',
+          title: 'Active Task',
+          status: 'in_progress',
+          assignee: 'Simon',
+          priority: 'medium',
+          description: 'Test',
+          current_run_id: 'run-alive-123',
+          user_email: 'user@test.com',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [{ taskId: 'active-task' } as any],  // In-memory run exists
+        pending: 0,
+        running: 1,
+        completed: 0,
+        failed: 0,
+      });
+
+      await forceSchedulerTick();
+
+      // Should NOT release the claim
+      expect(updateTask).not.toHaveBeenCalledWith('active-task', { current_run_id: null });
+      // Should NOT enqueue since it's actively running
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('does not release current_run_id when updated_at is recent (< 10min)', async () => {
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
+      // Task has current_run_id but updated_at is only 5 min ago (not stale yet)
+      const recentTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      vi.mocked(getTasksByUserEmail).mockResolvedValue([
+        {
+          id: 'recent-task',
+          title: 'Recent Task',
+          status: 'in_progress',
+          assignee: 'Simon',
+          priority: 'medium',
+          description: 'Test',
+          current_run_id: 'run-maybe-123',
+          user_email: 'user@test.com',
+          created_at: recentTime,
+          updated_at: recentTime,
+        },
+      ] as any);
+      vi.mocked(agentQueue.getStatus).mockResolvedValue({
+        jobs: [],
+        activeRuns: [],  // No in-memory run
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+
+      await forceSchedulerTick();
+
+      // Should NOT release — too recent to be considered stale
+      expect(updateTask).not.toHaveBeenCalledWith('recent-task', { current_run_id: null });
+      // Should NOT enqueue since activeTaskIds still has it
+      expect(agentQueue.enqueue).not.toHaveBeenCalled();
+    });
+
     it('one user error does not affect other users', async () => {
       vi.mocked(getUsersWithApiKeys).mockResolvedValue([
         { email: 'failing@test.com' },

@@ -417,6 +417,14 @@ async function initDb() {
       END $$;
     `);
 
+    // Add cancel_snapshot JSONB column to projects (stores task state on cancel for restart)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS cancel_snapshot JSONB;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
     // Create workspace_snapshots table
     await client.query(`
       CREATE TABLE IF NOT EXISTS workspace_snapshots (
@@ -953,6 +961,7 @@ export interface Project {
   started_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
+  cancel_snapshot: Record<string, unknown> | null;
   canceled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -1066,8 +1075,8 @@ export async function updateProject(id: string, updates: Partial<Project>): Prom
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  // First unlink all tasks from this project
-  await pool.query('UPDATE tasks SET project_id = NULL WHERE project_id = $1', [id]);
+  // Delete all tasks belonging to this project (cascades to comments, logs, runs, etc.)
+  await pool.query('DELETE FROM tasks WHERE project_id = $1', [id]);
   const result = await pool.query('DELETE FROM projects WHERE id = $1', [id]);
   return (result.rowCount ?? 0) > 0;
 }

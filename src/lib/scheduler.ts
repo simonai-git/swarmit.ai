@@ -94,13 +94,27 @@ async function processUserTasks(userEmail: string): Promise<void> {
     );
     // Check both in-memory active runs AND DB-level current_run_id
     // DB survives process restarts; in-memory is a fast path
+    const inMemoryActiveTaskIds = new Set(queueStatus.activeRuns.map(r => r.taskId));
     const tasksWithDbClaim = allTasks
       .filter(t => t.current_run_id != null)
       .map(t => t.id);
     activeTaskIds = new Set([
-      ...queueStatus.activeRuns.map(r => r.taskId),
+      ...inMemoryActiveTaskIds,
       ...tasksWithDbClaim,
     ]);
+
+    // Detect stale DB claims: task has current_run_id but no matching in-memory active run
+    // This happens when the process restarts (deploy) and running agents are killed
+    for (const task of allTasks) {
+      if (task.current_run_id && !inMemoryActiveTaskIds.has(task.id)) {
+        const runAge = Date.now() - new Date(task.updated_at).getTime();
+        if (runAge > 10 * 60 * 1000) {
+          console.warn(`[Scheduler] Releasing stale current_run_id on task ${task.id.slice(0, 8)} (no in-memory run, age: ${Math.round(runAge / 60000)}min)`);
+          await updateTask(task.id, { current_run_id: null } as any);
+          activeTaskIds.delete(task.id);
+        }
+      }
+    }
   } catch (error) {
     console.warn(`[Scheduler] Failed to get queue status for ${userEmail}, proceeding without queue dedup:`, error instanceof Error ? error.message : String(error));
   }

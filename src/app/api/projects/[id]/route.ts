@@ -14,6 +14,7 @@ import {
   completeProject,
   createTask,
   updateTask,
+  deleteTask,
   getAutomationUserEmail
 } from '@/lib/db';
 import { onTaskCreated } from '@/lib/task-lifecycle';
@@ -107,20 +108,36 @@ export async function PATCH(
           }
           break;
         case 'cancel': {
+          // Fetch tasks BEFORE cancelling for snapshot
+          const cancelTasks = await getTasksByProjectId(id);
+
+          // Save cancel snapshot with all task info for potential restart
+          const snapshot = {
+            canceled_at: new Date().toISOString(),
+            total_tasks: cancelTasks.length,
+            tasks: cancelTasks.map(t => ({
+              id: t.id,
+              title: t.title,
+              description: t.description,
+              status: t.status,
+              assignee: t.assignee,
+              priority: t.priority,
+              is_blocked: t.is_blocked,
+              progress: t.progress,
+            })),
+          };
+
+          // Cancel the project first (sets status = 'canceled')
           result = await cancelProject(id);
           if (!result) {
             return NextResponse.json({ error: 'Cannot cancel project' }, { status: 400 });
           }
-          // Cancel all project tasks (set non-done tasks to done)
-          const cancelTasks = await getTasksByProjectId(id);
-          const cancelTaskIds = new Set<string>();
-          for (const t of cancelTasks) {
-            cancelTaskIds.add(t.id);
-            if (t.status !== 'done') {
-              await updateTask(t.id, { status: 'done' });
-            }
-          }
+
+          // Save the snapshot
+          await updateProject(id, { cancel_snapshot: snapshot } as Partial<typeof result>);
+
           // Purge queued agent jobs for this project's tasks
+          const cancelTaskIds = new Set(cancelTasks.map(t => t.id));
           try {
             const queueStatus = await agentQueue.getStatus();
             for (const job of queueStatus.jobs) {
@@ -131,6 +148,19 @@ export async function PATCH(
           } catch (err) {
             console.warn('[Project] Failed to purge queue on cancel:', err);
           }
+
+          // Delete non-started tasks (todo), mark started tasks as done
+          for (const t of cancelTasks) {
+            if (t.status === 'done') continue;
+            if (t.status === 'todo') {
+              await deleteTask(t.id);  // Never started — remove entirely
+            } else {
+              await updateTask(t.id, { status: 'done' });  // Had work done — preserve
+            }
+          }
+
+          // Re-fetch to include snapshot in response
+          result = await getProject(id);
           break;
         }
         case 'complete':
