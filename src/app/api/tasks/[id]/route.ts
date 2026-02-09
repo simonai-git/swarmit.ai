@@ -89,8 +89,8 @@ export async function PATCH(
       }
     }
     
-    // When a task is marked done, recalculate blocked status for all dependents
-    if (body.status === 'done') {
+    // When a task advances (done/testing/in_review), recalculate blocked status for all dependents
+    if (body.status && ['done', 'testing', 'in_review'].includes(body.status)) {
       const dependents = await getTaskDependents(id);
       for (const dep of dependents) {
         await recalculateBlockedStatus(dep.task_id);

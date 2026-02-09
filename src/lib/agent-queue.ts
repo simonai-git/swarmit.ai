@@ -730,7 +730,7 @@ class AgentQueue {
       // Run agent
       console.log(`[Agent] Running ${job.agentType} agent for task ${job.taskId}`);
       const result = await runAgent(context, executor, taskApi, {
-        maxIterations: 30,
+        maxIterations: 75,
         apiKey: userApiKey, // Pass user's API key
         onToolUse: (tool, input) => {
           run.transcript.push({
@@ -787,8 +787,8 @@ class AgentQueue {
       if (result.success && newStatus) {
         await updateTask(job.taskId, { status: newStatus });
 
-        // When task reaches 'done', unblock dependent tasks and auto-enqueue agents
-        if (newStatus === 'done') {
+        // When task advances (done/testing/in_review), unblock dependent tasks and auto-enqueue agents
+        if (newStatus && ['done', 'testing', 'in_review'].includes(newStatus)) {
           try {
             const dependents = await getTaskDependents(job.taskId);
             for (const dep of dependents) {
