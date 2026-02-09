@@ -95,8 +95,8 @@ export async function onTaskCreated(task: Task, userEmail?: string): Promise<voi
     console.log(`[Lifecycle] Auto-assigned to ${assignee}`);
   }
 
-  // Auto-spawn agent for new tasks
-  if (settings.autoSpawnOnCreate && task.status === 'todo') {
+  // Auto-spawn agent for new tasks (skip blocked tasks)
+  if (settings.autoSpawnOnCreate && task.status === 'todo' && !task.is_blocked) {
     const priority = PRIORITY_MAP[task.priority] || 5;
     const effectiveUserEmail = userEmail || task.user_email || undefined;
     // Map assignee to agent type for correct prompt selection

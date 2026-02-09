@@ -503,6 +503,18 @@ class AgentQueue {
       const task = await getTask(job.taskId);
       if (!task) throw new Error('Task not found');
 
+      // Skip blocked tasks — they may have been enqueued before dependencies were set
+      if (task.is_blocked) {
+        run.status = 'completed';
+        run.completedAt = new Date();
+        run.error = 'Task is blocked, skipping';
+        await saveAgentRun(run);
+        await releaseTaskRun(job.taskId, run.id);
+        this.running.delete(run.id);
+        console.log(`[Agent] Task ${job.taskId.slice(0, 8)} is blocked, skipping run ${run.id}`);
+        return;
+      }
+
       const project = task.project_id ? await getProject(task.project_id) : null;
       const comments = await getCommentsByTaskId(job.taskId);
 
@@ -668,7 +680,7 @@ class AgentQueue {
       // Run agent
       console.log(`[Agent] Running ${job.agentType} agent for task ${job.taskId}`);
       const result = await runAgent(context, executor, taskApi, {
-        maxIterations: 30,
+        maxIterations: job.agentType === 'pm' ? 60 : 30,
         apiKey: userApiKey, // Pass user's API key
         onToolUse: (tool, input) => {
           run.transcript.push({
@@ -936,6 +948,27 @@ class AgentQueue {
       }
 
       if (!result.success) {
+        // PM plan tasks create side effects (tasks, deps) that can't be undone on retry.
+        // If the PM created enough tasks, treat it as success even if it hit max iterations.
+        if (job.agentType === 'pm' && task.title.startsWith('[PM] Plan:') && task.project_id) {
+          const projectTasks = await getTasksByProjectId(task.project_id);
+          const createdTasks = projectTasks.filter(t => t.id !== job.taskId);
+          if (createdTasks.length >= 2) {
+            console.log(`[Agent] PM plan hit max iterations but created ${createdTasks.length} tasks — treating as success`);
+            await updateTask(job.taskId, { status: 'done' });
+            // Unblock dependents (e.g. PM Verify task)
+            try {
+              const dependents = await getTaskDependents(job.taskId);
+              for (const dep of dependents) {
+                await recalculateBlockedStatus(dep.task_id);
+              }
+            } catch (err) {
+              console.warn(`[Agent] Failed to unblock dependents after PM plan:`, err);
+            }
+            // Don't throw — prevents retry of PM task
+            return;
+          }
+        }
         throw new Error(result.error || 'Agent failed');
       }
 

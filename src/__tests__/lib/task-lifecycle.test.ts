@@ -426,10 +426,17 @@ describe('task-lifecycle', () => {
     it('should set low priority for low priority tasks', async () => {
       const lowPriorityTask = { ...mockTask, priority: 'low' };
       await onTaskCreated(lowPriorityTask as any);
-      
+
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ priority: 1 })
       );
+    });
+
+    it('should not enqueue agent for blocked tasks', async () => {
+      const blockedTask = { ...mockTask, assignee: 'Alex', is_blocked: true };
+      await onTaskCreated(blockedTask as any);
+
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
   });
 
