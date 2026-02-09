@@ -1120,7 +1120,7 @@ describe('scheduler', () => {
             id: 'alice-task',
             title: 'Alice Task',
             status: 'todo',
-            assignee: 'Simon',
+            assignee: 'Alex',
             priority: 'high',
             description: 'Test',
             user_email: 'alice@test.com',
