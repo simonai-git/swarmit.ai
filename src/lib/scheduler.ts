@@ -20,7 +20,7 @@ const STUCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_LIFETIME_RUNS = 10; // Runs per agent type before permanent block
 
 /**
- * Determine agent type based on task status
+ * Determine agent type based on task status (fallback)
  */
 function getAgentTypeForStatus(status: string): 'developer' | 'qa' | 'reviewer' {
   switch (status) {
@@ -31,6 +31,20 @@ function getAgentTypeForStatus(status: string): 'developer' | 'qa' | 'reviewer' 
     default:
       return 'developer';
   }
+}
+
+/**
+ * Determine agent type based on task assignee, falling back to status-based.
+ * Matches the mapping in task-lifecycle.ts onTaskCreated.
+ */
+function getAgentTypeForTask(task: Task): 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' {
+  if (task.assignee === 'Sam') return 'product_manager';
+  if (task.assignee === 'Taylor') return 'pm';
+  if (task.assignee === 'Riley') return 'qa';
+  if (task.assignee === 'Simon') return 'reviewer';
+  if (task.assignee === 'Jordan') return 'devops';
+  // Fall back to status-based for non-assigned or developer tasks
+  return getAgentTypeForStatus(task.status);
 }
 
 /**
@@ -103,8 +117,8 @@ async function processUserTasks(userEmail: string): Promise<void> {
     if (task.is_blocked) continue;
 
     // Stuck detection: check both windowed and lifetime metrics
-    // Count only runs matching the agent type we'd spawn for the current status
-    const expectedAgentType = getAgentTypeForStatus(task.status);
+    // Count only runs matching the agent type we'd spawn for this task
+    const expectedAgentType = getAgentTypeForTask(task);
     const recentRuns = await getAgentRunsByTask(task.id);
     const finishedRuns = recentRuns.filter(r =>
       ['completed', 'failed'].includes(r.status) && r.agent_type === expectedAgentType
@@ -153,7 +167,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
 
   for (const task of tasksToEnqueue) {
     try {
-      const agentType = getAgentTypeForStatus(task.status);
+      const agentType = getAgentTypeForTask(task);
       const priority = getPriorityValue(task.priority);
 
       console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent [${userEmail}]`);
