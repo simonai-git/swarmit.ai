@@ -1,5 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject } from './db';
 import { agentQueue } from './agent-queue';
 import { taskLogBuffer } from './task-log-buffer';
 
@@ -70,6 +70,18 @@ async function processUserTasks(userEmail: string): Promise<void> {
   // Get tasks owned by this user
   const allTasks = await getTasksByUserEmail(userEmail);
 
+  // Build set of cancelled/completed project IDs to skip their tasks
+  const projectIds = [...new Set(allTasks.map(t => t.project_id).filter(Boolean))] as string[];
+  const inactiveProjectIds = new Set<string>();
+  for (const pid of projectIds) {
+    try {
+      const project = await getProject(pid);
+      if (project && ['canceled', 'completed'].includes(project.status)) {
+        inactiveProjectIds.add(pid);
+      }
+    } catch { /* skip if project lookup fails */ }
+  }
+
   // Get current queue status scoped to this user's tenant
   let queuedTaskIds = new Set<string>();
   let activeTaskIds = new Set<string>();
@@ -103,6 +115,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
   const tasksNeedingWork: Task[] = [];
   for (const task of allTasks) {
     if (task.status === 'done') continue;
+    if (task.project_id && inactiveProjectIds.has(task.project_id)) continue;
     if (!task.assignee) continue;
     if (queuedTaskIds.has(task.id)) {
       console.log(`[Scheduler] Task ${task.id.slice(0, 8)} already queued for ${userEmail}, skipping`);

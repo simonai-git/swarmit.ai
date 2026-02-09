@@ -13,9 +13,11 @@ import {
   cancelProject,
   completeProject,
   createTask,
+  updateTask,
   getAutomationUserEmail
 } from '@/lib/db';
 import { onTaskCreated } from '@/lib/task-lifecycle';
+import { agentQueue } from '@/lib/agent-queue';
 
 export async function GET(
   request: NextRequest,
@@ -104,12 +106,33 @@ export async function PATCH(
             return NextResponse.json({ error: 'Cannot resume project (must be paused)' }, { status: 400 });
           }
           break;
-        case 'cancel':
+        case 'cancel': {
           result = await cancelProject(id);
           if (!result) {
             return NextResponse.json({ error: 'Cannot cancel project' }, { status: 400 });
           }
+          // Cancel all project tasks (set non-done tasks to done)
+          const cancelTasks = await getTasksByProjectId(id);
+          const cancelTaskIds = new Set<string>();
+          for (const t of cancelTasks) {
+            cancelTaskIds.add(t.id);
+            if (t.status !== 'done') {
+              await updateTask(t.id, { status: 'done' });
+            }
+          }
+          // Purge queued agent jobs for this project's tasks
+          try {
+            const queueStatus = await agentQueue.getStatus();
+            for (const job of queueStatus.jobs) {
+              if (cancelTaskIds.has(job.taskId) && ['pending', 'running'].includes(job.status)) {
+                await agentQueue.cancel(job.id);
+              }
+            }
+          } catch (err) {
+            console.warn('[Project] Failed to purge queue on cancel:', err);
+          }
           break;
+        }
         case 'complete':
           result = await completeProject(id);
           if (!result) {

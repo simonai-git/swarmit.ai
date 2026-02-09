@@ -1584,10 +1584,12 @@ export async function removeTaskDependency(taskId: string, dependsOnId: string):
 
 export async function recalculateBlockedStatus(taskId: string): Promise<void> {
   // Get all incomplete dependencies for this task
+  // Consider testing/in_review as "complete enough" — QA/review are quality gates,
+  // not blockers for downstream work starting
   const result = await pool.query(
     `SELECT t.title FROM task_dependencies td
      JOIN tasks t ON t.id = td.depends_on_id
-     WHERE td.task_id = $1 AND t.status != 'done'`,
+     WHERE td.task_id = $1 AND t.status NOT IN ('done', 'testing', 'in_review')`,
     [taskId]
   );
 
