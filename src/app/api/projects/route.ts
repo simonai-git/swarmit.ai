@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
       description: body.description || null,
       status: body.status || 'defined',
       owner: body.owner || 'Bogdan',
+      reviewer: body.reviewer || 'Bogdan',
+      product_manager: body.product_manager || 'Sam',
       prd: body.prd || null,
       goals: body.goals || null,
       requirements: body.requirements || null,
@@ -39,6 +41,9 @@ export async function POST(request: NextRequest) {
       tech_stack: body.tech_stack || null,
       timeline: body.timeline || null,
       deadline: body.deadline || null,
+      github_repo: body.github_repo || null,
+      deploy_to_railway: body.deploy_to_railway || false,
+      push_to_github: body.push_to_github || false,
     });
     
     return NextResponse.json(project, { status: 201 });

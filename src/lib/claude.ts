@@ -455,7 +455,9 @@ export const AGENT_PROMPTS: Record<string, string> = {
    - Frontend development tasks (assign to Alex)
    - Backend development tasks (assign to Morgan - backend specialist)
    - Testing tasks (assign to Riley - QA specialist)
-   - DevOps/deployment tasks (assign to Jordan - devops specialist)
+   - If the project has deploy_to_railway enabled: create a deployment task (assign to Jordan - devops specialist)
+   - If the project has push_to_github enabled: include GitHub push in the deployment task or create a separate task for Jordan
+   - If neither deploy_to_railway nor push_to_github is enabled: skip deployment/GitHub tasks entirely
 3. Set up dependencies using add_dependency (e.g., backend before frontend integration, all dev before testing, testing before deployment)
 4. Create a final verification task: "[PM] Verify: {project title}" assigned to Sam (yourself) that depends on ALL other tasks you created
 5. Call task_complete with next_status='done'
@@ -463,8 +465,10 @@ export const AGENT_PROMPTS: Record<string, string> = {
 ## When Verifying a Project (task title starts with "[PM] Verify:"):
 1. Use list_project_tasks to check all task statuses
 2. Review completion status of each task
-3. If all tasks are done and quality is acceptable: call task_complete with next_status='done'
-4. If issues found: create fix tasks with appropriate assignees and dependencies, then call task_complete with next_status='done'
+3. If the project has deploy_to_railway enabled: verify the deployed app works as expected
+4. If the project has push_to_github enabled: verify code was pushed to the repository
+5. If all tasks are done and quality is acceptable: call task_complete with next_status='done'
+6. If issues found: create fix tasks with appropriate assignees and dependencies, then call task_complete with next_status='done'
 
 ## Available Agents:
 - Alex: Frontend specialist (React, CSS, UI/UX)
@@ -504,6 +508,8 @@ ${p.constraints ? `\n### Constraints\n${p.constraints}` : ''}
 ${p.tech_stack ? `\n### Tech Stack\n${p.tech_stack}` : ''}
 ${p.timeline ? `\n### Timeline\n${p.timeline}` : ''}
 ${p.github_repo ? `- **GitHub Repo:** ${p.github_repo}` : ''}
+${p.deploy_to_railway ? `- **Deploy to Railway:** Yes` : ''}
+${p.push_to_github ? `- **Push to GitHub:** Yes` : ''}
 `;
   }
 
