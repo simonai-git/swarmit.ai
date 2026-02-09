@@ -860,26 +860,27 @@ class AgentQueue {
               const allProjectTasks = await getTasksByProjectId(task.project_id);
               const incompleteTasks = allProjectTasks.filter(t => t.id !== job.taskId && t.status !== 'done');
               if (incompleteTasks.length > 0) {
-                console.warn(`[Agent] Project ${task.project_id} has ${incompleteTasks.length} incomplete tasks: ${incompleteTasks.map(t => t.title).join(', ')}`);
+                console.warn(`[Agent] Project ${task.project_id} has ${incompleteTasks.length} incomplete tasks, NOT completing: ${incompleteTasks.map(t => t.title).join(', ')}`);
                 taskLogBuffer.append({
                   task_id: job.taskId,
                   run_id: run.id,
                   agent_type: job.agentType,
                   stream: 'system',
-                  content: `WARNING: ${incompleteTasks.length} tasks still incomplete. Completing project anyway per PM verification.`,
+                  content: `WARNING: ${incompleteTasks.length} tasks still incomplete. Project NOT completed — needs manual review.`,
+                  timestamp: Date.now(),
+                });
+              } else {
+                await completeProject(task.project_id);
+                console.log(`[Agent] Project ${task.project_id} marked as completed`);
+                taskLogBuffer.append({
+                  task_id: job.taskId,
+                  run_id: run.id,
+                  agent_type: job.agentType,
+                  stream: 'system',
+                  content: `Project completed! All tasks verified.`,
                   timestamp: Date.now(),
                 });
               }
-              await completeProject(task.project_id);
-              console.log(`[Agent] Project ${task.project_id} marked as completed`);
-              taskLogBuffer.append({
-                task_id: job.taskId,
-                run_id: run.id,
-                agent_type: job.agentType,
-                stream: 'system',
-                content: `Project completed! All tasks verified.`,
-                timestamp: Date.now(),
-              });
             } catch (err) {
               console.warn(`[Agent] Failed to complete project:`, err);
             }

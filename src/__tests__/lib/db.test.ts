@@ -1132,6 +1132,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: null,
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1183,6 +1184,7 @@ describe('Database Module', () => {
           started_at: '2026-02-01T00:00:00Z',
           paused_at: null,
           completed_at: null,
+          cancel_snapshot: null,
           canceled_at: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
@@ -1235,6 +1237,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: null,
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1294,6 +1297,7 @@ describe('Database Module', () => {
           started_at: null,
           paused_at: null,
           completed_at: null,
+          cancel_snapshot: null,
           canceled_at: null,
           created_at: '2026-02-05T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
@@ -1340,6 +1344,7 @@ describe('Database Module', () => {
           started_at: '2026-02-01T00:00:00Z',
           paused_at: '2026-02-05T00:00:00Z',
           completed_at: null,
+          cancel_snapshot: null,
           canceled_at: null,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
@@ -1369,7 +1374,7 @@ describe('Database Module', () => {
     });
 
     describe('deleteProject', () => {
-      it('should unlink tasks and delete project', async () => {
+      it('should delete tasks and delete project', async () => {
         mockQuery
           .mockResolvedValueOnce({ rows: [], rowCount: 2 })
           .mockResolvedValueOnce({ rows: [], rowCount: 1 });
@@ -1379,7 +1384,7 @@ describe('Database Module', () => {
         expect(result).toBe(true);
         expect(mockQuery).toHaveBeenCalledTimes(2);
         expect(mockQuery).toHaveBeenCalledWith(
-          expect.stringContaining('UPDATE tasks SET project_id = NULL'),
+          expect.stringContaining('DELETE FROM tasks WHERE project_id = $1'),
           ['proj-1']
         );
         expect(mockQuery).toHaveBeenCalledWith(
@@ -1424,6 +1429,7 @@ describe('Database Module', () => {
             started_at: '2026-02-05T00:00:00Z',
             paused_at: null,
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1473,6 +1479,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: '2026-02-05T00:00:00Z',
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1522,6 +1529,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: null,
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1571,6 +1579,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: null,
             completed_at: null,
+            cancel_snapshot: null,
             canceled_at: '2026-02-05T00:00:00Z',
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
@@ -1620,6 +1629,7 @@ describe('Database Module', () => {
             started_at: '2026-02-01T00:00:00Z',
             paused_at: null,
             completed_at: '2026-02-05T00:00:00Z',
+            cancel_snapshot: null,
             canceled_at: null,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
