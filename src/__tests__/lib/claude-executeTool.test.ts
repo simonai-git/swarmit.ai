@@ -54,7 +54,7 @@ const mockContext = {
 
 describe('CLAUDE_CODE_TOOLS', () => {
   it('should have correct number of tools', () => {
-    expect(CLAUDE_CODE_TOOLS.length).toBe(9);
+    expect(CLAUDE_CODE_TOOLS.length).toBe(12);
   });
 
   it('should have all tools with PascalCase names except task management tools', () => {
@@ -68,6 +68,9 @@ describe('CLAUDE_CODE_TOOLS', () => {
     expect(toolNames).toContain('update_task');
     expect(toolNames).toContain('add_comment');
     expect(toolNames).toContain('task_complete');
+    expect(toolNames).toContain('create_task');
+    expect(toolNames).toContain('add_dependency');
+    expect(toolNames).toContain('list_project_tasks');
   });
 
   describe('Bash tool', () => {
