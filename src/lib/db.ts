@@ -121,7 +121,7 @@ async function initDb() {
       )
     `);
     
-    // Create default Simon agent if not exists
+    // Create default Simon agent if not exists (legacy fallback — seedDefaultAgents handles per-user agents)
     await client.query(`
       INSERT INTO agents (id, name, specialization, description, system_prompt, avatar_emoji, avatar_color)
       VALUES (
@@ -133,7 +133,7 @@ async function initDb() {
         '🦊',
         'from-orange-500 to-amber-500'
       )
-      ON CONFLICT (name) DO NOTHING
+      ON CONFLICT DO NOTHING
     `);
     
     // Create projects table
@@ -477,6 +477,18 @@ async function initDb() {
     `);
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_agents_user_email ON agents(user_email);
+    `);
+
+    // Migration: drop legacy global UNIQUE(name) to enable multi-tenancy
+    // Keep only the per-user UNIQUE(name, user_email) constraint
+    await client.query(`
+      ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_name_key;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE agents ADD CONSTRAINT agents_name_user_email_key UNIQUE(name, user_email);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$;
     `);
 
     // Create specializations table
@@ -2107,7 +2119,11 @@ export async function seedDefaultAgents(userEmail: string): Promise<void> {
     await pool.query(
       `INSERT INTO agents (id, name, specialization, description, avatar_emoji, avatar_color, user_email)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (name) DO NOTHING`,
+       ON CONFLICT (name, user_email) DO UPDATE SET
+         specialization = EXCLUDED.specialization,
+         description = EXCLUDED.description,
+         avatar_emoji = EXCLUDED.avatar_emoji,
+         avatar_color = EXCLUDED.avatar_color`,
       [id, agent.name, agent.specialization, agent.description, agent.emoji, agent.color, userEmail]
     );
   }
