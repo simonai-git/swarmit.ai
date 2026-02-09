@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllAgents, getActiveAgents, createAgent, Agent } from '@/lib/db';
+import { getAllAgents, getActiveAgents, createAgent, Agent, seedDefaultAgents } from '@/lib/db';
 import pool from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getServerSession } from 'next-auth';
@@ -53,11 +53,20 @@ async function computeAgentMetrics(): Promise<Record<string, { assigned: number;
 export async function GET(request: NextRequest) {
 
   try {
+    const session = await getServerSession();
+    const userEmail = session?.user?.email || 'default';
+
     const activeOnly = request.nextUrl.searchParams.get('active') === 'true';
     const specializationFilter = request.nextUrl.searchParams.get('specialization')?.toLowerCase();
     const availableOnly = request.nextUrl.searchParams.get('available') === 'true';
-    
-    let agents = activeOnly ? await getActiveAgents() : await getAllAgents();
+
+    let agents = activeOnly ? await getActiveAgents(userEmail) : await getAllAgents(userEmail);
+
+    // Auto-seed default agents on first access (adds Taylor, updates stale specializations)
+    if (agents.length < 8) {
+      await seedDefaultAgents(userEmail);
+      agents = activeOnly ? await getActiveAgents(userEmail) : await getAllAgents(userEmail);
+    }
     
     // Filter by specialization (case-insensitive partial match)
     if (specializationFilter) {

@@ -683,6 +683,14 @@ class AgentQueue {
           await createComment({ id: uuidv4(), task_id: taskId, author, content });
         },
         createTask: async (params: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }) => {
+          // Dedup: if a task with the same title already exists in this project, return its ID
+          const existing = await getTasksByProjectId(params.projectId);
+          const dup = existing.find(t => t.title === params.title);
+          if (dup) {
+            console.log(`[Agent] PM skipped duplicate task "${params.title}" (exists: ${dup.id.slice(0, 8)})`);
+            return { id: dup.id };
+          }
+
           const id = uuidv4();
           await createTask({
             id,
