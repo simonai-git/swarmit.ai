@@ -29,8 +29,17 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    
-    const agent = await updateAgent(id, body);
+
+    // Only pass valid Agent fields to updateAgent — reject unknown columns
+    const allowedFields = ['name', 'specialization', 'description', 'system_prompt', 'memory', 'avatar_emoji', 'avatar_color', 'is_active', 'requires_workflow'];
+    const updates: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (body[key] !== undefined) {
+        updates[key] = body[key];
+      }
+    }
+
+    const agent = await updateAgent(id, updates as Partial<typeof body>);
     
     if (!agent) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
