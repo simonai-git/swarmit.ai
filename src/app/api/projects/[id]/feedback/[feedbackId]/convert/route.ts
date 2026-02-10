@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { createTask, updateProjectFeedback, getProject } from '@/lib/db';
+import { createTask, updateProjectFeedback, getProject, getActiveAgents } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '@/lib/db';
 
@@ -62,13 +62,22 @@ export async function POST(
     if (feedback.type === 'bug') priority = 'high';
     if (feedback.type === 'question') priority = 'low';
     
+    // Determine default agent (first active agent for the user)
+    let defaultAssignee = body.assignee || null;
+    if (!defaultAssignee) {
+      const session2 = await getServerSession(authOptions);
+      const userEmail = session2?.user?.email || 'default';
+      const activeAgents = await getActiveAgents(userEmail);
+      defaultAssignee = activeAgents.length > 0 ? activeAgents[0].id : null;
+    }
+
     // Create task from feedback
     const task = await createTask({
       id: uuidv4(),
       title: body.title || `[${feedback.type.toUpperCase()}] ${feedback.title}`,
       description: body.description || `**From Feedback:**\n${feedback.content}\n\n**Reported by:** ${feedback.author}`,
       status: 'todo',
-      assignee: body.assignee || 'Simon', // Default to Simon for triage
+      assignee: defaultAssignee,
       priority: body.priority || priority,
       project_id: projectId,
       feedback_id: feedbackId,

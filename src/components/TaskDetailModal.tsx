@@ -63,19 +63,8 @@ const priorityConfig = {
   high: { label: 'High', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
 };
 
-const assigneeConfig: Record<string, { color: string; emoji: string }> = {
-  Bogdan: { color: 'from-blue-500 to-cyan-500', emoji: '👤' },
-  Simon: { color: 'from-orange-500 to-amber-500', emoji: '🦊' },
-  Sam: { color: 'from-purple-500 to-pink-500', emoji: '📋' },
-  Casey: { color: 'from-cyan-500 to-blue-500', emoji: '🎨' },
-  Riley: { color: 'from-emerald-500 to-teal-500', emoji: '⚙️' },
-  Jordan: { color: 'from-violet-500 to-purple-500', emoji: '🔧' },
-  Morgan: { color: 'from-rose-500 to-pink-500', emoji: '🤖' },
-  Alex: { color: 'from-amber-500 to-orange-500', emoji: '🧪' },
-};
-
-const defaultAssigneeConfig = { color: 'from-slate-500 to-slate-600', emoji: '🤖' };
-const unassignedConfig = { color: 'from-slate-600 to-slate-700', emoji: '❓' };
+const defaultAssigneeConfig = { color: 'from-slate-500 to-slate-600', emoji: '🤖', name: 'Unknown' };
+const unassignedConfig = { color: 'from-slate-600 to-slate-700', emoji: '❓', name: 'Unassigned' };
 
 // Compare due date (YYYY-MM-DD string) against today in local time
 function isDateOverdue(dueDateStr: string): boolean {
@@ -103,7 +92,10 @@ function getTodayString(): string {
 interface Agent {
   id: string;
   name: string;
-  role: string;
+  specialization: string;
+  avatar_emoji?: string;
+  avatar_color?: string;
+  role?: string;
   emoji?: string;
 }
 
@@ -491,12 +483,22 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
               <span className={`inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border ${priority.color}`}>
                 {priority.label}
               </span>
-              <span className="flex items-center gap-1.5 text-white/50">
-                <span className={`w-5 h-5 rounded-full bg-gradient-to-br ${(task.assignee ? (assigneeConfig[task.assignee] || defaultAssigneeConfig) : unassignedConfig).color} flex items-center justify-center text-[10px] shadow-sm`}>
-                  {(task.assignee ? (assigneeConfig[task.assignee] || defaultAssigneeConfig) : unassignedConfig).emoji}
-                </span>
-                <span className="text-white/60">{task.assignee || 'Unassigned'}</span>
-              </span>
+              {(() => {
+                const agentRecord = task.assignee ? agents.find((a: Agent) => a.id === task.assignee) : null;
+                const avatarColor = agentRecord?.avatar_color || defaultAssigneeConfig.color;
+                const avatarEmoji = agentRecord?.avatar_emoji || agentRecord?.emoji || defaultAssigneeConfig.emoji;
+                const displayName = agentRecord?.name || (task.assignee ? defaultAssigneeConfig.name : unassignedConfig.name);
+                const displayColor = task.assignee ? avatarColor : unassignedConfig.color;
+                const displayEmoji = task.assignee ? avatarEmoji : unassignedConfig.emoji;
+                return (
+                  <span className="flex items-center gap-1.5 text-white/50">
+                    <span className={`w-5 h-5 rounded-full bg-gradient-to-br ${displayColor} flex items-center justify-center text-[10px] shadow-sm`}>
+                      {displayEmoji}
+                    </span>
+                    <span className="text-white/60">{displayName}</span>
+                  </span>
+                );
+              })()}
               {task.due_date && (
                 <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-400' : 'text-white/40'}`}>
                   📅 {(() => {
@@ -804,32 +806,20 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                     <span>❓</span>
                     <span className="text-xs sm:text-sm font-medium">Unassigned</span>
                   </button>
-                  {/* Bogdan (owner) */}
-                  <button
-                    onClick={() => handleFieldUpdate('assignee', 'Bogdan')}
-                    className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border transition-all ${
-                      task.assignee === 'Bogdan'
-                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
-                        : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
-                    }`}
-                  >
-                    <span>👤</span>
-                    <span className="text-xs sm:text-sm font-medium">Bogdan</span>
-                  </button>
                   {/* AI Agents */}
                   {agents.map((agent) => {
-                    const isActive = task.assignee === agent.name;
+                    const isActive = task.assignee === agent.id;
                     return (
                       <button
                         key={agent.id}
-                        onClick={() => handleFieldUpdate('assignee', agent.name)}
+                        onClick={() => handleFieldUpdate('assignee', agent.id)}
                         className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border transition-all ${
                           isActive
                             ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
                             : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
                         }`}
                       >
-                        <span>{agent.emoji || '🤖'}</span>
+                        <span>{agent.avatar_emoji || agent.emoji || '🤖'}</span>
                         <span className="text-xs sm:text-sm font-medium">{agent.name}</span>
                       </button>
                     );

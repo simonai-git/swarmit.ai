@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents, getAgentWorkflow, getWorkflowVersion, appendWorkflowEvent } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgent, getAgentSkillContents, getAgentWorkflow, getWorkflowVersion, appendWorkflowEvent, getAgentTypeFromSpecialization } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
@@ -547,7 +547,7 @@ class AgentQueue {
 
       // Inject assigned skill content into agent context
       {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
+        const agentRecord = task.assignee ? await getAgent(task.assignee) : null;
         if (agentRecord) {
           try {
             const skillContents = await getAgentSkillContents(agentRecord.id);
@@ -579,7 +579,7 @@ class AgentQueue {
       // Inject workflow instructions if agent has an assigned workflow
       let workflowRunActive = false;
       if (process.env.FEATURE_WORKFLOWS === 'true') {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
+        const agentRecord = task.assignee ? await getAgent(task.assignee) : null;
         if (agentRecord) {
           try {
             const agentWorkflow = await getAgentWorkflow(agentRecord.id);
@@ -966,7 +966,7 @@ class AgentQueue {
                     title: pmPlanTitle,
                     description: `Create all tasks needed to deliver: ${project.title}\n\nRefer to the PRD in the project context for detailed requirements.`,
                     status: 'todo',
-                    assignee: project.project_manager || 'Taylor',
+                    assignee: project.project_manager || null,
                     priority: 'high',
                     project_id: task.project_id,
                     user_email: task.user_email,
@@ -1046,7 +1046,7 @@ class AgentQueue {
 
       // Save lessons to Supermemory
       if (result.success && process.env.SUPERMEMORY_API_KEY) {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
+        const agentRecord = task.assignee ? await getAgent(task.assignee) : null;
         if (agentRecord) {
           try {
             const memContent = [
@@ -1153,7 +1153,8 @@ class AgentQueue {
       }
 
       // Deploy to Railway for devops-assigned tasks after successful GitHub push
-      if (result.success && repoName && task.assignee === 'Jordan') {
+      const isDevOps = task.assignee ? (await getAgent(task.assignee))?.specialization.toLowerCase().includes('devops') : false;
+      if (result.success && repoName && isDevOps) {
         try {
           const railwayResult = await deployToRailway(job.userEmail || '', repoName, job.taskId, task.title);
           if (railwayResult) {

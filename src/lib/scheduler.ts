@@ -1,5 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject, getAgentByName, getAgentWorkflow } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject, getAgent, getAgentWorkflow, getAgentTypeFromSpecialization } from './db';
 import { agentQueue } from './agent-queue';
 import { taskLogBuffer } from './task-log-buffer';
 
@@ -34,16 +34,17 @@ function getAgentTypeForStatus(status: string): 'developer' | 'qa' | 'reviewer' 
 }
 
 /**
- * Determine agent type based on task assignee, falling back to status-based.
- * Matches the mapping in task-lifecycle.ts onTaskCreated.
+ * Determine agent type based on task assignee (agent ID), falling back to status-based.
+ * Looks up the agent by ID and derives type from specialization.
  */
-function getAgentTypeForTask(task: Task): 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' {
-  if (task.assignee === 'Sam') return 'product_manager';
-  if (task.assignee === 'Taylor') return 'pm';
-  if (task.assignee === 'Riley') return 'qa';
-  if (task.assignee === 'Simon') return 'reviewer';
-  if (task.assignee === 'Jordan') return 'devops';
-  // Fall back to status-based for non-assigned or developer tasks
+async function getAgentTypeForTask(task: Task): Promise<'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager'> {
+  if (task.assignee) {
+    const agent = await getAgent(task.assignee);
+    if (agent) {
+      return getAgentTypeFromSpecialization(agent.specialization);
+    }
+  }
+  // Fall back to status-based for non-assigned or unknown agents
   return getAgentTypeForStatus(task.status);
 }
 
@@ -162,7 +163,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
 
     // Stuck detection: check both windowed and lifetime metrics
     // Count only runs matching the agent type we'd spawn for this task
-    const expectedAgentType = getAgentTypeForTask(task);
+    const expectedAgentType = await getAgentTypeForTask(task);
     const recentRuns = await getAgentRunsByTask(task.id);
     const finishedRuns = recentRuns.filter(r =>
       ['completed', 'failed'].includes(r.status) && r.agent_type === expectedAgentType
@@ -203,7 +204,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
     // Gate: if the agent requires a workflow but has none assigned, skip
     if (process.env.FEATURE_WORKFLOWS === 'true' && task.assignee) {
       try {
-        const agent = await getAgentByName(task.assignee, userEmail);
+        const agent = await getAgent(task.assignee);
         if (agent?.requires_workflow) {
           const workflow = await getAgentWorkflow(agent.id);
           if (!workflow) {
@@ -227,7 +228,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
 
   for (const task of tasksToEnqueue) {
     try {
-      const agentType = getAgentTypeForTask(task);
+      const agentType = await getAgentTypeForTask(task);
       const priority = getPriorityValue(task.priority);
 
       console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent [${userEmail}]`);

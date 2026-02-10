@@ -36,7 +36,7 @@ const mockContext = {
     description: 'Test description',
     status: 'todo' as const,
     priority: 'high' as const,
-    assignee: 'Alex',
+    assignee: 'agent-alex',
   },
   project: null,
   recentComments: [],
@@ -54,7 +54,7 @@ const mockContext = {
 
 describe('CLAUDE_CODE_TOOLS', () => {
   it('should have correct number of tools', () => {
-    expect(CLAUDE_CODE_TOOLS.length).toBe(13);
+    expect(CLAUDE_CODE_TOOLS.length).toBe(14);
   });
 
   it('should have all tools with PascalCase names except task management tools', () => {
@@ -71,6 +71,7 @@ describe('CLAUDE_CODE_TOOLS', () => {
     expect(toolNames).toContain('create_task');
     expect(toolNames).toContain('add_dependency');
     expect(toolNames).toContain('list_project_tasks');
+    expect(toolNames).toContain('list_available_agents');
     expect(toolNames).toContain('save_prd');
   });
 

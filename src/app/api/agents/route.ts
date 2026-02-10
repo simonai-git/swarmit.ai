@@ -79,21 +79,21 @@ export async function GET(request: NextRequest) {
     // Compute metrics from tasks
     const metrics = await computeAgentMetrics();
     
-    // Add metrics to each agent
+    // Add metrics to each agent (tasks now store agent IDs in assignee column)
     let agentsWithMetrics: AgentWithMetrics[] = agents.map(agent => ({
       ...agent,
-      assigned_count: metrics[agent.name]?.assigned || 0,
-      worked_count: metrics[agent.name]?.worked || 0,
-      completed_count: metrics[agent.name]?.completed || 0,
+      assigned_count: metrics[agent.id]?.assigned || 0,
+      worked_count: metrics[agent.id]?.worked || 0,
+      completed_count: metrics[agent.id]?.completed || 0,
     }));
-    
+
     // Filter for available agents (no in_progress tasks assigned to them)
     if (availableOnly) {
       const inProgressResult = await pool.query(
         "SELECT DISTINCT assignee FROM tasks WHERE status = 'in_progress'"
       );
       const busyAgents = new Set(inProgressResult.rows.map(r => r.assignee));
-      agentsWithMetrics = agentsWithMetrics.filter(agent => !busyAgents.has(agent.name));
+      agentsWithMetrics = agentsWithMetrics.filter(agent => !busyAgents.has(agent.id));
     }
     
     return NextResponse.json(agentsWithMetrics);

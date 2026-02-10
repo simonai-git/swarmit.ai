@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { startScheduler, stopScheduler, getSchedulerStatus, forceSchedulerTick } from '@/lib/scheduler';
-import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, getProject } from '@/lib/db';
+import { getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, getProject, getAgent, getAgentTypeFromSpecialization } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 import cron from 'node-cron';
 
@@ -21,6 +21,17 @@ vi.mock('@/lib/db', () => ({
   assignOrphanedTasks: vi.fn(),
   cleanupOldTaskLogs: vi.fn().mockResolvedValue(0),
   getProject: vi.fn(),
+  getAgent: vi.fn(() => Promise.resolve(null)),
+  getAgentTypeFromSpecialization: vi.fn((spec: string) => {
+    const s = spec.toLowerCase();
+    if (s.includes('qa') || s.includes('test')) return 'qa';
+    if (s.includes('review')) return 'reviewer';
+    if (s.includes('devops')) return 'devops';
+    if (s.includes('product manager')) return 'product_manager';
+    if (s.includes('project manager')) return 'pm';
+    return 'developer';
+  }),
+  getAgentWorkflow: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -1208,7 +1219,7 @@ describe('scheduler', () => {
             id: 'alice-task',
             title: 'Alice Task',
             status: 'todo',
-            assignee: 'Alex',
+            assignee: 'agent-alex',
             priority: 'high',
             description: 'Test',
             user_email: 'alice@test.com',
@@ -1220,7 +1231,7 @@ describe('scheduler', () => {
           id: 'bob-task',
           title: 'Bob Task',
           status: 'in_review',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'low',
           description: 'Test',
           user_email: 'bob@test.com',
@@ -1308,7 +1319,7 @@ describe('scheduler', () => {
           id: 'task-1',
           title: 'Test Task',
           status: 'todo',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'medium',
           description: 'Test',
           user_email: 'user@test.com',
@@ -1414,7 +1425,7 @@ describe('scheduler', () => {
           id: 'stale-task',
           title: 'Stale Task',
           status: 'in_progress',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'medium',
           description: 'Test',
           current_run_id: 'run-dead-123',
@@ -1450,7 +1461,7 @@ describe('scheduler', () => {
           id: 'active-task',
           title: 'Active Task',
           status: 'in_progress',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'medium',
           description: 'Test',
           current_run_id: 'run-alive-123',
@@ -1485,7 +1496,7 @@ describe('scheduler', () => {
           id: 'recent-task',
           title: 'Recent Task',
           status: 'in_progress',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'medium',
           description: 'Test',
           current_run_id: 'run-maybe-123',
@@ -1524,7 +1535,7 @@ describe('scheduler', () => {
           id: 'ok-task',
           title: 'OK Task',
           status: 'todo',
-          assignee: 'Simon',
+          assignee: 'agent-simon',
           priority: 'medium',
           description: 'Test',
           user_email: 'ok@test.com',

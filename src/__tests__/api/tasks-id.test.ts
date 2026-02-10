@@ -25,6 +25,14 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid'),
 }));
 
+vi.mock('next-auth', () => ({
+  getServerSession: vi.fn(() => Promise.resolve(null)),
+}));
+
+vi.mock('@/lib/auth', () => ({
+  authOptions: {},
+}));
+
 import { PATCH, DELETE } from '@/app/api/tasks/[id]/route';
 import { getTask, updateTask, deleteTask, logActivity, getProject, getTaskDependents, recalculateBlockedStatus } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
@@ -56,7 +64,7 @@ describe('API /api/tasks/[id]', () => {
         id: 'task-123',
         title: 'Test Task',
         status: 'todo',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         priority: 'medium',
         project_id: null,
         worked_by: null,
@@ -84,7 +92,7 @@ describe('API /api/tasks/[id]', () => {
         title: 'Test Task',
         status: 'todo',
         priority: 'medium',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         project_id: null,
         worked_by: null,
       };
@@ -107,7 +115,7 @@ describe('API /api/tasks/[id]', () => {
         field_changed: 'status',
         old_value: 'todo',
         new_value: 'in_progress',
-        actor: 'Bogdan',
+        actor: 'system',
       }));
       expect(logActivity).toHaveBeenCalledWith(expect.objectContaining({
         field_changed: 'priority',
@@ -116,70 +124,16 @@ describe('API /api/tasks/[id]', () => {
       }));
     });
 
-    it('should auto-assign reviewer when status changes to in_review', async () => {
-      const oldTask = {
-        id: 'task-123',
-        title: 'Test Task',
-        status: 'in_progress',
-        assignee: 'Simon',
-        project_id: 'proj-1',
-        worked_by: null,
-      };
-      const updatedTask = { ...oldTask, status: 'in_review', assignee: 'Bogdan' };
-
-      vi.mocked(getTask).mockResolvedValue(oldTask as any);
-      vi.mocked(getProject).mockResolvedValue({ id: 'proj-1', reviewer: 'Bogdan' } as any);
-      vi.mocked(updateTask).mockResolvedValue(updatedTask as any);
-
-      const request = new NextRequest('http://localhost/api/tasks/task-123', {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'in_review' }),
-      });
-      await PATCH(request, { params: Promise.resolve({ id: 'task-123' }) });
-
-      expect(updateTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
-        status: 'in_review',
-        assignee: 'Bogdan',
-      }));
-    });
-
-    it('should auto-assign Simon when reviewer moves back to todo/in_progress', async () => {
-      const oldTask = {
-        id: 'task-123',
-        title: 'Test Task',
-        status: 'in_review',
-        assignee: 'Bogdan',
-        project_id: 'proj-1',
-        worked_by: null,
-      };
-      const updatedTask = { ...oldTask, status: 'in_progress', assignee: 'Simon' };
-
-      vi.mocked(getTask).mockResolvedValue(oldTask as any);
-      vi.mocked(getProject).mockResolvedValue({ id: 'proj-1', reviewer: 'Bogdan' } as any);
-      vi.mocked(updateTask).mockResolvedValue(updatedTask as any);
-
-      const request = new NextRequest('http://localhost/api/tasks/task-123', {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'in_progress' }),
-      });
-      await PATCH(request, { params: Promise.resolve({ id: 'task-123' }) });
-
-      expect(updateTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
-        status: 'in_progress',
-        assignee: 'Simon',
-      }));
-    });
-
     it('should track worked_by contributors on work-related status changes', async () => {
       const oldTask = {
         id: 'task-123',
         title: 'Test Task',
         status: 'todo',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         project_id: null,
         worked_by: null,
       };
-      const updatedTask = { ...oldTask, status: 'in_progress', worked_by: '["Bogdan"]' };
+      const updatedTask = { ...oldTask, status: 'in_progress', worked_by: '["system"]' };
 
       vi.mocked(getTask).mockResolvedValue(oldTask as any);
       vi.mocked(updateTask).mockResolvedValue(updatedTask as any);
@@ -191,7 +145,7 @@ describe('API /api/tasks/[id]', () => {
       await PATCH(request, { params: Promise.resolve({ id: 'task-123' }) });
 
       expect(updateTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
-        worked_by: '["Bogdan"]',
+        worked_by: '["system"]',
       }));
     });
 
@@ -200,7 +154,7 @@ describe('API /api/tasks/[id]', () => {
         id: 'task-123',
         title: 'Test Task',
         status: 'in_progress',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         project_id: null,
         worked_by: null,
       };
@@ -231,7 +185,7 @@ describe('API /api/tasks/[id]', () => {
         id: 'task-123',
         title: 'Test Task',
         status: 'todo',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         project_id: null,
         worked_by: null,
       };

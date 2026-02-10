@@ -650,6 +650,26 @@ async function initDb() {
       END $$;
     `);
 
+    // Migration: convert name-based assignees to agent IDs
+    // Tasks: assignee column (e.g. 'Simon' → 'agent-simon-<uuid>')
+    await client.query(`
+      UPDATE tasks t SET assignee = a.id FROM agents a
+      WHERE t.assignee = a.name AND t.assignee NOT LIKE 'agent-%'
+      AND a.user_email = COALESCE(t.user_email, 'default');
+    `);
+
+    // Projects: product_manager and project_manager columns
+    await client.query(`
+      UPDATE projects p SET product_manager = a.id FROM agents a
+      WHERE p.product_manager = a.name AND p.product_manager NOT LIKE 'agent-%'
+      AND a.user_email = 'default';
+    `);
+    await client.query(`
+      UPDATE projects p SET project_manager = a.id FROM agents a
+      WHERE p.project_manager = a.name AND p.project_manager NOT LIKE 'agent-%'
+      AND a.user_email = 'default';
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -998,6 +1018,35 @@ export async function getAgentByName(name: string, userEmail?: string): Promise<
     return fallback.rows[0] || null;
   }
   const result = await pool.query('SELECT * FROM agents WHERE name = $1', [name]);
+  return result.rows[0] || null;
+}
+
+// Derive agent type from specialization string
+export function getAgentTypeFromSpecialization(specialization: string): 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' {
+  const s = specialization.toLowerCase();
+  if (s.includes('product manager') || s.includes('product management')) return 'product_manager';
+  if (s.includes('project manager') || s.includes('project management')) return 'pm';
+  if (s.includes('qa') || s.includes('test') || s.includes('quality')) return 'qa';
+  if (s.includes('devops') || s.includes('infrastructure') || s.includes('deployment')) return 'devops';
+  if (s.includes('review') || s.includes('code review')) return 'reviewer';
+  return 'developer';
+}
+
+// Get all active agents for a user (used by PM tools)
+export async function getAllActiveAgents(userEmail: string): Promise<Agent[]> {
+  const result = await pool.query(
+    'SELECT * FROM agents WHERE is_active = TRUE AND user_email = $1 ORDER BY name ASC',
+    [userEmail]
+  );
+  return result.rows;
+}
+
+// Get agent by specialization keyword (for auto-assignment fallback)
+export async function getAgentBySpecialization(keyword: string, userEmail: string): Promise<Agent | null> {
+  const result = await pool.query(
+    'SELECT * FROM agents WHERE LOWER(specialization) LIKE $1 AND user_email = $2 AND is_active = TRUE LIMIT 1',
+    [`%${keyword.toLowerCase()}%`, userEmail]
+  );
   return result.rows[0] || null;
 }
 

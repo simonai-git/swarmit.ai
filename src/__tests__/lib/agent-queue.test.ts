@@ -22,12 +22,13 @@ vi.mock('@/lib/db', () => ({
   deleteWorkspaceSnapshot: vi.fn().mockResolvedValue(true),
   claimTaskRun: vi.fn(),
   releaseTaskRun: vi.fn(),
-  getAgentByName: vi.fn(),
+  getAgent: vi.fn(),
+  getAgentTypeFromSpecialization: vi.fn(() => 'developer'),
   getAgentSkillContents: vi.fn(),
 }));
 
 import { getTodaySpend, getSpendByPeriod, saveAgentRun, getAgentRuns, getAgentRun, getDefaultNextStatus, agentQueue, cleanupTaskResources } from '@/lib/agent-queue';
-import { getAgentByName, getAgentSkillContents } from '@/lib/db';
+import { getAgent, getAgentTypeFromSpecialization, getAgentSkillContents } from '@/lib/db';
 import { searchAgentMemory, addAgentMemory } from '@/lib/supermemory';
 
 vi.mock('@/lib/claude', () => ({
@@ -685,7 +686,7 @@ describe('agent-queue', () => {
     // Tests for the memory content format written after successful agent run
 
     it('should format run summary correctly', () => {
-      const task = { title: 'Fix login bug', assignee: 'Alex' };
+      const task = { title: 'Fix login bug', assignee: 'agent-alex' };
       const job = { agentType: 'developer' };
       const result = { summary: 'Fixed the auth issue', filesChanged: ['auth.ts', 'login.ts'], error: undefined };
 
@@ -698,7 +699,7 @@ describe('agent-queue', () => {
       ].filter(Boolean).join('\n');
 
       expect(memContent).toContain('## Run Summary for Task: Fix login bug');
-      expect(memContent).toContain('Agent: Alex (developer)');
+      expect(memContent).toContain('Agent: agent-alex (developer)');
       expect(memContent).toContain('Result: Fixed the auth issue');
       expect(memContent).toContain('Files changed: auth.ts, login.ts');
       expect(memContent).not.toContain('Error:');
@@ -724,9 +725,9 @@ describe('agent-queue', () => {
   });
 
   describe('skill and memory mock setup', () => {
-    it('getAgentByName should be importable and mockable', () => {
-      expect(getAgentByName).toBeDefined();
-      expect(vi.isMockFunction(getAgentByName)).toBe(true);
+    it('getAgent should be importable and mockable', () => {
+      expect(getAgent).toBeDefined();
+      expect(vi.isMockFunction(getAgent)).toBe(true);
     });
 
     it('getAgentSkillContents should be importable and mockable', () => {

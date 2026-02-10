@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     // Auto-assign if no assignee specified
     let assignee = body.assignee;
     if (assignee === undefined || assignee === null) {
-      assignee = selectSpecialist({ title: body.title, description: body.description });
+      assignee = await selectSpecialist({ title: body.title, description: body.description }, userEmail || 'default');
     }
 
     const task = await createTask({

@@ -84,7 +84,7 @@ export async function PATCH(
             title: `[PRD] ${result.title}`,
             description: `Write a comprehensive PRD for: ${result.title}\n\n${projectContext}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
             status: 'todo',
-            assignee: result.product_manager || 'Sam',
+            assignee: result.product_manager || null,
             priority: 'high',
             project_id: id,
             user_email: userEmail,

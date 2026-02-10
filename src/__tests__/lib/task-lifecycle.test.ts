@@ -13,12 +13,25 @@ vi.mock('@/lib/agent-queue', () => ({
   },
 }));
 
-// Mock the db module  
+// Mock the db module
 vi.mock('@/lib/db', () => ({
   getTask: vi.fn(),
   updateTask: mockUpdateTask,
+  getAgent: vi.fn(),
+  getActiveAgents: vi.fn(),
+  getAgentBySpecialization: vi.fn(),
+  getAgentTypeFromSpecialization: vi.fn((spec: string) => {
+    const s = spec.toLowerCase();
+    if (s.includes('product manager')) return 'product_manager';
+    if (s.includes('project manager')) return 'pm';
+    if (s.includes('qa') || s.includes('test')) return 'qa';
+    if (s.includes('devops')) return 'devops';
+    if (s.includes('review')) return 'reviewer';
+    return 'developer';
+  }),
 }));
 
+import { getAgent, getAgentBySpecialization, getActiveAgents } from '@/lib/db';
 import {
   detectSpecialization,
   selectSpecialist,
@@ -42,6 +55,38 @@ describe('task-lifecycle', () => {
       autoSpawnOnReview: true,
       autoConvertFeedback: true,
     });
+
+    // Mock getAgent to return agent fixtures by ID
+    vi.mocked(getAgent).mockImplementation(async (id: string) => {
+      const agents: Record<string, any> = {
+        'agent-simon': { id: 'agent-simon', name: 'Simon', specialization: 'Code Reviewer' },
+        'agent-alex': { id: 'agent-alex', name: 'Alex', specialization: 'Frontend Developer' },
+        'agent-morgan': { id: 'agent-morgan', name: 'Morgan', specialization: 'Backend Developer' },
+        'agent-riley': { id: 'agent-riley', name: 'Riley', specialization: 'QA/Testing' },
+        'agent-jordan': { id: 'agent-jordan', name: 'Jordan', specialization: 'DevOps Engineer' },
+        'agent-casey': { id: 'agent-casey', name: 'Casey', specialization: 'AI Engineer' },
+        'agent-sam': { id: 'agent-sam', name: 'Sam', specialization: 'Product Manager' },
+        'agent-taylor': { id: 'agent-taylor', name: 'Taylor', specialization: 'Project Manager' },
+      };
+      return agents[id] || null;
+    });
+
+    // Mock getAgentBySpecialization for selectSpecialist
+    vi.mocked(getAgentBySpecialization).mockImplementation(async (keyword: string) => {
+      const map: Record<string, any> = {
+        'frontend': { id: 'agent-alex', name: 'Alex', specialization: 'Frontend Developer' },
+        'backend': { id: 'agent-morgan', name: 'Morgan', specialization: 'Backend Developer' },
+        'devops': { id: 'agent-jordan', name: 'Jordan', specialization: 'DevOps Engineer' },
+        'qa': { id: 'agent-riley', name: 'Riley', specialization: 'QA/Testing' },
+        'ai': { id: 'agent-casey', name: 'Casey', specialization: 'AI Engineer' },
+      };
+      return map[keyword] || null;
+    });
+
+    // Mock getActiveAgents for selectSpecialist fallback
+    vi.mocked(getActiveAgents).mockResolvedValue([
+      { id: 'agent-simon', name: 'Simon', specialization: 'Full Stack Developer' } as any,
+    ]);
   });
 
   describe('detectSpecialization', () => {
@@ -284,32 +329,32 @@ describe('task-lifecycle', () => {
   });
 
   describe('selectSpecialist', () => {
-    it('should return Alex for frontend tasks', () => {
-      expect(selectSpecialist({ title: 'Fix button UI' })).toBe('Alex');
+    it('should return Alex agent ID for frontend tasks', async () => {
+      expect(await selectSpecialist({ title: 'Fix button UI' }, 'test@test.com')).toBe('agent-alex');
     });
 
-    it('should return Morgan for backend tasks', () => {
-      expect(selectSpecialist({ title: 'Create API endpoint' })).toBe('Morgan');
+    it('should return Morgan agent ID for backend tasks', async () => {
+      expect(await selectSpecialist({ title: 'Create API endpoint' }, 'test@test.com')).toBe('agent-morgan');
     });
 
-    it('should return Jordan for devops tasks', () => {
-      expect(selectSpecialist({ title: 'Deploy to Railway' })).toBe('Jordan');
+    it('should return Jordan agent ID for devops tasks', async () => {
+      expect(await selectSpecialist({ title: 'Deploy to Railway' }, 'test@test.com')).toBe('agent-jordan');
     });
 
-    it('should return Riley for QA tasks', () => {
-      expect(selectSpecialist({ title: 'Test login flow' })).toBe('Riley');
+    it('should return Riley agent ID for QA tasks', async () => {
+      expect(await selectSpecialist({ title: 'Test login flow' }, 'test@test.com')).toBe('agent-riley');
     });
 
-    it('should return Casey for AI tasks', () => {
-      expect(selectSpecialist({ title: 'Update LLM prompt' })).toBe('Casey');
+    it('should return Casey agent ID for AI tasks', async () => {
+      expect(await selectSpecialist({ title: 'Update LLM prompt' }, 'test@test.com')).toBe('agent-casey');
     });
 
-    it('should return Simon for generic tasks', () => {
-      expect(selectSpecialist({ title: 'Update documentation' })).toBe('Simon');
+    it('should return Simon agent ID for generic tasks', async () => {
+      expect(await selectSpecialist({ title: 'Update documentation' }, 'test@test.com')).toBe('agent-simon');
     });
 
-    it('should handle empty title', () => {
-      expect(selectSpecialist({ title: '' })).toBe('Simon');
+    it('should handle empty title', async () => {
+      expect(await selectSpecialist({ title: '' }, 'test@test.com')).toBe('agent-simon');
     });
   });
 
@@ -374,9 +419,9 @@ describe('task-lifecycle', () => {
     });
 
     it('should not auto-assign when assignee exists', async () => {
-      const taskWithAssignee = { ...mockTask, assignee: 'Alex' };
+      const taskWithAssignee = { ...mockTask, assignee: 'agent-alex' };
       await onTaskCreated(taskWithAssignee as any);
-      
+
       expect(mockUpdateTask).not.toHaveBeenCalled();
     });
 
@@ -433,7 +478,7 @@ describe('task-lifecycle', () => {
     });
 
     it('should enqueue product_manager agent for Sam-assigned tasks', async () => {
-      const samTask = { ...mockTask, assignee: 'Sam' };
+      const samTask = { ...mockTask, assignee: 'agent-sam' };
       await onTaskCreated(samTask as any);
 
       expect(mockEnqueue).toHaveBeenCalledWith(
@@ -442,7 +487,7 @@ describe('task-lifecycle', () => {
     });
 
     it('should enqueue pm agent for Taylor-assigned tasks', async () => {
-      const taylorTask = { ...mockTask, assignee: 'Taylor' };
+      const taylorTask = { ...mockTask, assignee: 'agent-taylor' };
       await onTaskCreated(taylorTask as any);
 
       expect(mockEnqueue).toHaveBeenCalledWith(
@@ -520,37 +565,37 @@ describe('task-lifecycle', () => {
     };
 
     it('should enqueue agent for in_progress task reassignment', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Alex');
-      
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-alex');
+
       expect(mockEnqueue).toHaveBeenCalled();
     });
 
     it('should use developer type for most agents', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Alex');
-      
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-alex');
+
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'developer' })
       );
     });
 
     it('should use qa type for Riley', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Riley');
-      
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-riley');
+
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'qa' })
       );
     });
 
     it('should use reviewer type for Simon', async () => {
-      await onTaskAssigned(mockTask as any, 'Alex', 'Simon');
-      
+      await onTaskAssigned(mockTask as any, 'agent-alex', 'agent-simon');
+
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'reviewer' })
       );
     });
 
     it('should use product_manager type for Sam', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Sam');
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-sam');
 
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'product_manager' })
@@ -558,7 +603,7 @@ describe('task-lifecycle', () => {
     });
 
     it('should use pm type for Taylor', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Taylor');
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-taylor');
 
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'pm' })
@@ -566,7 +611,7 @@ describe('task-lifecycle', () => {
     });
 
     it('should use devops type for Jordan', async () => {
-      await onTaskAssigned(mockTask as any, 'Simon', 'Jordan');
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-jordan');
 
       expect(mockEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({ agentType: 'devops' })
@@ -575,15 +620,15 @@ describe('task-lifecycle', () => {
 
     it('should not enqueue for non-in_progress tasks', async () => {
       const todoTask = { ...mockTask, status: 'todo' };
-      await onTaskAssigned(todoTask as any, 'Simon', 'Alex');
-      
+      await onTaskAssigned(todoTask as any, 'agent-simon', 'agent-alex');
+
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
     it('should not do anything when disabled', async () => {
       setAutomationSettings({ enabled: false });
-      await onTaskAssigned(mockTask as any, 'Simon', 'Alex');
-      
+      await onTaskAssigned(mockTask as any, 'agent-simon', 'agent-alex');
+
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
   });
@@ -615,7 +660,7 @@ describe('task-lifecycle', () => {
       const inProgressTask = { ...mockTask, status: 'in_progress' };
       mockEnqueue.mockRejectedValueOnce(new Error('Redis connection refused'));
 
-      await expect(onTaskAssigned(inProgressTask as any, 'Simon', 'Alex')).rejects.toThrow('Redis connection refused');
+      await expect(onTaskAssigned(inProgressTask as any, 'agent-simon', 'agent-alex')).rejects.toThrow('Redis connection refused');
     });
   });
 

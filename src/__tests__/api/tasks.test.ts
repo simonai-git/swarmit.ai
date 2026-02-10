@@ -19,7 +19,7 @@ vi.mock('@/lib/webhook', () => ({
 
 vi.mock('@/lib/task-lifecycle', () => ({
   onTaskCreated: vi.fn(() => Promise.resolve()),
-  selectSpecialist: vi.fn(() => 'Simon'),
+  selectSpecialist: vi.fn(() => Promise.resolve('agent-simon')),
 }));
 
 vi.mock('uuid', () => ({
@@ -108,7 +108,7 @@ describe('API /api/tasks', () => {
         id: 'test-uuid-123',
         title: 'New Task',
         status: 'todo',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         priority: 'medium',
       };
       vi.mocked(createTask).mockResolvedValue(newTask as any);
@@ -130,7 +130,7 @@ describe('API /api/tasks', () => {
         id: 'test-uuid-123',
         title: 'Fix button CSS',
         status: 'todo',
-        assignee: 'Simon',
+        assignee: 'agent-simon',
         priority: 'medium',
       };
       vi.mocked(createTask).mockResolvedValue(newTask as any);
@@ -143,7 +143,7 @@ describe('API /api/tasks', () => {
 
       expect(createTask).toHaveBeenCalledWith(
         expect.objectContaining({
-          assignee: 'Simon',
+          assignee: 'agent-simon',
         })
       );
     });

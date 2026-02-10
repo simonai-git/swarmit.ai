@@ -5,6 +5,13 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Task } from '@/lib/db';
 
+interface AgentInfo {
+  id: string;
+  name: string;
+  avatar_emoji: string;
+  avatar_color: string;
+}
+
 interface TaskCardProps {
   task: Task;
   onEdit: (task: Task) => void;
@@ -13,6 +20,7 @@ interface TaskCardProps {
   isActive?: boolean;
   projectName?: string;
   dependencyCount?: number;
+  agents?: AgentInfo[];
 }
 
 const priorityConfig = {
@@ -21,19 +29,8 @@ const priorityConfig = {
   high: { color: 'bg-red-500/20 text-red-400 border-red-500/30', dot: 'bg-red-400' },
 };
 
-const assigneeConfig: Record<string, { color: string; emoji: string }> = {
-  Bogdan: { color: 'from-blue-500 to-cyan-500', emoji: '👤' },
-  Simon: { color: 'from-orange-500 to-amber-500', emoji: '🦊' },
-  Sam: { color: 'from-purple-500 to-pink-500', emoji: '📋' },
-  Casey: { color: 'from-cyan-500 to-blue-500', emoji: '🎨' },
-  Riley: { color: 'from-emerald-500 to-teal-500', emoji: '⚙️' },
-  Jordan: { color: 'from-violet-500 to-purple-500', emoji: '🔧' },
-  Morgan: { color: 'from-rose-500 to-pink-500', emoji: '🤖' },
-  Alex: { color: 'from-amber-500 to-orange-500', emoji: '🧪' },
-};
-
-const defaultAssignee = { color: 'from-slate-500 to-slate-600', emoji: '👤' };
-const unassignedConfig = { color: 'from-slate-600 to-slate-700', emoji: '❓' };
+const defaultAssignee = { color: 'from-slate-500 to-slate-600', emoji: '👤', name: 'Unknown' };
+const unassignedConfig = { color: 'from-slate-600 to-slate-700', emoji: '❓', name: 'Unassigned' };
 
 // Compare due date (YYYY-MM-DD string) against today in local time
 function isDateOverdue(dueDateStr: string): boolean {
@@ -50,7 +47,7 @@ function isDateOverdue(dueDateStr: string): boolean {
 }
 
 // Memoized TaskCard to prevent re-renders when task data hasn't changed
-const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActive = false, projectName, dependencyCount = 0 }: TaskCardProps) {
+const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActive = false, projectName, dependencyCount = 0, agents = [] }: TaskCardProps) {
   // Defer overdue check to client-side only to avoid hydration mismatch
   // (server runs in UTC, client runs in user's local time)
   // Use useMemo instead of useState+useEffect to avoid cascading renders
@@ -76,7 +73,12 @@ const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActi
   };
 
   const priority = priorityConfig[task.priority];
-  const assignee = task.assignee ? (assigneeConfig[task.assignee] || defaultAssignee) : unassignedConfig;
+  const agentRecord = task.assignee ? agents.find(a => a.id === task.assignee) : null;
+  const assignee = task.assignee
+    ? (agentRecord
+        ? { color: agentRecord.avatar_color, emoji: agentRecord.avatar_emoji, name: agentRecord.name }
+        : defaultAssignee)
+    : unassignedConfig;
   const progress = task.progress || 0;
 
   return (
@@ -217,7 +219,7 @@ const TaskCard = memo(function TaskCard({ task, onEdit, onDelete, onView, isActi
             )}
           </div>
           <span className="text-[10px] sm:text-xs text-white/50 font-medium">
-            {task.assignee || 'Unassigned'}
+            {assignee.name}
           </span>
         </div>
       </div>

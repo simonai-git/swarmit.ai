@@ -9,6 +9,13 @@ import TaskCard from './TaskCard';
 const INITIAL_VISIBLE = 6;
 const LOAD_MORE_COUNT = 6;
 
+interface AgentInfo {
+  id: string;
+  name: string;
+  avatar_emoji: string;
+  avatar_color: string;
+}
+
 interface ColumnProps {
   id: string;
   title: string;
@@ -21,9 +28,10 @@ interface ColumnProps {
   activeTaskIds?: string[];
   projectNames?: Map<string, string>;
   dependencyCounts?: Record<string, number>;
+  agents?: AgentInfo[];
 }
 
-export default function Column({ id, title, icon, gradient, tasks, onEditTask, onDeleteTask, onViewTask, activeTaskIds = [], projectNames, dependencyCounts = {} }: ColumnProps) {
+export default function Column({ id, title, icon, gradient, tasks, onEditTask, onDeleteTask, onViewTask, activeTaskIds = [], projectNames, dependencyCounts = {}, agents = [] }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -97,6 +105,7 @@ export default function Column({ id, title, icon, gradient, tasks, onEditTask, o
                 isActive={activeTaskIds.includes(task.id)}
                 projectName={(task.project_id && projectNames?.get(task.project_id)) || "General Task"}
                 dependencyCount={dependencyCounts[task.id] || 0}
+                agents={agents}
               />
             </div>
           ))}
