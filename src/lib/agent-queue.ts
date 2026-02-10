@@ -547,7 +547,7 @@ class AgentQueue {
 
       // Inject assigned skill content into agent context
       {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
         if (agentRecord) {
           try {
             const skillContents = await getAgentSkillContents(agentRecord.id);
@@ -579,7 +579,7 @@ class AgentQueue {
       // Inject workflow instructions if agent has an assigned workflow
       let workflowRunActive = false;
       if (process.env.FEATURE_WORKFLOWS === 'true') {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
         if (agentRecord) {
           try {
             const agentWorkflow = await getAgentWorkflow(agentRecord.id);
@@ -1046,7 +1046,7 @@ class AgentQueue {
 
       // Save lessons to Supermemory
       if (result.success && process.env.SUPERMEMORY_API_KEY) {
-        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee, job.userEmail) : null;
         if (agentRecord) {
           try {
             const memContent = [

@@ -203,7 +203,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
     // Gate: if the agent requires a workflow but has none assigned, skip
     if (process.env.FEATURE_WORKFLOWS === 'true' && task.assignee) {
       try {
-        const agent = await getAgentByName(task.assignee);
+        const agent = await getAgentByName(task.assignee, userEmail);
         if (agent?.requires_workflow) {
           const workflow = await getAgentWorkflow(agent.id);
           if (!workflow) {

@@ -982,7 +982,21 @@ export async function getAgent(id: string): Promise<Agent | null> {
   return result.rows[0] || null;
 }
 
-export async function getAgentByName(name: string): Promise<Agent | null> {
+export async function getAgentByName(name: string, userEmail?: string): Promise<Agent | null> {
+  if (userEmail) {
+    // Try user-scoped agent first, fall back to default
+    const result = await pool.query(
+      'SELECT * FROM agents WHERE name = $1 AND user_email = $2',
+      [name, userEmail]
+    );
+    if (result.rows[0]) return result.rows[0];
+    // Fall back to default agents
+    const fallback = await pool.query(
+      "SELECT * FROM agents WHERE name = $1 AND user_email = 'default'",
+      [name]
+    );
+    return fallback.rows[0] || null;
+  }
   const result = await pool.query('SELECT * FROM agents WHERE name = $1', [name]);
   return result.rows[0] || null;
 }
