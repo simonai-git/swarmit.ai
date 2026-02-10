@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserEmail } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserId } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 // Verify API key
@@ -43,20 +43,20 @@ export async function POST(request: NextRequest) {
 
     // Step 1: Process each user's TODO tasks
     for (const user of users) {
-      const tasks = await getTasksByUserEmail(user.email);
+      const tasks = await getTasksByUserId(user.id);
       const todoTasks = tasks.filter(t => t.status === 'todo');
 
       // Get queue status scoped to this user to avoid double-enqueueing
       let queuedTaskIds = new Set<string>();
       try {
-        const queueStatus = await agentQueue.getStatus(user.email);
+        const queueStatus = await agentQueue.getStatus(user.id);
         queuedTaskIds = new Set(
           queueStatus.jobs
             .filter(j => ['pending', 'running'].includes(j.status))
             .map(j => j.taskId)
         );
       } catch (error) {
-        console.warn(`[Watcher] Failed to get queue status for ${user.email}:`, error instanceof Error ? error.message : String(error));
+        console.warn(`[Watcher] Failed to get queue status for ${user.id}:`, error instanceof Error ? error.message : String(error));
       }
 
       for (const task of todoTasks) {
@@ -70,11 +70,11 @@ export async function POST(request: NextRequest) {
             taskId: task.id,
             agentType: 'developer',
             priority,
-            tenantId: user.email,
-            userEmail: user.email,
+            tenantId: user.id,
+            userId: user.id,
           });
           results.enqueued++;
-          console.log(`[Watcher] Enqueued task ${task.id}: ${task.title} for ${user.email}`);
+          console.log(`[Watcher] Enqueued task ${task.id}: ${task.title} for ${user.id}`);
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           results.errors.push(`Failed to enqueue ${task.id}: ${msg}`);

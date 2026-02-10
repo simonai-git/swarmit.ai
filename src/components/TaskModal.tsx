@@ -50,11 +50,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
         }
       } catch (error) {
         console.error('Error fetching agents:', error);
-        // Fallback to default agents
-        setAgents([
-          { id: 'agent-simon', name: 'Simon', specialization: 'Full Stack Developer', avatar_emoji: '🦊', avatar_color: 'from-orange-500 to-amber-500', is_active: true },
-          { id: 'agent-bogdan', name: 'Bogdan', specialization: 'Project Manager', avatar_emoji: '👤', avatar_color: 'from-blue-500 to-purple-500', is_active: true },
-        ]);
       } finally {
         setLoadingAgents(false);
       }
@@ -93,7 +88,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     onClose();
   };
 
-  const selectedAgent = assignee ? agents.find(a => a.name === assignee) : null;
+  const selectedAgent = assignee ? agents.find(a => a.id === assignee) : null;
 
   return (
     <div className="fixed inset-0 modal-backdrop flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
@@ -178,9 +173,9 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
                   <button
                     key={agent.id}
                     type="button"
-                    onClick={() => setAssignee(agent.name)}
+                    onClick={() => setAssignee(agent.id)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                      assignee === agent.name
+                      assignee === agent.id
                         ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
                         : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'
                     }`}

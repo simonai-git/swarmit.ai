@@ -1,4 +1,4 @@
-import { Task, updateTask } from './db';
+import { Task, updateTask, getAgent, getActiveAgents, getAgentTypeFromSpecialization, getAgentBySpecialization } from './db';
 import { agentQueue } from './agent-queue';
 
 // Automation settings (can be configured via API)
@@ -40,24 +40,13 @@ const SPECIALIZATION_KEYWORDS: Record<string, string[]> = {
   ai: ['llm', 'claude', 'openai', 'prompt', 'agent', 'ml', 'model', 'embedding', 'vector'],
 };
 
-// Agent names by specialization
-const AGENT_BY_SPECIALIZATION: Record<string, string> = {
-  frontend: 'Alex',
-  backend: 'Morgan',
-  devops: 'Jordan',
-  qa: 'Riley',
-  ai: 'Casey',
-  pm: 'Sam',
-  default: 'Simon',
-};
-
 // Detect specialization from task title and description
 export function detectSpecialization(task: { title: string; description?: string | null }): string {
   const text = `${task.title} ${task.description || ''}`.toLowerCase();
-  
+
   let bestMatch = 'default';
   let bestScore = 0;
-  
+
   for (const [spec, keywords] of Object.entries(SPECIALIZATION_KEYWORDS)) {
     const score = keywords.filter(kw => text.includes(kw)).length;
     if (score > bestScore) {
@@ -65,14 +54,32 @@ export function detectSpecialization(task: { title: string; description?: string
       bestMatch = spec;
     }
   }
-  
+
   return bestMatch;
 }
 
-// Select specialist agent for a task
-export function selectSpecialist(task: { title: string; description?: string | null }): string {
+// Select specialist agent for a task — returns agent ID
+export async function selectSpecialist(task: { title: string; description?: string | null }, userId: string): Promise<string | null> {
   const specialization = detectSpecialization(task);
-  return AGENT_BY_SPECIALIZATION[specialization] || AGENT_BY_SPECIALIZATION.default;
+
+  // Try to find an agent whose specialization matches the detected keyword
+  if (specialization !== 'default') {
+    const agent = await getAgentBySpecialization(specialization, userId);
+    if (agent) return agent.id;
+  }
+
+  // Fall back to first active agent (general-purpose)
+  const activeAgents = await getActiveAgents(userId);
+  if (activeAgents.length > 0) {
+    // Prefer a "full stack" or general developer agent
+    const generalAgent = activeAgents.find(a =>
+      a.specialization.toLowerCase().includes('full stack') ||
+      a.specialization.toLowerCase().includes('general')
+    );
+    return generalAgent?.id || activeAgents[0].id;
+  }
+
+  return null;
 }
 
 // Priority mapping
@@ -83,35 +90,40 @@ const PRIORITY_MAP: Record<string, number> = {
 };
 
 // Hook: Called when a task is created
-export async function onTaskCreated(task: Task, userEmail?: string): Promise<void> {
+export async function onTaskCreated(task: Task, userId?: string): Promise<void> {
   if (!settings.enabled) return;
 
   console.log(`[Lifecycle] Task created: ${task.id} - ${task.title}`);
 
   // Auto-assign if no assignee
   if (settings.autoAssign && !task.assignee) {
-    const assignee = selectSpecialist(task);
-    await updateTask(task.id, { assignee });
-    console.log(`[Lifecycle] Auto-assigned to ${assignee}`);
+    const effectiveUserId = userId || task.user_id || 'default';
+    const assignee = await selectSpecialist(task, effectiveUserId);
+    if (assignee) {
+      await updateTask(task.id, { assignee });
+      console.log(`[Lifecycle] Auto-assigned to ${assignee}`);
+    }
   }
 
   // Auto-spawn agent for new tasks
   if (settings.autoSpawnOnCreate && task.status === 'todo') {
     const priority = PRIORITY_MAP[task.priority] || 5;
-    const effectiveUserEmail = userEmail || task.user_email || undefined;
-    // Map assignee to agent type for correct prompt selection
-    const agentType = task.assignee === 'Sam' ? 'product_manager'
-      : task.assignee === 'Taylor' ? 'pm'
-      : task.assignee === 'Riley' ? 'qa'
-      : task.assignee === 'Simon' ? 'reviewer'
-      : task.assignee === 'Jordan' ? 'devops'
-      : 'developer';
+    const effectiveUserId = userId || task.user_id || undefined;
+    // Derive agent type from the assigned agent's specialization
+    const assigneeId = task.assignee;
+    let agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' = 'developer';
+    if (assigneeId) {
+      const agent = await getAgent(assigneeId);
+      if (agent) {
+        agentType = getAgentTypeFromSpecialization(agent.specialization);
+      }
+    }
     await agentQueue.enqueue({
       taskId: task.id,
       agentType,
       priority,
-      tenantId: effectiveUserEmail,
-      userEmail: effectiveUserEmail,
+      tenantId: effectiveUserId,
+      userId: effectiveUserId,
     });
     console.log(`[Lifecycle] Enqueued ${agentType} agent for task ${task.id}`);
   }
@@ -122,14 +134,14 @@ export async function onTaskStatusChanged(
   task: Task,
   oldStatus: string,
   newStatus: string,
-  userEmail?: string
+  userId?: string
 ): Promise<void> {
   if (!settings.enabled) return;
 
   console.log(`[Lifecycle] Task ${task.id} status: ${oldStatus} → ${newStatus}`);
 
   const priority = PRIORITY_MAP[task.priority] || 5;
-  const effectiveUserEmail = userEmail || task.user_email || undefined;
+  const effectiveUserId = userId || task.user_id || undefined;
 
   // Spawn QA when moved to testing
   if (settings.autoSpawnOnTesting && newStatus === 'testing') {
@@ -137,8 +149,8 @@ export async function onTaskStatusChanged(
       taskId: task.id,
       agentType: 'qa',
       priority,
-      tenantId: effectiveUserEmail,
-      userEmail: effectiveUserEmail,
+      tenantId: effectiveUserId,
+      userId: effectiveUserId,
     });
     console.log(`[Lifecycle] Enqueued QA agent for task ${task.id}`);
   }
@@ -149,8 +161,8 @@ export async function onTaskStatusChanged(
       taskId: task.id,
       agentType: 'reviewer',
       priority,
-      tenantId: effectiveUserEmail,
-      userEmail: effectiveUserEmail,
+      tenantId: effectiveUserId,
+      userId: effectiveUserId,
     });
     console.log(`[Lifecycle] Enqueued reviewer agent for task ${task.id}`);
   }
@@ -178,7 +190,7 @@ export async function onTaskAssigned(
   task: Task,
   oldAssignee: string | null,
   newAssignee: string,
-  userEmail?: string
+  userId?: string
 ): Promise<void> {
   if (!settings.enabled) return;
 
@@ -186,21 +198,20 @@ export async function onTaskAssigned(
 
   // If task is in progress and assigned to a new agent, spawn that agent
   if (task.status === 'in_progress') {
-    const agentType = newAssignee === 'Sam' ? 'product_manager'
-      : newAssignee === 'Taylor' ? 'pm'
-      : newAssignee === 'Riley' ? 'qa'
-      : newAssignee === 'Simon' ? 'reviewer'
-      : newAssignee === 'Jordan' ? 'devops'
-      : 'developer';
+    let agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' = 'developer';
+    const agent = await getAgent(newAssignee);
+    if (agent) {
+      agentType = getAgentTypeFromSpecialization(agent.specialization);
+    }
 
     const priority = PRIORITY_MAP[task.priority] || 5;
-    const effectiveUserEmail = userEmail || task.user_email || undefined;
+    const effectiveUserId = userId || task.user_id || undefined;
     await agentQueue.enqueue({
       taskId: task.id,
       agentType,
       priority,
-      tenantId: effectiveUserEmail,
-      userEmail: effectiveUserEmail,
+      tenantId: effectiveUserId,
+      userId: effectiveUserId,
     });
     console.log(`[Lifecycle] Enqueued ${agentType} agent for reassigned task ${task.id}`);
   }

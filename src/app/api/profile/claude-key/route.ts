@@ -23,15 +23,16 @@ function decryptKey(encrypted: string): string {
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const client = await pool.connect();
     try {
       const result = await client.query(
-        'SELECT claude_api_key, claude_connected_at FROM user_profiles WHERE email = $1',
-        [session.user.email]
+        'SELECT claude_api_key, claude_connected_at FROM user_profiles WHERE id = $1',
+        [userId]
       );
 
       if (result.rows.length === 0 || !result.rows[0].claude_api_key) {
@@ -63,7 +64,8 @@ function isOATToken(key: string): boolean {
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -138,13 +140,10 @@ export async function POST(req: NextRequest) {
     try {
       // Upsert user profile with Claude API key
       await client.query(`
-        INSERT INTO user_profiles (email, claude_api_key, claude_connected_at, updated_at)
-        VALUES ($1, $2, $3, $3)
-        ON CONFLICT (email) DO UPDATE SET
-          claude_api_key = EXCLUDED.claude_api_key,
-          claude_connected_at = EXCLUDED.claude_connected_at,
-          updated_at = EXCLUDED.updated_at
-      `, [session.user.email, encryptedKey, now]);
+        UPDATE user_profiles
+        SET claude_api_key = $2, claude_connected_at = $3, updated_at = $3
+        WHERE id = $1
+      `, [userId, encryptedKey, now]);
 
       return NextResponse.json({
         success: true,
@@ -163,17 +162,18 @@ export async function POST(req: NextRequest) {
 export async function DELETE() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const client = await pool.connect();
     try {
       await client.query(`
-        UPDATE user_profiles 
+        UPDATE user_profiles
         SET claude_api_key = NULL, claude_connected_at = NULL, updated_at = NOW()
-        WHERE email = $1
-      `, [session.user.email]);
+        WHERE id = $1
+      `, [userId]);
 
       return NextResponse.json({ success: true });
     } finally {

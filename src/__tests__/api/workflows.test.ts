@@ -79,10 +79,10 @@ describe('API /api/workflows', () => {
 
     it('should return list of workflows', async () => {
       const mockWorkflows = [
-        { id: 'wf-1', name: 'Workflow 1', user_email: 'test@test.com' },
-        { id: 'wf-2', name: 'Workflow 2', user_email: 'test@test.com' },
+        { id: 'wf-1', name: 'Workflow 1', user_id: 'user-test-123' },
+        { id: 'wf-2', name: 'Workflow 2', user_id: 'user-test-123' },
       ];
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflowsByUser).mockResolvedValue(mockWorkflows as any);
 
       const request = new NextRequest('http://localhost/api/workflows');
@@ -93,11 +93,11 @@ describe('API /api/workflows', () => {
       expect(data).toHaveLength(2);
       expect(data[0].id).toBe('wf-1');
       expect(data[1].id).toBe('wf-2');
-      expect(getWorkflowsByUser).toHaveBeenCalledWith('test@test.com');
+      expect(getWorkflowsByUser).toHaveBeenCalledWith('user-test-123');
     });
 
     it('should return 500 on database error', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflowsByUser).mockRejectedValue(new Error('Database error'));
 
       const request = new NextRequest('http://localhost/api/workflows');
@@ -141,7 +141,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 400 when name is missing', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
 
       const request = new NextRequest('http://localhost/api/workflows', {
         method: 'POST',
@@ -155,7 +155,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 400 when name is not a string', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
 
       const request = new NextRequest('http://localhost/api/workflows', {
         method: 'POST',
@@ -175,9 +175,9 @@ describe('API /api/workflows', () => {
         description: 'A test workflow',
         nodes: [],
         edges: [],
-        user_email: 'test@test.com',
+        user_id: 'user-test-123',
       };
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(createWorkflow).mockResolvedValue(mockCreated as any);
 
       const request = new NextRequest('http://localhost/api/workflows', {
@@ -196,12 +196,12 @@ describe('API /api/workflows', () => {
         description: 'A test workflow',
         nodes: [],
         edges: [],
-        user_email: 'test@test.com',
+        user_id: 'user-test-123',
       });
     });
 
     it('should default description to null and nodes/edges to empty arrays', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(createWorkflow).mockResolvedValue({ id: 'test-uuid', name: 'Minimal' } as any);
 
       const request = new NextRequest('http://localhost/api/workflows', {
@@ -220,7 +220,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 on database error', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(createWorkflow).mockRejectedValue(new Error('Database error'));
 
       const request = new NextRequest('http://localhost/api/workflows', {
@@ -261,7 +261,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 404 when workflow not found', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(null);
 
       const request = new NextRequest('http://localhost/api/workflows/nonexistent');
@@ -273,11 +273,11 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 403 when workflow belongs to another user', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue({
         id: 'workflow-1',
         name: 'Other User Workflow',
-        user_email: 'other@test.com',
+        user_id: 'other-user-456',
       } as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1');
@@ -292,11 +292,11 @@ describe('API /api/workflows', () => {
       const mockWorkflow = {
         id: 'workflow-1',
         name: 'My Workflow',
-        user_email: 'test@test.com',
+        user_id: 'user-test-123',
         nodes: [],
         edges: [],
       };
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1');
@@ -312,14 +312,14 @@ describe('API /api/workflows', () => {
       const mockWorkflow = {
         id: 'workflow-1',
         name: 'My Workflow',
-        user_email: 'test@test.com',
+        user_id: 'user-test-123',
         nodes: [],
         edges: [],
       };
       const mockVersions = [{ id: 'v-1', version: 1 }];
       const mockAgents = [{ agent_id: 'agent-1', name: 'Agent A' }];
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(getWorkflowVersions).mockResolvedValue(mockVersions as any);
       vi.mocked(getAgentsByWorkflow).mockResolvedValue(mockAgents as any);
@@ -343,9 +343,9 @@ describe('API /api/workflows', () => {
       const mockWorkflow = {
         id: 'workflow-1',
         name: 'My Workflow',
-        user_email: 'test@test.com',
+        user_id: 'user-test-123',
       };
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1');
@@ -360,7 +360,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 on database error', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockRejectedValue(new Error('Database error'));
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1');
@@ -378,7 +378,7 @@ describe('API /api/workflows', () => {
     const mockWorkflow = {
       id: 'workflow-1',
       name: 'My Workflow',
-      user_email: 'test@test.com',
+      user_id: 'user-test-123',
       nodes: [
         { id: 'start-1', type: 'start', data: { label: 'Start' }, position: { x: 0, y: 0 } },
         { id: 'end-1', type: 'end', data: { label: 'End' }, position: { x: 200, y: 0 } },
@@ -418,7 +418,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 404 when workflow not found', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(null);
 
       const request = new NextRequest('http://localhost/api/workflows/nonexistent', {
@@ -433,10 +433,10 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 403 when workflow belongs to another user', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue({
         ...mockWorkflow,
-        user_email: 'other@test.com',
+        user_id: 'other-user-456',
       } as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1', {
@@ -454,7 +454,7 @@ describe('API /api/workflows', () => {
 
     it('should validate and publish workflow', async () => {
       const mockVersion = { id: 'v-1', version: 1, workflow_id: 'workflow-1' };
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(validateWorkflow).mockReturnValue({
         valid: true,
@@ -475,11 +475,11 @@ describe('API /api/workflows', () => {
       expect(data.warnings).toHaveLength(1);
       expect(data.warnings[0].message).toBe('Consider simplifying');
       expect(validateWorkflow).toHaveBeenCalledWith(mockWorkflow.nodes, mockWorkflow.edges);
-      expect(publishWorkflowVersion).toHaveBeenCalledWith('workflow-1', 'test@test.com');
+      expect(publishWorkflowVersion).toHaveBeenCalledWith('workflow-1', 'user-test-123');
     });
 
     it('should return 400 when publish validation fails', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(validateWorkflow).mockReturnValue({
         valid: false,
@@ -502,7 +502,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 when publishWorkflowVersion returns null', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(validateWorkflow).mockReturnValue({
         valid: true,
@@ -525,7 +525,7 @@ describe('API /api/workflows', () => {
     // ── action: validate ────────────────────────────────────────────
 
     it('should return dry-run validation result', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(validateWorkflow).mockReturnValue({
         valid: true,
@@ -552,7 +552,7 @@ describe('API /api/workflows', () => {
       const customNodes = [{ id: 'n-1', type: 'start', data: {}, position: { x: 0, y: 0 } }];
       const customEdges = [{ id: 'e-custom', source: 'n-1', target: 'n-2' }];
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(validateWorkflow).mockReturnValue({
         valid: false,
@@ -575,7 +575,7 @@ describe('API /api/workflows', () => {
     // ── regular update ──────────────────────────────────────────────
 
     it('should return 400 when lock_version is missing for regular update', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1', {
@@ -595,7 +595,7 @@ describe('API /api/workflows', () => {
         name: 'Updated Name',
         lock_version: 2,
       };
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(updateWorkflow).mockResolvedValue(updatedWorkflow as any);
 
@@ -617,7 +617,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 409 conflict when lock_version mismatches', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(updateWorkflow).mockResolvedValue(null as any);
 
@@ -633,7 +633,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 on database error', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockRejectedValue(new Error('Database error'));
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1', {
@@ -654,7 +654,7 @@ describe('API /api/workflows', () => {
     const mockWorkflow = {
       id: 'workflow-1',
       name: 'My Workflow',
-      user_email: 'test@test.com',
+      user_id: 'user-test-123',
     };
 
     it('should return 404 when feature flag is disabled', async () => {
@@ -684,7 +684,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 404 when workflow not found', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(null);
 
       const request = new NextRequest('http://localhost/api/workflows/nonexistent', {
@@ -698,10 +698,10 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 403 when workflow belongs to another user', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue({
         ...mockWorkflow,
-        user_email: 'other@test.com',
+        user_id: 'other-user-456',
       } as any);
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1', {
@@ -720,7 +720,7 @@ describe('API /api/workflows', () => {
         { agent_id: 'agent-2', name: 'Agent B' },
       ];
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(getAgentsByWorkflow).mockResolvedValue(mockAgents as any);
       vi.mocked(removeAgentWorkflow).mockResolvedValue(true as any);
@@ -742,7 +742,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should delete workflow with no assigned agents', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(getAgentsByWorkflow).mockResolvedValue([]);
       vi.mocked(deleteWorkflow).mockResolvedValue(true as any);
@@ -760,7 +760,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 when deleteWorkflow returns false', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockResolvedValue(mockWorkflow as any);
       vi.mocked(getAgentsByWorkflow).mockResolvedValue([]);
       vi.mocked(deleteWorkflow).mockResolvedValue(false as any);
@@ -776,7 +776,7 @@ describe('API /api/workflows', () => {
     });
 
     it('should return 500 on database error', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
       vi.mocked(getWorkflow).mockRejectedValue(new Error('Database error'));
 
       const request = new NextRequest('http://localhost/api/workflows/workflow-1', {

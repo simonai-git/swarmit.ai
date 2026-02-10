@@ -15,7 +15,7 @@ import {
   createTask,
   updateTask,
   deleteTask,
-  getAutomationUserEmail
+  getAutomationUserId
 } from '@/lib/db';
 import { onTaskCreated } from '@/lib/task-lifecycle';
 import { agentQueue } from '@/lib/agent-queue';
@@ -65,7 +65,7 @@ export async function PATCH(
           }
           // Create PRD task for the Product Manager
           const session = await getServerSession(authOptions);
-          const userEmail = session?.user?.email || await getAutomationUserEmail() || null;
+          const userId = session?.user?.id || await getAutomationUserId() || null;
           const prdTaskId = uuidv4();
           const deployPrefs: string[] = [];
           if (result.deploy_to_railway) deployPrefs.push('Deploy to Railway is ENABLED - create a deployment task assigned to Jordan.');
@@ -84,13 +84,13 @@ export async function PATCH(
             title: `[PRD] ${result.title}`,
             description: `Write a comprehensive PRD for: ${result.title}\n\n${projectContext}\n\n## Deployment Preferences\n${deployPrefs.join('\n')}`,
             status: 'todo',
-            assignee: result.product_manager || 'Sam',
+            assignee: result.product_manager || null,
             priority: 'high',
             project_id: id,
-            user_email: userEmail,
+            user_id: userId,
           });
           // Trigger lifecycle automation (enqueues Product Manager agent)
-          onTaskCreated(prdTask, userEmail || undefined).catch(err =>
+          onTaskCreated(prdTask, userId || undefined).catch(err =>
             console.error('[Project] Failed to trigger PRD task lifecycle:', err)
           );
           break;

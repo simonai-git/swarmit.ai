@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getInstalledSkills, installSkill, uninstallSkill } from '@/lib/db';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 // GET /api/skills/installed - List user's installed skills
 export async function GET() {
   try {
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
-    const skills = await getInstalledSkills(userEmail);
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const skills = await getInstalledSkills(userId);
     return NextResponse.json({ skills });
   } catch (error) {
     console.error('Error fetching installed skills:', error);
@@ -18,8 +22,11 @@ export async function GET() {
 // POST /api/skills/installed - Install a skill
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const body = await request.json();
 
     if (!body.skill_id || !body.skill_name) {
@@ -34,7 +41,7 @@ export async function POST(request: NextRequest) {
       source_url: body.source_url || null,
       category: body.category || null,
       author: body.author || null,
-      user_email: userEmail,
+      user_id: userId,
     });
 
     return NextResponse.json(skill, { status: 201 });
@@ -50,15 +57,18 @@ export async function POST(request: NextRequest) {
 // DELETE /api/skills/installed?skill_id=xxx - Uninstall a skill
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const skillId = request.nextUrl.searchParams.get('skill_id');
 
     if (!skillId) {
       return NextResponse.json({ error: 'skill_id is required' }, { status: 400 });
     }
 
-    const deleted = await uninstallSkill(skillId, userEmail);
+    const deleted = await uninstallSkill(skillId, userId);
     if (!deleted) {
       return NextResponse.json({ error: 'Skill not found' }, { status: 404 });
     }

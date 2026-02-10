@@ -84,8 +84,8 @@ export async function refreshRailwayOAuthToken(refreshToken: string): Promise<{
 }
 
 /** Get a valid Railway token, refreshing OAuth tokens if expired */
-export async function getValidRailwayToken(userEmail: string): Promise<string | null> {
-  const stored = await getUserRailwayToken(userEmail);
+export async function getValidRailwayToken(userId: string): Promise<string | null> {
+  const stored = await getUserRailwayToken(userId);
   if (!stored) return null;
 
   // API tokens (non-OAuth) don't expire
@@ -105,7 +105,7 @@ export async function getValidRailwayToken(userEmail: string): Promise<string | 
   try {
     const refreshed = await refreshRailwayOAuthToken(stored.refreshToken);
     const newExpiry = new Date(Date.now() + refreshed.expiresIn * 1000);
-    await updateUserRailwayToken(userEmail, refreshed.accessToken, refreshed.refreshToken, newExpiry);
+    await updateUserRailwayToken(userId, refreshed.accessToken, refreshed.refreshToken, newExpiry);
     return refreshed.accessToken;
   } catch (err) {
     console.error('[Railway] Token refresh failed:', err);
@@ -198,15 +198,15 @@ export async function generateDomain(
  * Returns null on failure (non-blocking).
  */
 export async function deployToRailway(
-  userEmail: string,
+  userId: string,
   githubRepoFullName: string,
   taskId: string,
   taskTitle: string
 ): Promise<RailwayDeployResult | null> {
   try {
-    const token = await getValidRailwayToken(userEmail);
+    const token = await getValidRailwayToken(userId);
     if (!token) {
-      console.log('[Railway] No valid token for', userEmail);
+      console.log('[Railway] No valid token for', userId);
       return null;
     }
 

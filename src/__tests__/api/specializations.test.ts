@@ -13,7 +13,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn(() => Promise.resolve({
-    user: { email: 'test@user.com', name: 'Test User' },
+    user: { id: 'user-test-123', email: 'test@user.com', name: 'Test User' },
   })),
 }));
 
@@ -47,7 +47,7 @@ describe('API /api/specializations', () => {
 
       expect(response.status).toBe(200);
       expect(data).toHaveLength(1);
-      expect(getSpecializations).toHaveBeenCalledWith('test@user.com');
+      expect(getSpecializations).toHaveBeenCalledWith('user-test-123');
     });
 
     it('should auto-seed defaults when user has none', async () => {
@@ -61,7 +61,7 @@ describe('API /api/specializations', () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(seedDefaultSpecializations).toHaveBeenCalledWith('test@user.com');
+      expect(seedDefaultSpecializations).toHaveBeenCalledWith('user-test-123');
       expect(data).toHaveLength(1);
     });
 
@@ -78,7 +78,7 @@ describe('API /api/specializations', () => {
 
   describe('POST /api/specializations', () => {
     it('should create a specialization', async () => {
-      const created = { id: 'spec-new', name: 'Blockchain Dev', icon: '🔗', user_email: 'test@user.com' };
+      const created = { id: 'spec-new', name: 'Blockchain Dev', icon: '🔗', user_id: 'user-test-123' };
       vi.mocked(createSpecialization).mockResolvedValue(created as any);
 
       const request = new NextRequest('http://localhost/api/specializations', {
@@ -91,7 +91,7 @@ describe('API /api/specializations', () => {
       expect(response.status).toBe(201);
       expect(data.name).toBe('Blockchain Dev');
       expect(createSpecialization).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'Blockchain Dev', user_email: 'test@user.com' })
+        expect.objectContaining({ name: 'Blockchain Dev', user_id: 'user-test-123' })
       );
     });
 
@@ -184,7 +184,7 @@ describe('API /api/specializations', () => {
 
   describe('DELETE /api/specializations/[id]', () => {
     it('should delete a specialization with no agents', async () => {
-      vi.mocked(getSpecialization).mockResolvedValue({ id: 'spec-1', name: 'Old', user_email: 'test@user.com' } as any);
+      vi.mocked(getSpecialization).mockResolvedValue({ id: 'spec-1', name: 'Old', user_id: 'user-test-123' } as any);
       vi.mocked(getSpecializationAgentCount).mockResolvedValue(0);
       vi.mocked(deleteSpecialization).mockResolvedValue(true);
 
@@ -195,7 +195,7 @@ describe('API /api/specializations', () => {
     });
 
     it('should return 409 when agents use the specialization', async () => {
-      vi.mocked(getSpecialization).mockResolvedValue({ id: 'spec-1', name: 'InUse', user_email: 'test@user.com' } as any);
+      vi.mocked(getSpecialization).mockResolvedValue({ id: 'spec-1', name: 'InUse', user_id: 'user-test-123' } as any);
       vi.mocked(getSpecializationAgentCount).mockResolvedValue(3);
 
       const request = new NextRequest('http://localhost/api/specializations/spec-1', { method: 'DELETE' });

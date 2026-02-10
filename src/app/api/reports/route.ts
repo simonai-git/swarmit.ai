@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db';
+import pool, { getAgent } from '@/lib/db';
 
 // Compare due date (YYYY-MM-DD string) against today in server's local time
 function isDateOverdue(dueDateStr: string): boolean {
@@ -106,20 +106,51 @@ export async function GET() {
     // Average cycle time
     const avgCycleTime = cycleTimeCount > 0 ? totalCycleTime / cycleTimeCount : null;
     
+    // Resolve agent IDs to names for display
+    const agentNameCache = new Map<string, string>();
+    const resolveAgentName = async (idOrName: string): Promise<string> => {
+      if (!idOrName) return idOrName;
+      if (agentNameCache.has(idOrName)) return agentNameCache.get(idOrName)!;
+      if (idOrName.startsWith('agent-')) {
+        const agent = await getAgent(idOrName);
+        const name = agent?.name || idOrName;
+        agentNameCache.set(idOrName, name);
+        return name;
+      }
+      return idOrName;
+    };
+
+    // Resolve all keys in assignee/contributor maps
+    const resolvedByAssignee: Record<string, number> = {};
+    for (const [key, val] of Object.entries(byAssignee)) {
+      const name = await resolveAgentName(key);
+      resolvedByAssignee[name] = (resolvedByAssignee[name] || 0) + val;
+    }
+    const resolvedByContributor: Record<string, number> = {};
+    for (const [key, val] of Object.entries(byContributor)) {
+      const name = await resolveAgentName(key);
+      resolvedByContributor[name] = (resolvedByContributor[name] || 0) + val;
+    }
+    const resolvedCompletedByContributor: Record<string, number> = {};
+    for (const [key, val] of Object.entries(completedByContributor)) {
+      const name = await resolveAgentName(key);
+      resolvedCompletedByContributor[name] = (resolvedCompletedByContributor[name] || 0) + val;
+    }
+
     const metrics: TaskMetrics = {
       total_tasks: tasks.length,
       by_status: byStatus,
       by_priority: byPriority,
-      by_assignee: byAssignee,
-      by_contributor: byContributor,
-      completed_by_contributor: completedByContributor,
+      by_assignee: resolvedByAssignee,
+      by_contributor: resolvedByContributor,
+      completed_by_contributor: resolvedCompletedByContributor,
       completed_this_week: completedThisWeek,
       avg_cycle_time_hours: avgCycleTime ? Math.round(avgCycleTime * 10) / 10 : null,
       velocity_per_day: Math.round(velocityPerDay * 10) / 10,
       overdue_count: overdueCount,
       blocked_count: blockedCount,
     };
-    
+
     return NextResponse.json(metrics);
   } catch (error) {
     console.error('Error generating report:', error);

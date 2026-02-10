@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getAllTasks, getTasksByUserEmail, getWatcherConfig } from '@/lib/db';
+import { getAllTasks, getTasksByUserId, getWatcherConfig } from '@/lib/db';
 
 // SSE endpoint for real-time updates
 // Uses server-side polling to check for changes and streams them to clients
@@ -45,12 +45,12 @@ function safeEnqueue(
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
 
-  // Extract user email from query params for user-scoped updates
+  // Extract user ID from query params for user-scoped updates
   const { searchParams } = new URL(request.url);
-  const userEmail = searchParams.get('user') || undefined;
+  const userId = searchParams.get('user') || undefined;
 
   // Helper to fetch tasks (user-scoped or all)
-  const fetchTasks = () => userEmail ? getTasksByUserEmail(userEmail) : getAllTasks();
+  const fetchTasks = () => userId ? getTasksByUserId(userId) : getAllTasks();
 
   // Track stream state - using object for reference semantics
   const isClosed = { value: false };

@@ -203,13 +203,13 @@ export async function pushWorkspaceToGitHub(
  * Called from agent-queue.ts
  */
 export async function pushToGitHub(
-  job: { taskId: string; agentType: string; userEmail?: string },
+  job: { taskId: string; agentType: string; userId?: string },
   task: Task,
   executor: SandboxToolExecutor
 ): Promise<string | null> {
-  if (!job.userEmail) return null;
+  if (!job.userId) return null;
 
-  const github = await getUserGitHubToken(job.userEmail);
+  const github = await getUserGitHubToken(job.userId);
   if (!github) return null; // no GitHub connected
 
   // Determine repo name

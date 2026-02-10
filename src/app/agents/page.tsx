@@ -13,7 +13,7 @@ interface Agent {
   avatar_color: string;
   is_active: boolean;
   tasks_completed: number;
-  user_email: string | null;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 }

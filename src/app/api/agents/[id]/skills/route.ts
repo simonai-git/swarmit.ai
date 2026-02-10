@@ -25,14 +25,17 @@ export async function PUT(
   try {
     const { id } = await params;
     const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const body = await request.json();
 
     if (!Array.isArray(body.skill_ids)) {
       return NextResponse.json({ error: 'skill_ids array is required' }, { status: 400 });
     }
 
-    await setAgentSkills(id, body.skill_ids, userEmail);
+    await setAgentSkills(id, body.skill_ids, userId);
     const skills = await getAgentSkills(id);
     return NextResponse.json({ skills });
   } catch (error) {

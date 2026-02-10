@@ -54,18 +54,21 @@ export async function GET(request: NextRequest) {
 
   try {
     const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const activeOnly = request.nextUrl.searchParams.get('active') === 'true';
     const specializationFilter = request.nextUrl.searchParams.get('specialization')?.toLowerCase();
     const availableOnly = request.nextUrl.searchParams.get('available') === 'true';
 
-    let agents = activeOnly ? await getActiveAgents(userEmail) : await getAllAgents(userEmail);
+    let agents = activeOnly ? await getActiveAgents(userId) : await getAllAgents(userId);
 
     // Auto-seed default agents on first access (adds Taylor, updates stale specializations)
     if (agents.length < 8) {
-      await seedDefaultAgents(userEmail);
-      agents = activeOnly ? await getActiveAgents(userEmail) : await getAllAgents(userEmail);
+      await seedDefaultAgents(userId);
+      agents = activeOnly ? await getActiveAgents(userId) : await getAllAgents(userId);
     }
     
     // Filter by specialization (case-insensitive partial match)
@@ -79,21 +82,21 @@ export async function GET(request: NextRequest) {
     // Compute metrics from tasks
     const metrics = await computeAgentMetrics();
     
-    // Add metrics to each agent
+    // Add metrics to each agent (tasks now store agent IDs in assignee column)
     let agentsWithMetrics: AgentWithMetrics[] = agents.map(agent => ({
       ...agent,
-      assigned_count: metrics[agent.name]?.assigned || 0,
-      worked_count: metrics[agent.name]?.worked || 0,
-      completed_count: metrics[agent.name]?.completed || 0,
+      assigned_count: metrics[agent.id]?.assigned || 0,
+      worked_count: metrics[agent.id]?.worked || 0,
+      completed_count: metrics[agent.id]?.completed || 0,
     }));
-    
+
     // Filter for available agents (no in_progress tasks assigned to them)
     if (availableOnly) {
       const inProgressResult = await pool.query(
         "SELECT DISTINCT assignee FROM tasks WHERE status = 'in_progress'"
       );
       const busyAgents = new Set(inProgressResult.rows.map(r => r.assignee));
-      agentsWithMetrics = agentsWithMetrics.filter(agent => !busyAgents.has(agent.name));
+      agentsWithMetrics = agentsWithMetrics.filter(agent => !busyAgents.has(agent.id));
     }
     
     return NextResponse.json(agentsWithMetrics);

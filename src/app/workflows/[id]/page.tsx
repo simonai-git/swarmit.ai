@@ -95,7 +95,7 @@ interface WorkflowData {
   edges: Edge[];
   lock_version: number;
   published_version_id: string | null;
-  user_email: string;
+  user_id: string;
   created_at: string;
   updated_at: string;
 }

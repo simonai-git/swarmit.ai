@@ -43,7 +43,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should return {connected: false} when no key found', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
       mockClientQuery.mockResolvedValue({ rows: [] });
 
@@ -57,7 +57,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should return {connected: true, maskedKey} when key exists', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       const encryptedKey = Buffer.from('sk-ant-api01-test-key-1234').toString('base64');
@@ -98,7 +98,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should return 400 for missing apiKey', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       const request = new NextRequest('http://localhost/api/profile/claude-key', {
@@ -114,7 +114,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should return 400 for invalid key format', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       const request = new NextRequest('http://localhost/api/profile/claude-key', {
@@ -130,7 +130,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should validate key against Anthropic API (mock fetch)', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       (global.fetch as any).mockResolvedValue({
@@ -164,7 +164,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should save encrypted key on success', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       (global.fetch as any).mockResolvedValue({
@@ -181,9 +181,9 @@ describe('API /api/profile/claude-key', () => {
       await POST(request);
 
       expect(mockClientQuery).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO user_profiles'),
+        expect.stringContaining('UPDATE user_profiles'),
         expect.arrayContaining([
-          'test@example.com',
+          'user-test-123',
           expect.any(String), // encrypted key
           expect.any(String), // timestamp
         ])
@@ -193,7 +193,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should handle OAT token format (sk-ant-oat...)', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       (global.fetch as any).mockResolvedValue({
@@ -240,7 +240,7 @@ describe('API /api/profile/claude-key', () => {
 
     it('should clear API key successfully', async () => {
       vi.mocked(getServerSession).mockResolvedValue({
-        user: { email: 'test@example.com' },
+        user: { id: 'user-test-123', email: 'test@example.com' },
       } as any);
 
       mockClientQuery.mockResolvedValue({ rows: [] });
@@ -253,7 +253,7 @@ describe('API /api/profile/claude-key', () => {
 
       expect(mockClientQuery).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE user_profiles'),
-        ['test@example.com']
+        ['user-test-123']
       );
       expect(mockClientRelease).toHaveBeenCalled();
     });

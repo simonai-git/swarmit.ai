@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTask, updateTask, deleteTask, logActivity, getProject, Task, getTaskDependents, recalculateBlockedStatus } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
 import { onTaskStatusChanged, onTaskAssigned } from '@/lib/task-lifecycle';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 const API_KEY = process.env.SIMON_API_KEY;
@@ -37,26 +39,12 @@ export async function PATCH(
     // Determine the actor making this change
     // Allow explicit agent identification via X-Agent header, otherwise infer from auth
     const agentHeader = request.headers.get('x-agent');
-    const actor = agentHeader || (isAuthorized(request) ? 'Simon' : 'Bogdan');
-    
-    // Get project reviewer (if task belongs to a project)
-    let reviewer = 'Bogdan'; // default
-    if (oldTask.project_id) {
-      const project = await getProject(oldTask.project_id);
-      if (project?.reviewer) {
-        reviewer = project.reviewer;
-      }
-    }
-    
-    // Auto-assign based on status transitions
+    const session = await getServerSession(authOptions);
+    const actor = agentHeader || session?.user?.email || 'system';
+
+    // Auto-assign based on status transitions — keep current assignee for all transitions
+    // (reviewer is a human user, not an agent — no auto-reassign needed)
     if (body.status && body.status !== oldTask.status) {
-      if (body.status === 'in_review') {
-        // in_review → project reviewer (or Bogdan if no project)
-        body.assignee = reviewer;
-      } else if ((body.status === 'todo' || body.status === 'in_progress') && oldTask.assignee === reviewer) {
-        // Reviewer moving task back to todo/in_progress → Simon (default agent)
-        body.assignee = 'Simon';
-      }
       // done → keep current assignee
       
       // Track who worked on the task: add to worked_by for any work-related status transition
@@ -106,13 +94,13 @@ export async function PATCH(
     
     // Trigger lifecycle automation hooks
     if (body.status && body.status !== oldTask.status) {
-      onTaskStatusChanged(task as Task, oldTask.status, body.status, task.user_email || undefined).catch(err => {
+      onTaskStatusChanged(task as Task, oldTask.status, body.status, task.user_id || undefined).catch(err => {
         console.error('Status change lifecycle hook error:', err);
       });
     }
 
     if (body.assignee && body.assignee !== oldTask.assignee) {
-      onTaskAssigned(task as Task, oldTask.assignee, body.assignee, task.user_email || undefined).catch(err => {
+      onTaskAssigned(task as Task, oldTask.assignee, body.assignee, task.user_id || undefined).catch(err => {
         console.error('Assignment lifecycle hook error:', err);
       });
     }

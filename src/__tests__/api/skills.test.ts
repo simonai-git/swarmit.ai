@@ -11,7 +11,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn(() => Promise.resolve({
-    user: { email: 'test@user.com', name: 'Test User' },
+    user: { id: 'user-test-123', email: 'test@user.com', name: 'Test User' },
   })),
 }));
 
@@ -43,7 +43,7 @@ describe('Skills API', () => {
 
       expect(response.status).toBe(200);
       expect(data.skills).toHaveLength(1);
-      expect(getInstalledSkills).toHaveBeenCalledWith('test@user.com');
+      expect(getInstalledSkills).toHaveBeenCalledWith('user-test-123');
     });
   });
 
@@ -73,7 +73,7 @@ describe('Skills API', () => {
           skill_id: 'sk-2',
           skill_name: 'Testing',
           skill_content: 'Test carefully',
-          user_email: 'test@user.com',
+          user_id: 'user-test-123',
         })
       );
     });
@@ -121,7 +121,7 @@ describe('Skills API', () => {
       const response = await DELETE_INSTALLED(request);
 
       expect(response.status).toBe(200);
-      expect(uninstallSkill).toHaveBeenCalledWith('sk-1', 'test@user.com');
+      expect(uninstallSkill).toHaveBeenCalledWith('sk-1', 'user-test-123');
     });
 
     it('should return 400 when skill_id missing', async () => {
@@ -344,7 +344,7 @@ describe('Skills API', () => {
 
       expect(response.status).toBe(200);
       expect(data.skills).toHaveLength(2);
-      expect(setAgentSkills).toHaveBeenCalledWith('agent-1', ['sk-1', 'sk-2'], 'test@user.com');
+      expect(setAgentSkills).toHaveBeenCalledWith('agent-1', ['sk-1', 'sk-2'], 'user-test-123');
     });
 
     it('should return 400 when skill_ids not an array', async () => {
@@ -370,7 +370,7 @@ describe('Skills API', () => {
 
       expect(response.status).toBe(200);
       expect(data.skills).toHaveLength(0);
-      expect(setAgentSkills).toHaveBeenCalledWith('agent-1', [], 'test@user.com');
+      expect(setAgentSkills).toHaveBeenCalledWith('agent-1', [], 'user-test-123');
     });
   });
 });

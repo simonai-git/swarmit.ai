@@ -28,7 +28,8 @@ export async function GET(
   try {
     const { id } = await params;
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -36,7 +37,7 @@ export async function GET(
     if (!workflow) {
       return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
     }
-    if (workflow.user_email !== session.user.email) {
+    if (workflow.user_id !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -71,7 +72,8 @@ export async function PATCH(
   try {
     const { id } = await params;
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -79,7 +81,7 @@ export async function PATCH(
     if (!workflow) {
       return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
     }
-    if (workflow.user_email !== session.user.email) {
+    if (workflow.user_id !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -96,7 +98,7 @@ export async function PATCH(
         }, { status: 400 });
       }
 
-      const version = await publishWorkflowVersion(id, session.user.email);
+      const version = await publishWorkflowVersion(id, userId);
       if (!version) {
         return NextResponse.json({ error: 'Failed to publish workflow' }, { status: 500 });
       }
@@ -154,7 +156,8 @@ export async function DELETE(
   try {
     const { id } = await params;
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -162,7 +165,7 @@ export async function DELETE(
     if (!workflow) {
       return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
     }
-    if (workflow.user_email !== session.user.email) {
+    if (workflow.user_id !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

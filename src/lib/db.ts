@@ -650,6 +650,104 @@ async function initDb() {
       END $$;
     `);
 
+    // Migration: convert name-based assignees to agent IDs
+    // Tasks: assignee column (e.g. 'Simon' → 'agent-simon-<uuid>')
+    await client.query(`
+      UPDATE tasks t SET assignee = a.id FROM agents a
+      WHERE t.assignee = a.name AND t.assignee NOT LIKE 'agent-%'
+      AND a.user_email = COALESCE(t.user_email, 'default');
+    `);
+
+    // Projects: product_manager and project_manager columns
+    await client.query(`
+      UPDATE projects p SET product_manager = a.id FROM agents a
+      WHERE p.product_manager = a.name AND p.product_manager NOT LIKE 'agent-%'
+      AND a.user_email = 'default';
+    `);
+    await client.query(`
+      UPDATE projects p SET project_manager = a.id FROM agents a
+      WHERE p.project_manager = a.name AND p.project_manager NOT LIKE 'agent-%'
+      AND a.user_email = 'default';
+    `);
+
+    // ==================== user_id Migration ====================
+    // Add stable id to user_profiles (email can change, id never does)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS id TEXT UNIQUE;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+    await client.query(`
+      UPDATE user_profiles SET id = 'user-' || gen_random_uuid()::text WHERE id IS NULL;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_profiles ALTER COLUMN id SET NOT NULL;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
+    // Add user_id column to all tenant-scoped tables
+    for (const table of ['tasks', 'agents', 'user_api_keys', 'user_integrations', 'specializations', 'installed_skills', 'agent_skills', 'workflows', 'agent_workflows', 'projects']) {
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS user_id TEXT;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END $$;
+      `);
+    }
+
+    // Backfill user_id from user_email for all tables
+    for (const table of ['tasks', 'agents', 'user_api_keys', 'user_integrations', 'specializations', 'installed_skills', 'agent_skills', 'workflows', 'agent_workflows']) {
+      await client.query(`
+        UPDATE ${table} t SET user_id = up.id
+        FROM user_profiles up
+        WHERE t.user_email = up.email AND t.user_id IS NULL;
+      `);
+    }
+
+    // Create indexes on user_id
+    for (const table of ['tasks', 'agents', 'specializations', 'installed_skills', 'workflows', 'projects']) {
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_${table}_user_id ON ${table}(user_id);
+      `);
+    }
+
+    // Update UNIQUE constraints from user_email to user_id
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_name_user_email_key;
+        ALTER TABLE agents ADD CONSTRAINT agents_name_user_id_key UNIQUE(name, user_id);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+
+    // Migrate user_integrations PK from user_email to user_id
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE user_integrations DROP CONSTRAINT IF EXISTS user_integrations_pkey;
+        ALTER TABLE user_integrations ADD CONSTRAINT user_integrations_user_id_key UNIQUE(user_id);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+
+    // Update specializations and installed_skills UNIQUE constraints
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE specializations DROP CONSTRAINT IF EXISTS specializations_name_user_email_key;
+        ALTER TABLE specializations ADD CONSTRAINT specializations_name_user_id_key UNIQUE(name, user_id);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE installed_skills DROP CONSTRAINT IF EXISTS installed_skills_skill_id_user_email_key;
+        ALTER TABLE installed_skills ADD CONSTRAINT installed_skills_skill_id_user_id_key UNIQUE(skill_id, user_id);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -675,7 +773,7 @@ export interface Task {
   blocked_reason: string | null;
   agent_context: string | null;
   project_id: string | null;
-  user_email: string | null;
+  user_id: string | null;
   current_run_id: string | null;
   worked_by: string; // JSON array of contributors who worked on this task
   created_at: string;
@@ -687,7 +785,7 @@ export async function getAllTasks(): Promise<Task[]> {
   const result = await pool.query(`
     SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
+           created_at, updated_at, project_id, user_id, COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
     FROM tasks
     ORDER BY updated_at DESC
@@ -702,7 +800,7 @@ export interface SearchFilters {
   priority?: string;
   project_id?: string;
   is_blocked?: string;
-  user_email?: string;
+  user_id?: string;
 }
 
 export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
@@ -755,9 +853,9 @@ export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
     conditions.push(`(is_blocked = FALSE OR is_blocked IS NULL)`);
   }
 
-  if (filters.user_email) {
-    conditions.push(`user_email = $${paramIndex}`);
-    values.push(filters.user_email);
+  if (filters.user_id) {
+    conditions.push(`user_id = $${paramIndex}`);
+    values.push(filters.user_id);
     paramIndex++;
   }
 
@@ -766,7 +864,7 @@ export async function searchTasks(filters: SearchFilters): Promise<Task[]> {
   const result = await pool.query(`
     SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, user_email, COALESCE(worked_by, '[]') as worked_by,
+           created_at, updated_at, project_id, user_id, COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
     FROM tasks
     ${whereClause}
@@ -787,7 +885,7 @@ export async function getTasksByStatus(status: string): Promise<Task[]> {
 
 export async function createTask(task: Partial<Task> & { id: string; title: string }): Promise<Task> {
   const result = await pool.query(
-    `INSERT INTO tasks (id, title, description, status, assignee, priority, due_date, estimated_hours, time_spent, progress, is_blocked, blocked_reason, agent_context, project_id, feedback_id, user_email)
+    `INSERT INTO tasks (id, title, description, status, assignee, priority, due_date, estimated_hours, time_spent, progress, is_blocked, blocked_reason, agent_context, project_id, feedback_id, user_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
@@ -806,7 +904,7 @@ export async function createTask(task: Partial<Task> & { id: string; title: stri
       task.agent_context || null,
       task.project_id || null,
       task.feedback_id || null,
-      task.user_email || null
+      task.user_id || null
     ]
   );
   return result.rows[0];
@@ -953,24 +1051,24 @@ export interface Agent {
   avatar_color: string;
   is_active: boolean;
   tasks_completed: number;
-  user_email: string | null;
+  user_id: string | null;
   requires_workflow: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export async function getAllAgents(userEmail?: string): Promise<Agent[]> {
-  if (userEmail) {
-    const result = await pool.query('SELECT * FROM agents WHERE user_email = $1 ORDER BY created_at DESC', [userEmail]);
+export async function getAllAgents(userId?: string): Promise<Agent[]> {
+  if (userId) {
+    const result = await pool.query('SELECT * FROM agents WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
     return result.rows;
   }
   const result = await pool.query('SELECT * FROM agents ORDER BY created_at DESC');
   return result.rows;
 }
 
-export async function getActiveAgents(userEmail?: string): Promise<Agent[]> {
-  if (userEmail) {
-    const result = await pool.query('SELECT * FROM agents WHERE is_active = TRUE AND user_email = $1 ORDER BY name ASC', [userEmail]);
+export async function getActiveAgents(userId?: string): Promise<Agent[]> {
+  if (userId) {
+    const result = await pool.query('SELECT * FROM agents WHERE is_active = TRUE AND user_id = $1 ORDER BY name ASC', [userId]);
     return result.rows;
   }
   const result = await pool.query('SELECT * FROM agents WHERE is_active = TRUE ORDER BY name ASC');
@@ -982,14 +1080,51 @@ export async function getAgent(id: string): Promise<Agent | null> {
   return result.rows[0] || null;
 }
 
-export async function getAgentByName(name: string): Promise<Agent | null> {
+export async function getAgentByName(name: string, userId?: string): Promise<Agent | null> {
+  if (userId) {
+    // Try user-scoped agent first, fall back to legacy
+    const result = await pool.query(
+      'SELECT * FROM agents WHERE name = $1 AND user_id = $2',
+      [name, userId]
+    );
+    if (result.rows[0]) return result.rows[0];
+  }
   const result = await pool.query('SELECT * FROM agents WHERE name = $1', [name]);
+  return result.rows[0] || null;
+}
+
+// Derive agent type from specialization string
+export function getAgentTypeFromSpecialization(specialization: string): 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager' {
+  const s = specialization.toLowerCase();
+  if (s.includes('product manager') || s.includes('product management')) return 'product_manager';
+  if (s.includes('project manager') || s.includes('project management')) return 'pm';
+  if (s.includes('qa') || s.includes('test') || s.includes('quality')) return 'qa';
+  if (s.includes('devops') || s.includes('infrastructure') || s.includes('deployment')) return 'devops';
+  if (s.includes('review') || s.includes('code review')) return 'reviewer';
+  return 'developer';
+}
+
+// Get all active agents for a user (used by PM tools)
+export async function getAllActiveAgents(userId: string): Promise<Agent[]> {
+  const result = await pool.query(
+    'SELECT * FROM agents WHERE is_active = TRUE AND user_id = $1 ORDER BY name ASC',
+    [userId]
+  );
+  return result.rows;
+}
+
+// Get agent by specialization keyword (for auto-assignment fallback)
+export async function getAgentBySpecialization(keyword: string, userId: string): Promise<Agent | null> {
+  const result = await pool.query(
+    'SELECT * FROM agents WHERE LOWER(specialization) LIKE $1 AND user_id = $2 AND is_active = TRUE LIMIT 1',
+    [`%${keyword.toLowerCase()}%`, userId]
+  );
   return result.rows[0] || null;
 }
 
 export async function createAgent(agent: Partial<Agent> & { id: string; name: string; specialization: string }): Promise<Agent> {
   const result = await pool.query(
-    `INSERT INTO agents (id, name, specialization, description, system_prompt, memory, avatar_emoji, avatar_color, is_active, tasks_completed, user_email)
+    `INSERT INTO agents (id, name, specialization, description, system_prompt, memory, avatar_emoji, avatar_color, is_active, tasks_completed, user_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
@@ -1003,7 +1138,7 @@ export async function createAgent(agent: Partial<Agent> & { id: string; name: st
       agent.avatar_color || 'from-blue-500 to-purple-500',
       agent.is_active !== false,
       agent.tasks_completed || 0,
-      agent.user_email || null
+      agent.user_id || null
     ]
   );
   return result.rows[0];
@@ -1736,13 +1871,36 @@ export async function getAllTaskDependencyCounts(): Promise<Record<string, numbe
   return Object.fromEntries(result.rows.map(r => [r.task_id, parseInt(r.count)]));
 }
 
-// Get automation user email (first user with a Claude API key)
-export async function getAutomationUserEmail(): Promise<string | undefined> {
+// Get or create a user profile by email — returns the stable user ID
+export async function getOrCreateUser(email: string, name?: string, image?: string): Promise<{ id: string; email: string }> {
+  // Try to find existing
+  const existing = await pool.query('SELECT id, email FROM user_profiles WHERE email = $1', [email]);
+  if (existing.rows[0]) return existing.rows[0];
+  // Create new
+  const id = 'user-' + crypto.randomUUID();
+  await pool.query(
+    `INSERT INTO user_profiles (id, email, name, avatar_url) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (email) DO NOTHING`,
+    [id, email, name || null, image || null]
+  );
+  // Re-fetch in case of race condition
+  const result = await pool.query('SELECT id, email FROM user_profiles WHERE email = $1', [email]);
+  return result.rows[0];
+}
+
+// Get user profile by stable user ID
+export async function getUserById(userId: string): Promise<{ id: string; email: string; name: string | null; claude_api_key: string | null } | null> {
+  const result = await pool.query('SELECT id, email, name, claude_api_key FROM user_profiles WHERE id = $1', [userId]);
+  return result.rows[0] || null;
+}
+
+// Get automation user ID (first user with a Claude API key)
+export async function getAutomationUserId(): Promise<string | undefined> {
   try {
     const result = await pool.query(
-      'SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL LIMIT 1'
+      'SELECT id FROM user_profiles WHERE claude_api_key IS NOT NULL LIMIT 1'
     );
-    return result.rows[0]?.email;
+    return result.rows[0]?.id;
   } catch (error) {
     console.error('[DB] Failed to get automation user:', error);
     return undefined;
@@ -1750,41 +1908,41 @@ export async function getAutomationUserEmail(): Promise<string | undefined> {
 }
 
 // Get all users with Claude API keys (for multi-tenant scheduler)
-export async function getUsersWithApiKeys(): Promise<Array<{ email: string }>> {
+export async function getUsersWithApiKeys(): Promise<Array<{ id: string; email: string }>> {
   const result = await pool.query(
-    'SELECT email FROM user_profiles WHERE claude_api_key IS NOT NULL'
+    'SELECT id, email FROM user_profiles WHERE claude_api_key IS NOT NULL AND id IS NOT NULL'
   );
   return result.rows;
 }
 
 // Get tasks owned by a specific user
-export async function getTasksByUserEmail(userEmail: string): Promise<Task[]> {
+export async function getTasksByUserId(userId: string): Promise<Task[]> {
   const result = await pool.query(`
     SELECT id, title, description, status, assignee, priority, due_date,
            estimated_hours, time_spent, progress, is_blocked, blocked_reason,
-           created_at, updated_at, project_id, user_email, current_run_id,
+           created_at, updated_at, project_id, user_id, current_run_id,
            COALESCE(worked_by, '[]') as worked_by,
            CASE WHEN agent_context IS NOT NULL THEN 'has_context' ELSE NULL END as agent_context
     FROM tasks
-    WHERE user_email = $1
+    WHERE user_id = $1
     ORDER BY updated_at DESC
-  `, [userEmail]);
+  `, [userId]);
   return result.rows;
 }
 
-// Get tasks with no user_email (orphaned)
+// Get tasks with no user_id (orphaned)
 export async function getOrphanedTasks(): Promise<Task[]> {
   const result = await pool.query(
-    `SELECT * FROM tasks WHERE user_email IS NULL AND status != 'done' LIMIT 50`
+    `SELECT * FROM tasks WHERE user_id IS NULL AND status != 'done' LIMIT 50`
   );
   return result.rows;
 }
 
 // Assign orphaned tasks to a specific user
-export async function assignOrphanedTasks(userEmail: string): Promise<number> {
+export async function assignOrphanedTasks(userId: string): Promise<number> {
   const result = await pool.query(
-    `UPDATE tasks SET user_email = $1 WHERE user_email IS NULL RETURNING id`,
-    [userEmail]
+    `UPDATE tasks SET user_id = $1 WHERE user_id IS NULL RETURNING id`,
+    [userId]
   );
   return result.rowCount || 0;
 }
@@ -1940,7 +2098,7 @@ export async function deleteWorkspaceSnapshot(taskId: string): Promise<boolean> 
 
 // ==================== GitHub Integration ====================
 
-export async function getUserGitHubToken(userEmail: string): Promise<{
+export async function getUserGitHubToken(userId: string): Promise<{
   token: string;
   username: string;
   authMethod: string;
@@ -1949,8 +2107,8 @@ export async function getUserGitHubToken(userEmail: string): Promise<{
 } | null> {
   const result = await pool.query(
     `SELECT github_token, github_username, github_auth_method, github_refresh_token, github_token_expires_at
-     FROM user_integrations WHERE user_email = $1 AND github_token IS NOT NULL`,
-    [userEmail]
+     FROM user_integrations WHERE user_id = $1 AND github_token IS NOT NULL`,
+    [userId]
   );
   if (result.rows.length === 0 || !result.rows[0].github_token) return null;
   return {
@@ -1963,7 +2121,7 @@ export async function getUserGitHubToken(userEmail: string): Promise<{
 }
 
 export async function setUserGitHubIntegration(
-  userEmail: string,
+  userId: string,
   token: string,
   username: string,
   authMethod: string = 'token',
@@ -1971,27 +2129,27 @@ export async function setUserGitHubIntegration(
   expiresAt?: Date | null
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO user_integrations (user_email, github_token, github_username, github_connected_at, github_auth_method, github_refresh_token, github_token_expires_at)
+    `INSERT INTO user_integrations (user_id, github_token, github_username, github_connected_at, github_auth_method, github_refresh_token, github_token_expires_at)
      VALUES ($1, $2, $3, NOW(), $4, $5, $6)
-     ON CONFLICT (user_email) DO UPDATE SET
+     ON CONFLICT (user_id) DO UPDATE SET
        github_token = $2, github_username = $3, github_connected_at = NOW(),
        github_auth_method = $4, github_refresh_token = $5, github_token_expires_at = $6, updated_at = NOW()`,
-    [userEmail, token, username, authMethod, refreshToken || null, expiresAt || null]
+    [userId, token, username, authMethod, refreshToken || null, expiresAt || null]
   );
 }
 
-export async function clearUserGitHubIntegration(userEmail: string): Promise<void> {
+export async function clearUserGitHubIntegration(userId: string): Promise<void> {
   await pool.query(
     `UPDATE user_integrations SET github_token = NULL, github_username = NULL, github_connected_at = NULL,
        github_refresh_token = NULL, github_token_expires_at = NULL, github_auth_method = NULL, updated_at = NOW()
-     WHERE user_email = $1`,
-    [userEmail]
+     WHERE user_id = $1`,
+    [userId]
   );
 }
 
 // ==================== Railway Integration ====================
 
-export async function getUserRailwayToken(userEmail: string): Promise<{
+export async function getUserRailwayToken(userId: string): Promise<{
   token: string;
   authMethod: string;
   refreshToken: string | null;
@@ -1999,8 +2157,8 @@ export async function getUserRailwayToken(userEmail: string): Promise<{
 } | null> {
   const result = await pool.query(
     `SELECT railway_token, railway_auth_method, railway_refresh_token, railway_token_expires_at
-     FROM user_integrations WHERE user_email = $1 AND railway_token IS NOT NULL`,
-    [userEmail]
+     FROM user_integrations WHERE user_id = $1 AND railway_token IS NOT NULL`,
+    [userId]
   );
   if (result.rows.length === 0 || !result.rows[0].railway_token) return null;
   return {
@@ -2012,7 +2170,7 @@ export async function getUserRailwayToken(userEmail: string): Promise<{
 }
 
 export async function updateUserRailwayToken(
-  userEmail: string,
+  userId: string,
   token: string,
   refreshToken: string | null,
   expiresAt: Date | null
@@ -2020,8 +2178,8 @@ export async function updateUserRailwayToken(
   await pool.query(
     `UPDATE user_integrations
      SET railway_token = $2, railway_refresh_token = $3, railway_token_expires_at = $4, updated_at = NOW()
-     WHERE user_email = $1`,
-    [userEmail, token, refreshToken, expiresAt]
+     WHERE user_id = $1`,
+    [userId, token, refreshToken, expiresAt]
   );
 }
 
@@ -2033,7 +2191,7 @@ export interface Specialization {
   description: string | null;
   system_prompt: string | null;
   icon: string;
-  user_email: string;
+  user_id: string;
   is_default: boolean;
   created_at: string;
   updated_at: string;
@@ -2054,22 +2212,22 @@ const DEFAULT_SPECIALIZATIONS = [
   { name: 'Project Manager', icon: '📋', description: 'Planning, coordination, task breakdown, and delivery oversight' },
 ];
 
-export async function seedDefaultSpecializations(userEmail: string): Promise<void> {
+export async function seedDefaultSpecializations(userId: string): Promise<void> {
   for (const spec of DEFAULT_SPECIALIZATIONS) {
     const id = `spec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await pool.query(
-      `INSERT INTO specializations (id, name, description, icon, user_email, is_default)
+      `INSERT INTO specializations (id, name, description, icon, user_id, is_default)
        VALUES ($1, $2, $3, $4, $5, TRUE)
-       ON CONFLICT (name, user_email) DO NOTHING`,
-      [id, spec.name, spec.description, spec.icon, userEmail]
+       ON CONFLICT DO NOTHING`,
+      [id, spec.name, spec.description, spec.icon, userId]
     );
   }
 }
 
-export async function getSpecializations(userEmail: string): Promise<Specialization[]> {
+export async function getSpecializations(userId: string): Promise<Specialization[]> {
   const result = await pool.query(
-    'SELECT * FROM specializations WHERE user_email = $1 ORDER BY is_default DESC, name ASC',
-    [userEmail]
+    'SELECT * FROM specializations WHERE user_id = $1 ORDER BY is_default DESC, name ASC',
+    [userId]
   );
   return result.rows;
 }
@@ -2082,16 +2240,16 @@ export async function getSpecialization(id: string): Promise<Specialization | nu
 export async function createSpecialization(spec: Omit<Specialization, 'id' | 'created_at' | 'updated_at' | 'is_default'>): Promise<Specialization> {
   const id = `spec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const result = await pool.query(
-    `INSERT INTO specializations (id, name, description, system_prompt, icon, user_email, is_default)
+    `INSERT INTO specializations (id, name, description, system_prompt, icon, user_id, is_default)
      VALUES ($1, $2, $3, $4, $5, $6, FALSE)
      RETURNING *`,
-    [id, spec.name, spec.description || null, spec.system_prompt || null, spec.icon || '🤖', spec.user_email]
+    [id, spec.name, spec.description || null, spec.system_prompt || null, spec.icon || '🤖', spec.user_id]
   );
   return result.rows[0];
 }
 
 export async function updateSpecialization(id: string, updates: Partial<Specialization>): Promise<Specialization | null> {
-  const fields = Object.keys(updates).filter(k => k !== 'id' && k !== 'created_at' && k !== 'user_email');
+  const fields = Object.keys(updates).filter(k => k !== 'id' && k !== 'created_at' && k !== 'user_id');
   if (fields.length === 0) return null;
 
   const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
@@ -2109,10 +2267,10 @@ export async function deleteSpecialization(id: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function getSpecializationAgentCount(specName: string, userEmail: string): Promise<number> {
+export async function getSpecializationAgentCount(specName: string, userId: string): Promise<number> {
   const result = await pool.query(
-    'SELECT COUNT(*) as count FROM agents WHERE specialization = $1 AND (user_email = $2 OR user_email IS NULL)',
-    [specName, userEmail]
+    'SELECT COUNT(*) as count FROM agents WHERE specialization = $1 AND (user_id = $2 OR user_id IS NULL)',
+    [specName, userId]
   );
   return parseInt(result.rows[0].count) || 0;
 }
@@ -2128,14 +2286,14 @@ export interface InstalledSkill {
   source_url: string | null;
   category: string | null;
   author: string | null;
-  user_email: string;
+  user_id: string;
   installed_at: string;
 }
 
-export async function getInstalledSkills(userEmail: string): Promise<InstalledSkill[]> {
+export async function getInstalledSkills(userId: string): Promise<InstalledSkill[]> {
   const result = await pool.query(
-    'SELECT * FROM installed_skills WHERE user_email = $1 ORDER BY installed_at DESC',
-    [userEmail]
+    'SELECT * FROM installed_skills WHERE user_id = $1 ORDER BY installed_at DESC',
+    [userId]
   );
   return result.rows;
 }
@@ -2143,19 +2301,19 @@ export async function getInstalledSkills(userEmail: string): Promise<InstalledSk
 export async function installSkill(skill: Omit<InstalledSkill, 'id' | 'installed_at'>): Promise<InstalledSkill> {
   const id = `iskill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const result = await pool.query(
-    `INSERT INTO installed_skills (id, skill_id, skill_name, skill_description, skill_content, source_url, category, author, user_email)
+    `INSERT INTO installed_skills (id, skill_id, skill_name, skill_description, skill_content, source_url, category, author, user_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (skill_id, user_email) DO NOTHING
+     ON CONFLICT DO NOTHING
      RETURNING *`,
-    [id, skill.skill_id, skill.skill_name, skill.skill_description || null, skill.skill_content || null, skill.source_url || null, skill.category || null, skill.author || null, skill.user_email]
+    [id, skill.skill_id, skill.skill_name, skill.skill_description || null, skill.skill_content || null, skill.source_url || null, skill.category || null, skill.author || null, skill.user_id]
   );
   return result.rows[0];
 }
 
-export async function uninstallSkill(skillId: string, userEmail: string): Promise<boolean> {
+export async function uninstallSkill(skillId: string, userId: string): Promise<boolean> {
   // Also remove from any agent_skills
-  await pool.query('DELETE FROM agent_skills WHERE skill_id = $1 AND user_email = $2', [skillId, userEmail]);
-  const result = await pool.query('DELETE FROM installed_skills WHERE skill_id = $1 AND user_email = $2', [skillId, userEmail]);
+  await pool.query('DELETE FROM agent_skills WHERE skill_id = $1 AND user_id = $2', [skillId, userId]);
+  const result = await pool.query('DELETE FROM installed_skills WHERE skill_id = $1 AND user_id = $2', [skillId, userId]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -2165,7 +2323,7 @@ export interface AgentSkill {
   id: string;
   agent_id: string;
   skill_id: string;
-  user_email: string | null;
+  user_id: string | null;
   assigned_at: string;
 }
 
@@ -2173,7 +2331,7 @@ export async function getAgentSkills(agentId: string): Promise<(AgentSkill & { s
   const result = await pool.query(
     `SELECT ags.*, COALESCE(isk.skill_name, ags.skill_id) as skill_name
      FROM agent_skills ags
-     LEFT JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_email = ags.user_email
+     LEFT JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_id = ags.user_id
      WHERE ags.agent_id = $1
      ORDER BY ags.assigned_at ASC`,
     [agentId]
@@ -2189,7 +2347,7 @@ export async function getAgentSkillContents(agentId: string): Promise<Array<{ sk
   const result = await pool.query(
     `SELECT isk.skill_name, isk.skill_content
      FROM agent_skills ags
-     JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_email = ags.user_email
+     JOIN installed_skills isk ON isk.skill_id = ags.skill_id AND isk.user_id = ags.user_id
      WHERE ags.agent_id = $1 AND isk.skill_content IS NOT NULL AND isk.skill_content != ''
      ORDER BY ags.assigned_at ASC`,
     [agentId]
@@ -2197,17 +2355,17 @@ export async function getAgentSkillContents(agentId: string): Promise<Array<{ sk
   return result.rows;
 }
 
-export async function setAgentSkills(agentId: string, skillIds: string[], userEmail: string): Promise<void> {
+export async function setAgentSkills(agentId: string, skillIds: string[], userId: string): Promise<void> {
   // Remove old skills
   await pool.query('DELETE FROM agent_skills WHERE agent_id = $1', [agentId]);
   // Insert new
   for (const skillId of skillIds) {
     const id = `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await pool.query(
-      `INSERT INTO agent_skills (id, agent_id, skill_id, user_email)
+      `INSERT INTO agent_skills (id, agent_id, skill_id, user_id)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (agent_id, skill_id) DO NOTHING`,
-      [id, agentId, skillId, userEmail]
+      [id, agentId, skillId, userId]
     );
   }
 }
@@ -2225,18 +2383,18 @@ const DEFAULT_AGENTS = [
   { name: 'Taylor', specialization: 'Project Manager', description: 'Task planning, breakdown, dependency management, and delivery coordination.', emoji: '📊', color: 'from-yellow-500 to-orange-500' },
 ];
 
-export async function seedDefaultAgents(userEmail: string): Promise<void> {
+export async function seedDefaultAgents(userId: string): Promise<void> {
   for (const agent of DEFAULT_AGENTS) {
     const id = `agent-${agent.name.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     await pool.query(
-      `INSERT INTO agents (id, name, specialization, description, avatar_emoji, avatar_color, user_email)
+      `INSERT INTO agents (id, name, specialization, description, avatar_emoji, avatar_color, user_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (name, user_email) DO UPDATE SET
+       ON CONFLICT (name, user_id) DO UPDATE SET
          specialization = EXCLUDED.specialization,
          description = EXCLUDED.description,
          avatar_emoji = EXCLUDED.avatar_emoji,
          avatar_color = EXCLUDED.avatar_color`,
-      [id, agent.name, agent.specialization, agent.description, agent.emoji, agent.color, userEmail]
+      [id, agent.name, agent.specialization, agent.description, agent.emoji, agent.color, userId]
     );
   }
 }
@@ -2273,7 +2431,7 @@ export interface Workflow {
   edges: WorkflowEdge[];
   lock_version: number;
   published_version_id: string | null;
-  user_email: string;
+  user_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -2293,7 +2451,7 @@ export interface AgentWorkflow {
   agent_id: string;
   workflow_id: string;
   workflow_version_id: string;
-  user_email: string;
+  user_id: string;
   assigned_at: string;
 }
 
@@ -2331,10 +2489,10 @@ export async function createWorkflow(workflow: {
   description?: string | null;
   nodes?: WorkflowNode[];
   edges?: WorkflowEdge[];
-  user_email: string;
+  user_id: string;
 }): Promise<Workflow> {
   const result = await pool.query(
-    `INSERT INTO workflows (id, name, description, nodes, edges, user_email)
+    `INSERT INTO workflows (id, name, description, nodes, edges, user_id)
      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
      RETURNING *`,
     [
@@ -2343,7 +2501,7 @@ export async function createWorkflow(workflow: {
       workflow.description || null,
       JSON.stringify(workflow.nodes || []),
       JSON.stringify(workflow.edges || []),
-      workflow.user_email,
+      workflow.user_id,
     ]
   );
   return result.rows[0];
@@ -2354,10 +2512,10 @@ export async function getWorkflow(id: string): Promise<Workflow | null> {
   return result.rows[0] || null;
 }
 
-export async function getWorkflowsByUser(userEmail: string): Promise<Workflow[]> {
+export async function getWorkflowsByUser(userId: string): Promise<Workflow[]> {
   const result = await pool.query(
-    'SELECT * FROM workflows WHERE user_email = $1 ORDER BY updated_at DESC',
-    [userEmail]
+    'SELECT * FROM workflows WHERE user_id = $1 ORDER BY updated_at DESC',
+    [userId]
   );
   return result.rows;
 }
@@ -2480,16 +2638,16 @@ export async function setAgentWorkflow(
   agentId: string,
   workflowId: string,
   workflowVersionId: string,
-  userEmail: string
+  userId: string
 ): Promise<AgentWorkflow> {
   const id = `aw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const result = await pool.query(
-    `INSERT INTO agent_workflows (id, agent_id, workflow_id, workflow_version_id, user_email)
+    `INSERT INTO agent_workflows (id, agent_id, workflow_id, workflow_version_id, user_id)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (agent_id) DO UPDATE SET
        workflow_id = $3, workflow_version_id = $4, assigned_at = NOW()
      RETURNING *`,
-    [id, agentId, workflowId, workflowVersionId, userEmail]
+    [id, agentId, workflowId, workflowVersionId, userId]
   );
   return result.rows[0];
 }

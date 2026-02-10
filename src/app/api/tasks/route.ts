@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getAllTasks, searchTasks, createTask, getTasksByUserEmail, getAutomationUserEmail, Task } from '@/lib/db';
+import { getAllTasks, searchTasks, createTask, getTasksByUserId, getAutomationUserId, Task } from '@/lib/db';
 import { sendWebhook } from '@/lib/webhook';
 import { onTaskCreated, selectSpecialist } from '@/lib/task-lifecycle';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     // Determine user from session
     const session = await getServerSession(authOptions);
-    const userEmail = session?.user?.email;
+    const userId = session?.user?.id;
 
     // Use server-side search if any filter params are provided
     const hasFilters = q || assignee || priority || project_id || is_blocked;
@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
         priority: priority || undefined,
         project_id: project_id || undefined,
         is_blocked: is_blocked || undefined,
-        user_email: userEmail || undefined,
+        user_id: userId || undefined,
       });
-    } else if (userEmail) {
+    } else if (userId) {
       // Authenticated user: show only their tasks
-      tasks = await getTasksByUserEmail(userEmail);
+      tasks = await getTasksByUserId(userId);
 
       // Filter by status if provided (supports comma-separated values)
       if (status) {
@@ -69,14 +69,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Determine user email from session
+    // Determine user from session
     const session = await getServerSession(authOptions);
-    const userEmail = session?.user?.email || body.userEmail || await getAutomationUserEmail() || null;
+    const userId = session?.user?.id || body.userId || await getAutomationUserId() || null;
 
     // Auto-assign if no assignee specified
     let assignee = body.assignee;
     if (assignee === undefined || assignee === null) {
-      assignee = selectSpecialist({ title: body.title, description: body.description });
+      assignee = await selectSpecialist({ title: body.title, description: body.description }, userId || 'default');
     }
 
     const task = await createTask({
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       project_id: body.project_id || null,
       estimated_hours: body.estimated_hours || null,
       agent_context: body.agent_context || null,
-      user_email: userEmail,
+      user_id: userId,
     });
 
     // Send webhook notification
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Trigger lifecycle automation (auto-spawn agents if enabled)
-    onTaskCreated(task as Task, userEmail || undefined).catch(err => {
+    onTaskCreated(task as Task, userId || undefined).catch(err => {
       console.error('Lifecycle hook error:', err);
     });
 

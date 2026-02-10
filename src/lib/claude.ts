@@ -1,6 +1,6 @@
 import { streamSimpleAnthropic } from '@mariozechner/pi-ai';
 import type { Model, Context, Message, UserMessage, TextContent, ToolCall } from '@mariozechner/pi-ai';
-import { Task, Comment, Project, pool } from './db';
+import { Task, Comment, Project, pool, getAllActiveAgents } from './db';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
@@ -35,32 +35,32 @@ function createModel(modelId: string): Model<'anthropic-messages'> {
 }
 
 // Get user's Claude API key from database (decrypted)
-export async function getUserClaudeKey(userEmail: string): Promise<string | null> {
-  console.log(`[Claude] Looking up API key for user: ${userEmail}`);
+export async function getUserClaudeKey(userId: string): Promise<string | null> {
+  console.log(`[Claude] Looking up API key for user: ${userId}`);
   const client = await pool.connect();
   try {
     const result = await client.query(
-      'SELECT claude_api_key FROM user_profiles WHERE email = $1',
-      [userEmail]
+      'SELECT claude_api_key FROM user_profiles WHERE id = $1',
+      [userId]
     );
-    
+
     if (result.rows.length === 0) {
-      console.log(`[Claude] No user profile found for email: ${userEmail}`);
+      console.log(`[Claude] No user profile found for id: ${userId}`);
       return null;
     }
-    
+
     const storedKey = result.rows[0].claude_api_key;
     if (!storedKey) {
-      console.log(`[Claude] No Claude API key stored for user: ${userEmail}`);
+      console.log(`[Claude] No Claude API key stored for user: ${userId}`);
       return null;
     }
-    
+
     // Decrypt (base64 decode)
     const decoded = Buffer.from(storedKey, 'base64').toString('utf-8');
-    console.log(`[Claude] Decoded key for ${userEmail}, starts with: ${decoded.slice(0, 15)}...`);
+    console.log(`[Claude] Decoded key for ${userId}, starts with: ${decoded.slice(0, 15)}...`);
     return decoded;
   } catch (error) {
-    console.error(`[Claude] Error fetching API key for ${userEmail}:`, error);
+    console.error(`[Claude] Error fetching API key for ${userId}:`, error);
     return null;
   } finally {
     client.release();
@@ -207,10 +207,10 @@ const AGENT_TOOLS: AnyTool[] = [
       properties: {
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'Detailed task description' },
-        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Taylor, Simon)' },
+        agent_id: { type: 'string', description: 'Agent ID to assign (use list_available_agents to get IDs)' },
         priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
       },
-      required: ['title', 'description', 'assignee']
+      required: ['title', 'description', 'agent_id']
     }
   },
   {
@@ -228,6 +228,15 @@ const AGENT_TOOLS: AnyTool[] = [
   {
     name: 'list_project_tasks',
     description: 'List all tasks in the current project with their status',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'list_available_agents',
+    description: 'List all available agents with their IDs, names, and specializations',
     parameters: {
       type: 'object',
       properties: {},
@@ -382,10 +391,10 @@ const CLAUDE_CODE_TOOLS: AnyTool[] = [
       properties: {
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'Detailed task description' },
-        assignee: { type: 'string', description: 'Agent name to assign (Alex, Morgan, Jordan, Riley, Sam, Taylor, Simon)' },
+        agent_id: { type: 'string', description: 'Agent ID to assign (use list_available_agents to get IDs)' },
         priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Task priority' },
       },
-      required: ['title', 'description', 'assignee']
+      required: ['title', 'description', 'agent_id']
     }
   },
   {
@@ -403,6 +412,15 @@ const CLAUDE_CODE_TOOLS: AnyTool[] = [
   {
     name: 'list_project_tasks',
     description: 'List all tasks in the current project with their status',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'list_available_agents',
+    description: 'List all available agents with their IDs, names, and specializations',
     parameters: {
       type: 'object',
       properties: {},
@@ -537,16 +555,15 @@ export const AGENT_PROMPTS: Record<string, string> = {
    - If tech_stack specifies vanilla HTML/CSS/JS → do NOT create React/Vue/framework tasks
    - If "Deploy to Railway" is not listed as "Yes" → do NOT create Railway deployment tasks
    - If "Push to GitHub" is not listed as "Yes" → do NOT create GitHub push tasks
-3. Call list_project_tasks FIRST to see what already exists (in case of retry). Do NOT create tasks that already exist — skip them.
-4. Create ONLY the necessary tasks (aim for 5-8 tasks for a simple project, 8-12 for complex). Use create_task for each:
-   - Design/UI tasks (assign to Alex) — only if visual design work is needed
-   - Frontend tasks (assign to Alex) — match the tech_stack (e.g., vanilla JS if specified)
-   - Backend tasks (assign to Morgan) — ONLY if the project needs a backend
-   - Testing tasks (assign to Riley)
-   - Deployment tasks (assign to Jordan) — ONLY if deploy_to_railway or push_to_github is enabled
-5. Set up dependencies using add_dependency (e.g., design before frontend, backend before integration, all dev before testing, testing before deployment)
-6. Create ONE final verification task: "[PM] Verify: {project title}" assigned to Taylor (yourself) that depends on ALL other tasks
-7. Call task_complete with next_status='done'
+3. Call list_available_agents FIRST to see which agents are available and their IDs/specializations.
+4. Call list_project_tasks to see what already exists (in case of retry). Do NOT create tasks that already exist — skip them.
+5. Create ONLY the necessary tasks (aim for 5-8 tasks for a simple project, 8-12 for complex). Use create_task for each, passing the agent_id (NOT agent name) from list_available_agents:
+   - Match tasks to agents by their specialization (e.g., frontend tasks to a frontend agent, QA tasks to a QA agent)
+   - Only create backend tasks if the project needs a backend
+   - Only create deployment tasks if deploy_to_railway or push_to_github is enabled
+6. Set up dependencies using add_dependency (e.g., design before frontend, backend before integration, all dev before testing, testing before deployment)
+7. Create ONE final verification task: "[PM] Verify: {project title}" assigned to yourself (find your own agent_id in list_available_agents — look for Project Manager specialization) that depends on ALL other tasks
+8. Call task_complete with next_status='done'
 
 ## When Verifying a Project (task title starts with "[PM] Verify:"):
 1. Use list_project_tasks to check all task statuses
@@ -554,18 +571,11 @@ export const AGENT_PROMPTS: Record<string, string> = {
 3. If the project has deploy_to_railway enabled: verify the deployed app works as expected
 4. If the project has push_to_github enabled: verify code was pushed to the repository
 5. If all tasks are done and quality is acceptable: call task_complete with next_status='done'
-6. If issues found: create fix tasks with appropriate assignees and dependencies, then call task_complete with next_status='done'
-
-## Available Agents:
-- Alex: Frontend specialist (React, CSS, UI/UX)
-- Morgan: Backend specialist (APIs, databases, server logic)
-- Jordan: DevOps specialist (deployment, CI/CD, infrastructure)
-- Riley: QA specialist (testing, bug verification)
-- Taylor: Project Manager (that's you - for verification tasks)
-- Sam: Product Manager (PRD creation)
-- Simon: General developer (full-stack, default)
+6. If issues found: call list_available_agents, create fix tasks with appropriate agent_ids and dependencies, then call task_complete with next_status='done'
 
 ## Critical Rules:
+- ALWAYS call list_available_agents before creating tasks to get valid agent IDs
+- Use agent_id (not agent name) when calling create_task
 - NEVER create tasks that violate the project's constraints or tech_stack
 - Keep the total task count reasonable (5-12 tasks). Do not over-engineer.
 - Create focused, well-scoped tasks (not too broad, not too granular)
@@ -644,7 +654,7 @@ export interface ToolExecutor {
 export interface TaskAPI {
   updateTask(taskId: string, updates: Partial<Task>): Promise<void>;
   addComment(taskId: string, author: string, content: string): Promise<void>;
-  createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }): Promise<{ id: string }>;
+  createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userId: string | null }): Promise<{ id: string }>;
   addDependency?(taskId: string, dependsOnId: string): Promise<void>;
   listProjectTasks?(projectId: string): Promise<Array<{ id: string; title: string; status: string; assignee: string | null }>>;
   updateProject?(projectId: string, updates: Partial<Project>): Promise<void>;
@@ -765,13 +775,14 @@ async function executeTool(
         if (!taskApi.createTask) return 'Error: create_task not available';
         const projectId = context.project?.id || context.task.project_id;
         if (!projectId) return 'Error: No project context — create_task requires a project';
+        const agentId = (toolInput.agent_id || toolInput.assignee) as string;
         const created = await taskApi.createTask({
           title: toolInput.title as string,
           description: toolInput.description as string,
-          assignee: toolInput.assignee as string,
+          assignee: agentId,
           priority: (toolInput.priority as string) || 'medium',
           projectId,
-          userEmail: context.task.user_email,
+          userId: context.task.user_id,
         });
         return `Task created: ${created.id} — "${toolInput.title}"`;
       }
@@ -786,6 +797,16 @@ async function executeTool(
         if (!projectId) return 'Error: No project context';
         const tasks = await taskApi.listProjectTasks(projectId);
         return JSON.stringify(tasks, null, 2);
+      }
+      case 'list_available_agents': {
+        const userId = context.task.user_id || 'default';
+        const agents = await getAllActiveAgents(userId);
+        const agentList = agents.map(a => ({
+          id: a.id,
+          name: a.name,
+          specialization: a.specialization,
+        }));
+        return JSON.stringify(agentList, null, 2);
       }
       case 'save_prd': {
         if (!taskApi.updateProject) return 'Error: save_prd not available';

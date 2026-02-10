@@ -6,7 +6,7 @@ vi.mock('@/lib/db', () => ({
   getAllTasks: vi.fn(),
   getWatcherConfig: vi.fn(),
   getUsersWithApiKeys: vi.fn(),
-  getTasksByUserEmail: vi.fn(),
+  getTasksByUserId: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -21,7 +21,7 @@ vi.mock('@/lib/agent-queue', () => ({
 process.env.SIMON_API_KEY = 'test-api-key';
 
 import { POST, GET } from '@/app/api/watcher/poll/route';
-import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserEmail } from '@/lib/db';
+import { getAllTasks, getWatcherConfig, getUsersWithApiKeys, getTasksByUserId } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 describe('API /api/watcher/poll', () => {
@@ -56,10 +56,10 @@ describe('API /api/watcher/poll', () => {
 
     it('should enqueue todo tasks when watcher is running', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
-        { id: 'task-2', status: 'in_progress', priority: 'medium', user_email: 'user@test.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-test-123', email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_id: 'user-test-123' },
+        { id: 'task-2', status: 'in_progress', priority: 'medium', user_id: 'user-test-123' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
@@ -86,9 +86,9 @@ describe('API /api/watcher/poll', () => {
 
     it('should not enqueue tasks already in queue', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-test-123', email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_id: 'user-test-123' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [{ taskId: 'task-1', status: 'pending' } as any],
@@ -112,9 +112,9 @@ describe('API /api/watcher/poll', () => {
 
     it('should set correct priority for high priority tasks', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'high', user_email: 'user@test.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-test-123', email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'high', user_id: 'user-test-123' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
@@ -138,9 +138,9 @@ describe('API /api/watcher/poll', () => {
 
     it('should set correct priority for low priority tasks', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'low', user_email: 'user@test.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-test-123', email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'low', user_id: 'user-test-123' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
@@ -195,11 +195,11 @@ describe('API /api/watcher/poll', () => {
       expect(response.status).toBe(500);
     });
 
-    it('should pass tenantId and userEmail to enqueue', async () => {
+    it('should pass tenantId and userId to enqueue', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'automation@example.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'medium', user_email: 'automation@example.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-auto-456', email: 'automation@example.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium', user_id: 'user-auto-456' },
       ] as any);
       vi.mocked(agentQueue.getStatus).mockResolvedValue({
         jobs: [],
@@ -218,8 +218,8 @@ describe('API /api/watcher/poll', () => {
 
       expect(agentQueue.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          userEmail: 'automation@example.com',
-          tenantId: 'automation@example.com',
+          userId: 'user-auto-456',
+          tenantId: 'user-auto-456',
         })
       );
     });
@@ -247,9 +247,9 @@ describe('API /api/watcher/poll', () => {
 
     it('should still enqueue tasks when getStatus fails (Redis down)', async () => {
       vi.mocked(getWatcherConfig).mockResolvedValue({ is_running: true } as any);
-      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ email: 'user@test.com' }]);
-      vi.mocked(getTasksByUserEmail).mockResolvedValue([
-        { id: 'task-1', status: 'todo', priority: 'medium', user_email: 'user@test.com' },
+      vi.mocked(getUsersWithApiKeys).mockResolvedValue([{ id: 'user-test-123', email: 'user@test.com' }]);
+      vi.mocked(getTasksByUserId).mockResolvedValue([
+        { id: 'task-1', status: 'todo', priority: 'medium', user_id: 'user-test-123' },
       ] as any);
       // getStatus fails (Redis down) — should still attempt to enqueue
       vi.mocked(agentQueue.getStatus).mockRejectedValue(new Error('Redis connection refused'));

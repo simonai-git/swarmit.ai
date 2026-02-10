@@ -45,9 +45,9 @@ import { setUserGitHubIntegration } from '@/lib/db';
 
 // --- Helpers ---
 
-function mockSession(email = 'test@example.com') {
+function mockSession(email = 'test@example.com', id = 'user-test-123') {
   vi.mocked(getServerSession).mockResolvedValue({
-    user: { email },
+    user: { id, email },
   } as any);
 }
 
@@ -313,7 +313,7 @@ describe('GitHub OAuth Callback - GET /api/profile/integrations/github/callback'
 
     // Verify DB store with oauth auth method
     expect(setUserGitHubIntegration).toHaveBeenCalledWith(
-      'test@example.com',
+      'user-test-123',
       'gho_new-access-token',
       'testuser',
       'oauth',
@@ -363,7 +363,7 @@ describe('GitHub OAuth Callback - GET /api/profile/integrations/github/callback'
 
     // Verify DB store with refresh token and expiry
     expect(setUserGitHubIntegration).toHaveBeenCalledWith(
-      'test@example.com',
+      'user-test-123',
       'ghu_app-token',
       'appuser',
       'oauth',
@@ -478,7 +478,7 @@ describe('GitHub Disconnect - DELETE /api/profile/integrations/github', () => {
 
     expect(response.status).toBe(200);
     expect(data.success).toBe(true);
-    expect(clearUserGitHubIntegration).toHaveBeenCalledWith('test@example.com');
+    expect(clearUserGitHubIntegration).toHaveBeenCalledWith('user-test-123');
   });
 });
 

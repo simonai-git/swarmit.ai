@@ -8,7 +8,8 @@ import { refreshGitHubToken } from './github/route';
 export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -18,8 +19,8 @@ export async function GET(_request: NextRequest) {
               github_token, github_username, github_connected_at,
               github_refresh_token, github_token_expires_at, github_auth_method
        FROM user_integrations
-       WHERE user_email = $1`,
-      [session.user.email]
+       WHERE user_id = $1`,
+      [userId]
     );
 
     const integrations = result.rows[0] || {};
@@ -42,8 +43,8 @@ export async function GET(_request: NextRequest) {
           await pool.query(
             `UPDATE user_integrations SET
               railway_token = $1, railway_refresh_token = $2, railway_token_expires_at = $3, updated_at = NOW()
-             WHERE user_email = $4`,
-            [refreshed.access_token, refreshed.refresh_token, newExpiresAt, session.user.email]
+             WHERE user_id = $4`,
+            [refreshed.access_token, refreshed.refresh_token, newExpiresAt, userId]
           );
 
           integrations.railway_token = refreshed.access_token;
@@ -76,8 +77,8 @@ export async function GET(_request: NextRequest) {
           await pool.query(
             `UPDATE user_integrations SET
               github_token = $1, github_refresh_token = $2, github_token_expires_at = $3, updated_at = NOW()
-             WHERE user_email = $4`,
-            [refreshed.access_token, refreshed.refresh_token || null, newExpiresAt, session.user.email]
+             WHERE user_id = $4`,
+            [refreshed.access_token, refreshed.refresh_token || null, newExpiresAt, userId]
           );
 
           integrations.github_token = refreshed.access_token;

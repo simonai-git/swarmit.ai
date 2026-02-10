@@ -34,9 +34,9 @@ import { getServerSession } from 'next-auth';
 
 // --- Helpers ---
 
-function mockSession(email = 'test@example.com') {
+function mockSession(email = 'test@example.com', id = 'user-test-123') {
   vi.mocked(getServerSession).mockResolvedValue({
-    user: { email },
+    user: { id, email },
   } as any);
 }
 
@@ -324,7 +324,7 @@ describe('Railway OAuth Callback - GET /api/profile/integrations/railway/callbac
     expect(mockPoolQuery).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO user_integrations'),
       expect.arrayContaining([
-        'test@example.com',
+        'user-test-123',
         'new-access-token',
         expect.stringContaining('"account"'),
         'new-refresh-token',

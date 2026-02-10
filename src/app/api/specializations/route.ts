@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSpecializations, seedDefaultSpecializations, createSpecialization } from '@/lib/db';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 // GET /api/specializations - List specializations for current user (auto-seed on first access)
 export async function GET(_request: NextRequest) {
   try {
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    let specs = await getSpecializations(userEmail);
+    let specs = await getSpecializations(userId);
 
     // Auto-seed defaults on first access
     if (specs.length === 0) {
-      await seedDefaultSpecializations(userEmail);
-      specs = await getSpecializations(userEmail);
+      await seedDefaultSpecializations(userId);
+      specs = await getSpecializations(userId);
     }
 
     return NextResponse.json(specs);
@@ -26,8 +30,11 @@ export async function GET(_request: NextRequest) {
 // POST /api/specializations - Create a new specialization
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const body = await request.json();
 
     if (!body.name) {
@@ -39,7 +46,7 @@ export async function POST(request: NextRequest) {
       description: body.description || null,
       system_prompt: body.system_prompt || null,
       icon: body.icon || '🤖',
-      user_email: userEmail,
+      user_id: userId,
     });
 
     return NextResponse.json(spec, { status: 201 });

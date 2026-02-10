@@ -147,7 +147,7 @@ export default function KanbanBoard() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskTitle: string }>({ isOpen: false, taskId: null, taskTitle: '' });
   const [isDeleting, setIsDeleting] = useState(false);
   const [dependencyCounts, setDependencyCounts] = useState<Record<string, number>>({});
-  const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar_emoji: string; avatar_color: string }>>([]);
   const [projectsList, setProjectsList] = useState<Array<{ id: string; title: string }>>([]);
   const { data: session } = useSession();
   const searchParams = useSearchParams();
@@ -301,7 +301,9 @@ export default function KanbanBoard() {
     try {
       const res = await fetch('/api/agents');
       const data = await res.json();
-      setAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })));
+      setAgents(data.map((a: { id: string; name: string; avatar_emoji: string; avatar_color: string }) => ({
+        id: a.id, name: a.name, avatar_emoji: a.avatar_emoji, avatar_color: a.avatar_color,
+      })));
     } catch (error) {
       console.error('Error fetching agents:', error);
     }
@@ -686,9 +688,8 @@ export default function KanbanBoard() {
         >
           <option value="">All Assignees</option>
           <option value="unassigned">Unassigned</option>
-          <option value="Bogdan">Bogdan</option>
           {agents.map(a => (
-            <option key={a.id} value={a.name}>{a.name}</option>
+            <option key={a.id} value={a.id}>{a.name}</option>
           ))}
         </select>
 
@@ -769,6 +770,7 @@ export default function KanbanBoard() {
                 activeTaskIds={watcherConfig?.active_task_ids ? JSON.parse(watcherConfig.active_task_ids) : []}
                 projectNames={projects}
                 dependencyCounts={dependencyCounts}
+                agents={agents}
               />
             </div>
           ))}

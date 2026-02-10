@@ -1,5 +1,19 @@
+import { getAgent } from './db';
+
 const NTFY_TOPIC = process.env.NTFY_TOPIC || 'simon-tasks-notify';
 const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+
+// Resolve agent ID to display name
+async function resolveAssigneeName(assignee: string | null): Promise<string> {
+  if (!assignee) return 'Unassigned';
+  if (assignee.startsWith('agent-')) {
+    try {
+      const agent = await getAgent(assignee);
+      return agent?.name || assignee;
+    } catch { return assignee; }
+  }
+  return assignee;
+}
 
 export interface WebhookPayload {
   event: 'task.created' | 'task.updated' | 'task.deleted' | 'task.completed';
@@ -27,12 +41,13 @@ export async function sendWebhook(payload: WebhookPayload): Promise<void> {
     };
     const eventAction = eventActions[event] || 'Updated';
     
+    const assigneeName = await resolveAssigneeName(task.assignee);
     const title = `${eventAction}: ${task.title}`;
     const message = [
       task.description || 'No description',
       '',
       `Priority: ${task.priority.toUpperCase()}`,
-      `Assignee: ${task.assignee || 'Unassigned'}`,
+      `Assignee: ${assigneeName}`,
       task.due_date ? `Due: ${task.due_date}` : '',
     ].filter(Boolean).join('\n');
 
@@ -79,6 +94,7 @@ export async function sendCommentWebhook(payload: CommentWebhookPayload): Promis
   try {
     const { task, comment } = payload;
     
+    const assigneeName = await resolveAssigneeName(task.assignee);
     const title = `Comment on: ${task.title}`;
     const message = [
       `From: ${comment.author}`,
@@ -86,7 +102,7 @@ export async function sendCommentWebhook(payload: CommentWebhookPayload): Promis
       comment.content,
       '',
       `Task Status: ${task.status}`,
-      `Assignee: ${task.assignee || 'Unassigned'}`,
+      `Assignee: ${assigneeName}`,
     ].join('\n');
 
     await fetch(NTFY_URL, {

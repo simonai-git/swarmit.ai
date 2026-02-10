@@ -6,7 +6,8 @@ import pool from '@/lib/db';
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
