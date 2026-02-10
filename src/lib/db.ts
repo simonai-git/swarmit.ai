@@ -550,6 +550,106 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_agent_skills_agent ON agent_skills(agent_id);
     `);
 
+    // ==================== Workflow Tables ====================
+
+    // Workflows table (draft, editable definitions)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workflows (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        nodes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        edges JSONB NOT NULL DEFAULT '[]'::jsonb,
+        lock_version INTEGER NOT NULL DEFAULT 1,
+        published_version_id TEXT,
+        user_email TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_workflows_user_email ON workflows(user_email);
+    `);
+
+    // Workflow versions (immutable published snapshots)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workflow_versions (
+        id TEXT PRIMARY KEY,
+        workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+        version_number INTEGER NOT NULL,
+        nodes JSONB NOT NULL,
+        edges JSONB NOT NULL,
+        published_by TEXT,
+        published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(workflow_id, version_number)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_workflow_versions_workflow_id ON workflow_versions(workflow_id);
+    `);
+
+    // Agent-workflow junction (max 1 workflow per agent)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_workflows (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+        workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id) ON DELETE CASCADE,
+        user_email TEXT NOT NULL,
+        assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(agent_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_agent_workflows_workflow_id ON agent_workflows(workflow_id);
+    `);
+
+    // Workflow execution state (runtime tracking between LLM turns)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workflow_execution_state (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id) ON DELETE CASCADE,
+        current_node_id TEXT NOT NULL,
+        completed_nodes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        variables JSONB NOT NULL DEFAULT '{}'::jsonb,
+        status TEXT NOT NULL DEFAULT 'running',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(run_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_workflow_execution_state_task_id ON workflow_execution_state(task_id);
+    `);
+
+    // Workflow execution events (machine-parseable step markers)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS workflow_execution_events (
+        id BIGSERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        node_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        node_label TEXT NOT NULL DEFAULT '',
+        details JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_workflow_events_run_id ON workflow_execution_events(run_id);
+      CREATE INDEX IF NOT EXISTS idx_workflow_events_task_id ON workflow_execution_events(task_id, id);
+    `);
+
+    // Add requires_workflow flag to agents
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS requires_workflow BOOLEAN DEFAULT FALSE;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `);
+
     console.log('Database initialized');
   } finally {
     client.release();
@@ -854,6 +954,7 @@ export interface Agent {
   is_active: boolean;
   tasks_completed: number;
   user_email: string | null;
+  requires_workflow: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -2138,6 +2239,394 @@ export async function seedDefaultAgents(userEmail: string): Promise<void> {
       [id, agent.name, agent.specialization, agent.description, agent.emoji, agent.color, userEmail]
     );
   }
+}
+
+// ==================== Workflows ====================
+
+export type WorkflowNodeType = 'start' | 'end' | 'instruction' | 'condition' | 'parallel' | 'checkpoint';
+
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  position: { x: number; y: number };
+  data: {
+    label: string;
+    instructions?: string;
+    condition?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  label?: string;
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string | null;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  lock_version: number;
+  published_version_id: string | null;
+  user_email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowVersion {
+  id: string;
+  workflow_id: string;
+  version_number: number;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  published_by: string | null;
+  published_at: string;
+}
+
+export interface AgentWorkflow {
+  id: string;
+  agent_id: string;
+  workflow_id: string;
+  workflow_version_id: string;
+  user_email: string;
+  assigned_at: string;
+}
+
+export interface WorkflowExecutionState {
+  id: string;
+  run_id: string;
+  task_id: string;
+  workflow_version_id: string;
+  current_node_id: string;
+  completed_nodes: string[];
+  variables: Record<string, unknown>;
+  status: 'running' | 'completed' | 'failed' | 'paused';
+  created_at: string;
+  updated_at: string;
+}
+
+export type WorkflowEventType = 'step_started' | 'step_completed' | 'step_failed' | 'condition_evaluated' | 'checkpoint_reached';
+
+export interface WorkflowExecutionEvent {
+  id: number;
+  run_id: string;
+  task_id: string;
+  node_id: string;
+  event_type: WorkflowEventType;
+  node_label: string;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// --- Workflow CRUD ---
+
+export async function createWorkflow(workflow: {
+  id: string;
+  name: string;
+  description?: string | null;
+  nodes?: WorkflowNode[];
+  edges?: WorkflowEdge[];
+  user_email: string;
+}): Promise<Workflow> {
+  const result = await pool.query(
+    `INSERT INTO workflows (id, name, description, nodes, edges, user_email)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+     RETURNING *`,
+    [
+      workflow.id,
+      workflow.name,
+      workflow.description || null,
+      JSON.stringify(workflow.nodes || []),
+      JSON.stringify(workflow.edges || []),
+      workflow.user_email,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function getWorkflow(id: string): Promise<Workflow | null> {
+  const result = await pool.query('SELECT * FROM workflows WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+export async function getWorkflowsByUser(userEmail: string): Promise<Workflow[]> {
+  const result = await pool.query(
+    'SELECT * FROM workflows WHERE user_email = $1 ORDER BY updated_at DESC',
+    [userEmail]
+  );
+  return result.rows;
+}
+
+export async function updateWorkflow(
+  id: string,
+  updates: Partial<Pick<Workflow, 'name' | 'description' | 'nodes' | 'edges'>>,
+  expectedVersion: number
+): Promise<Workflow | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (updates.name !== undefined) {
+    fields.push(`name = $${idx}`);
+    values.push(updates.name);
+    idx++;
+  }
+  if (updates.description !== undefined) {
+    fields.push(`description = $${idx}`);
+    values.push(updates.description);
+    idx++;
+  }
+  if (updates.nodes !== undefined) {
+    fields.push(`nodes = $${idx}::jsonb`);
+    values.push(JSON.stringify(updates.nodes));
+    idx++;
+  }
+  if (updates.edges !== undefined) {
+    fields.push(`edges = $${idx}::jsonb`);
+    values.push(JSON.stringify(updates.edges));
+    idx++;
+  }
+
+  if (fields.length === 0) return null;
+
+  // Optimistic concurrency: only update if lock_version matches
+  const result = await pool.query(
+    `UPDATE workflows SET ${fields.join(', ')}, lock_version = lock_version + 1, updated_at = NOW()
+     WHERE id = $${idx} AND lock_version = $${idx + 1}
+     RETURNING *`,
+    [...values, id, expectedVersion]
+  );
+
+  return result.rows[0] || null;
+}
+
+export async function deleteWorkflow(id: string): Promise<boolean> {
+  const result = await pool.query('DELETE FROM workflows WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+// --- Workflow Versions ---
+
+export async function publishWorkflowVersion(
+  workflowId: string,
+  publishedBy: string
+): Promise<WorkflowVersion | null> {
+  const workflow = await getWorkflow(workflowId);
+  if (!workflow) return null;
+
+  // Get next version number
+  const versionResult = await pool.query(
+    'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM workflow_versions WHERE workflow_id = $1',
+    [workflowId]
+  );
+  const nextVersion = parseInt(versionResult.rows[0].next_version);
+
+  const versionId = `wfv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(
+    `INSERT INTO workflow_versions (id, workflow_id, version_number, nodes, edges, published_by)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+     RETURNING *`,
+    [
+      versionId,
+      workflowId,
+      nextVersion,
+      JSON.stringify(workflow.nodes),
+      JSON.stringify(workflow.edges),
+      publishedBy,
+    ]
+  );
+
+  // Update workflow's published_version_id
+  await pool.query(
+    'UPDATE workflows SET published_version_id = $1, updated_at = NOW() WHERE id = $2',
+    [versionId, workflowId]
+  );
+
+  return result.rows[0];
+}
+
+export async function getWorkflowVersion(id: string): Promise<WorkflowVersion | null> {
+  const result = await pool.query('SELECT * FROM workflow_versions WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+  const result = await pool.query(
+    'SELECT * FROM workflow_versions WHERE workflow_id = $1 ORDER BY version_number DESC',
+    [workflowId]
+  );
+  return result.rows;
+}
+
+// --- Agent Workflows ---
+
+export async function getAgentWorkflow(agentId: string): Promise<(AgentWorkflow & { workflow_name: string }) | null> {
+  const result = await pool.query(
+    `SELECT aw.*, w.name as workflow_name
+     FROM agent_workflows aw
+     JOIN workflows w ON w.id = aw.workflow_id
+     WHERE aw.agent_id = $1`,
+    [agentId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function setAgentWorkflow(
+  agentId: string,
+  workflowId: string,
+  workflowVersionId: string,
+  userEmail: string
+): Promise<AgentWorkflow> {
+  const id = `aw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(
+    `INSERT INTO agent_workflows (id, agent_id, workflow_id, workflow_version_id, user_email)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (agent_id) DO UPDATE SET
+       workflow_id = $3, workflow_version_id = $4, assigned_at = NOW()
+     RETURNING *`,
+    [id, agentId, workflowId, workflowVersionId, userEmail]
+  );
+  return result.rows[0];
+}
+
+export async function removeAgentWorkflow(agentId: string): Promise<boolean> {
+  const result = await pool.query('DELETE FROM agent_workflows WHERE agent_id = $1', [agentId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function getAgentsByWorkflow(workflowId: string): Promise<Array<{ agent_id: string; agent_name: string }>> {
+  const result = await pool.query(
+    `SELECT aw.agent_id, a.name as agent_name
+     FROM agent_workflows aw
+     JOIN agents a ON a.id = aw.agent_id
+     WHERE aw.workflow_id = $1`,
+    [workflowId]
+  );
+  return result.rows;
+}
+
+// --- Workflow Execution State ---
+
+export async function createWorkflowExecutionState(state: {
+  id: string;
+  run_id: string;
+  task_id: string;
+  workflow_version_id: string;
+  current_node_id: string;
+}): Promise<WorkflowExecutionState> {
+  const result = await pool.query(
+    `INSERT INTO workflow_execution_state (id, run_id, task_id, workflow_version_id, current_node_id)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [state.id, state.run_id, state.task_id, state.workflow_version_id, state.current_node_id]
+  );
+  return result.rows[0];
+}
+
+export async function getWorkflowExecutionState(runId: string): Promise<WorkflowExecutionState | null> {
+  const result = await pool.query(
+    'SELECT * FROM workflow_execution_state WHERE run_id = $1',
+    [runId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function updateWorkflowExecutionState(
+  runId: string,
+  updates: Partial<Pick<WorkflowExecutionState, 'current_node_id' | 'completed_nodes' | 'variables' | 'status'>>
+): Promise<WorkflowExecutionState | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (updates.current_node_id !== undefined) {
+    fields.push(`current_node_id = $${idx}`);
+    values.push(updates.current_node_id);
+    idx++;
+  }
+  if (updates.completed_nodes !== undefined) {
+    fields.push(`completed_nodes = $${idx}::jsonb`);
+    values.push(JSON.stringify(updates.completed_nodes));
+    idx++;
+  }
+  if (updates.variables !== undefined) {
+    fields.push(`variables = $${idx}::jsonb`);
+    values.push(JSON.stringify(updates.variables));
+    idx++;
+  }
+  if (updates.status !== undefined) {
+    fields.push(`status = $${idx}`);
+    values.push(updates.status);
+    idx++;
+  }
+
+  if (fields.length === 0) return null;
+
+  const result = await pool.query(
+    `UPDATE workflow_execution_state SET ${fields.join(', ')}, updated_at = NOW()
+     WHERE run_id = $${idx}
+     RETURNING *`,
+    [...values, runId]
+  );
+  return result.rows[0] || null;
+}
+
+// --- Workflow Execution Events ---
+
+export async function appendWorkflowEvent(event: {
+  run_id: string;
+  task_id: string;
+  node_id: string;
+  event_type: WorkflowEventType;
+  node_label: string;
+  details?: Record<string, unknown> | null;
+}): Promise<WorkflowExecutionEvent> {
+  const result = await pool.query(
+    `INSERT INTO workflow_execution_events (run_id, task_id, node_id, event_type, node_label, details)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+     RETURNING *`,
+    [
+      event.run_id,
+      event.task_id,
+      event.node_id,
+      event.event_type,
+      event.node_label,
+      event.details ? JSON.stringify(event.details) : null,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function getWorkflowEvents(
+  taskId: string,
+  opts: { runId?: string; afterId?: number; limit?: number } = {}
+): Promise<WorkflowExecutionEvent[]> {
+  const conditions = ['task_id = $1'];
+  const values: (string | number)[] = [taskId];
+  let idx = 2;
+
+  if (opts.runId) {
+    conditions.push(`run_id = $${idx}`);
+    values.push(opts.runId);
+    idx++;
+  }
+  if (opts.afterId != null) {
+    conditions.push(`id > $${idx}`);
+    values.push(opts.afterId);
+    idx++;
+  }
+
+  const limit = opts.limit || 200;
+  const result = await pool.query(
+    `SELECT * FROM workflow_execution_events WHERE ${conditions.join(' AND ')} ORDER BY id ASC LIMIT $${idx}`,
+    [...values, limit]
+  );
+  return result.rows;
 }
 
 export default pool;

@@ -540,6 +540,15 @@ export default function KanbanBoard() {
               <span className="hidden sm:inline">Agents</span>
             </Link>
 
+            {/* Workflows Button */}
+            <Link
+              href="/workflows"
+              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
+            >
+              <span className="text-base sm:text-lg">🔀</span>
+              <span className="hidden sm:inline">Workflows</span>
+            </Link>
+
             {/* Runs Button */}
             <Link
               href="/runs"

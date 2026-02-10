@@ -1,5 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject, getAgentByName, getAgentWorkflow } from './db';
 import { agentQueue } from './agent-queue';
 import { taskLogBuffer } from './task-log-buffer';
 
@@ -197,6 +197,22 @@ async function processUserTasks(userEmail: string): Promise<void> {
       const backoffMs = Math.min(finishedRuns.length * 60_000, 600_000); // 1min per run, max 10min
       if (Date.now() - lastRunTime < backoffMs) {
         continue; // Not enough time has passed, skip for now
+      }
+    }
+
+    // Gate: if the agent requires a workflow but has none assigned, skip
+    if (process.env.FEATURE_WORKFLOWS === 'true' && task.assignee) {
+      try {
+        const agent = await getAgentByName(task.assignee);
+        if (agent?.requires_workflow) {
+          const workflow = await getAgentWorkflow(agent.id);
+          if (!workflow) {
+            console.log(`[Scheduler] Task ${task.id.slice(0, 8)} skipped: agent ${task.assignee} requires_workflow but has none assigned`);
+            continue;
+          }
+        }
+      } catch {
+        // Non-blocking — proceed without workflow gate
       }
     }
 
