@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents, getAgentWorkflow, getWorkflowVersion } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents, getAgentWorkflow, getWorkflowVersion, appendWorkflowEvent } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
@@ -577,6 +577,7 @@ class AgentQueue {
       }
 
       // Inject workflow instructions if agent has an assigned workflow
+      let workflowRunActive = false;
       if (process.env.FEATURE_WORKFLOWS === 'true') {
         const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
         if (agentRecord) {
@@ -592,6 +593,7 @@ class AgentQueue {
                 const workflowPrompt = serializeWorkflowToPrompt(version, execState);
                 if (workflowPrompt) {
                   context.agentMemory = (context.agentMemory || '') + '\n\n' + workflowPrompt;
+                  workflowRunActive = true;
                   console.log(`[Agent] Injected workflow "${agentWorkflow.workflow_name}" (v${version.version_number}) for ${task.assignee}`);
                   taskLogBuffer.append({
                     task_id: job.taskId,
@@ -603,10 +605,14 @@ class AgentQueue {
                   });
                 }
               }
+            } else {
+              console.log(`[Agent] Agent "${task.assignee}" (${agentRecord.id.slice(0, 8)}) has no workflow assigned`);
             }
           } catch (err) {
             console.warn('[Agent] Failed to load workflow (non-blocking):', err);
           }
+        } else if (task.assignee) {
+          console.log(`[Agent] No agent record found for assignee "${task.assignee}" — skipping workflow`);
         }
       }
 
@@ -796,6 +802,27 @@ class AgentQueue {
             content: content.slice(0, 1000),
             timestamp: Date.now(),
           });
+
+          // Process workflow step markers from agent output
+          if (workflowRunActive) {
+            const markers = parseStepMarkers(content);
+            for (const nodeId of markers.started) {
+              appendWorkflowEvent({
+                run_id: run.id,
+                task_id: job.taskId,
+                node_id: nodeId,
+                event_type: 'step_started',
+                node_label: nodeId,
+              }).catch(err => console.warn('[Agent] Failed to record step_started:', err));
+            }
+            for (const nodeId of markers.completed) {
+              advanceExecution(run.id, nodeId, {
+                task: { id: job.taskId, status: task.status },
+                run: { id: run.id, agentType: job.agentType },
+                variables: {},
+              }).catch(err => console.warn('[Agent] Failed to advance workflow:', err));
+            }
+          }
         },
       });
 
