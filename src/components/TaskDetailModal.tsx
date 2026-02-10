@@ -115,6 +115,17 @@ interface DependencyItem {
   status: string;
 }
 
+interface WorkflowEvent {
+  id: number;
+  run_id: string;
+  task_id: string;
+  node_id: string;
+  event_type: 'step_started' | 'step_completed' | 'step_failed' | 'condition_evaluated' | 'checkpoint_reached';
+  node_label: string;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
 function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive = false, projectName }: TaskDetailModalProps) {
   const { data: session } = useSession();
   const [comments, setComments] = useState<Comment[]>([]);
@@ -123,7 +134,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   const [newComment, setNewComment] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs' | 'logs'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'activity' | 'agent_context' | 'runs' | 'logs' | 'workflow'>('details');
   const [dependencies, setDependencies] = useState<DependencyItem[]>([]);
   const [dependents, setDependents] = useState<DependencyItem[]>([]);
   const [depSearchQuery, setDepSearchQuery] = useState('');
@@ -133,6 +144,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState<AgentRun | null>(null);
   const [githubRepo, setGithubRepo] = useState<string | null>(null);
+  const [workflowEvents, setWorkflowEvents] = useState<WorkflowEvent[]>([]);
   // Defer overdue check to client-side only to avoid hydration mismatch
   // (server runs in UTC, client runs in user's local time)
   const [isOverdue, setIsOverdue] = useState(false);
@@ -153,6 +165,7 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
       fetchDependencies();
       fetchAllTasks();
       fetchGithubRepo();
+      fetchWorkflowEvents();
     }
   }, [task, isOpen]);
 
@@ -169,6 +182,19 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
       }
     } catch {
       // ignore
+    }
+  };
+
+  const fetchWorkflowEvents = async () => {
+    if (!task) return;
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/workflow-events`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorkflowEvents(data);
+      }
+    } catch {
+      // ignore — feature may be disabled
     }
   };
 
@@ -528,6 +554,17 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
             <span>📊</span>
             <span>Runs{runs.length > 0 ? ` (${runs.length})` : ''}</span>
           </button>
+          {workflowEvents.length > 0 && (
+            <button
+              onClick={() => setActiveTab('workflow')}
+              className={`px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'workflow' ? 'text-white border-b-2 border-cyan-500' : 'text-white/50 hover:text-white/70'
+              }`}
+            >
+              <span>📋</span>
+              <span>Workflow</span>
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('logs')}
             className={`px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 ${
@@ -940,6 +977,82 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
                   No agent context set for this task
                 </div>
               )}
+            </div>
+          ) : activeTab === 'workflow' ? (
+            /* Workflow Execution Tab */
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-white/50 text-sm">
+                <span>📋</span>
+                <span>Workflow execution progress</span>
+              </div>
+              {(() => {
+                // Group events by node_id to show step progress
+                const nodeSteps = new Map<string, { started?: WorkflowEvent; completed?: WorkflowEvent; failed?: WorkflowEvent; label: string }>();
+                const orderedNodeIds: string[] = [];
+                for (const event of workflowEvents) {
+                  if (!nodeSteps.has(event.node_id)) {
+                    nodeSteps.set(event.node_id, { label: event.node_label });
+                    orderedNodeIds.push(event.node_id);
+                  }
+                  const step = nodeSteps.get(event.node_id)!;
+                  step.label = event.node_label || step.label;
+                  if (event.event_type === 'step_started') step.started = event;
+                  if (event.event_type === 'step_completed') step.completed = event;
+                  if (event.event_type === 'step_failed') step.failed = event;
+                }
+
+                return (
+                  <div className="space-y-2">
+                    {orderedNodeIds.map((nodeId) => {
+                      const step = nodeSteps.get(nodeId)!;
+                      const isCompleted = !!step.completed;
+                      const isFailed = !!step.failed;
+                      const isRunning = !!step.started && !isCompleted && !isFailed;
+
+                      return (
+                        <div
+                          key={nodeId}
+                          className={`p-3 rounded-lg border ${
+                            isCompleted ? 'border-emerald-500/30 bg-emerald-500/5' :
+                            isFailed ? 'border-red-500/30 bg-red-500/5' :
+                            isRunning ? 'border-blue-500/30 bg-blue-500/5' :
+                            'border-white/10 bg-black/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">
+                              {isCompleted ? '✅' : isFailed ? '❌' : isRunning ? '🔄' : '⏳'}
+                            </span>
+                            <span className="text-sm font-medium text-white/80">{step.label}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ml-auto ${
+                              isCompleted ? 'bg-emerald-500/20 text-emerald-400' :
+                              isFailed ? 'bg-red-500/20 text-red-400' :
+                              isRunning ? 'bg-blue-500/20 text-blue-400' :
+                              'bg-white/10 text-white/40'
+                            }`}>
+                              {isCompleted ? 'completed' : isFailed ? 'failed' : isRunning ? 'running' : 'pending'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 mt-1.5 text-xs text-white/40">
+                            {step.started && (
+                              <span>Started: {new Date(step.started.created_at).toLocaleTimeString()}</span>
+                            )}
+                            {step.completed && (
+                              <span>Completed: {new Date(step.completed.created_at).toLocaleTimeString()}</span>
+                            )}
+                            {step.completed && step.started && (
+                              <span>Duration: {Math.round((new Date(step.completed.created_at).getTime() - new Date(step.started.created_at).getTime()) / 1000)}s</span>
+                            )}
+                            {step.failed && (
+                              <span className="text-red-400">Failed: {new Date(step.failed.created_at).toLocaleTimeString()}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           ) : activeTab === 'logs' ? (
             /* Live Logs Tab */
