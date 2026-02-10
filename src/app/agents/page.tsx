@@ -33,6 +33,13 @@ interface InstalledSkill {
   category: string | null;
 }
 
+interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  published_version_id: string | null;
+}
+
 interface ReportData {
   total_tasks: number;
   by_status: Record<string, number>;
@@ -79,12 +86,15 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [specializations, setSpecializations] = useState<Specialization[]>([]);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [inProgressTasks, setInProgressTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
+  const [requiresWorkflow, setRequiresWorkflow] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     specialization: 'Full Stack Developer',
@@ -102,12 +112,13 @@ export default function AgentsPage() {
 
   const fetchAllData = async () => {
     try {
-      const [agentsRes, reportsRes, tasksRes, specsRes, skillsRes] = await Promise.all([
+      const [agentsRes, reportsRes, tasksRes, specsRes, skillsRes, workflowsRes] = await Promise.all([
         fetch('/api/agents'),
         fetch('/api/reports'),
         fetch('/api/tasks?status=in_progress'),
         fetch('/api/specializations'),
         fetch('/api/skills/installed'),
+        fetch('/api/workflows'),
       ]);
 
       if (agentsRes.ok) setAgents(await agentsRes.json());
@@ -117,6 +128,10 @@ export default function AgentsPage() {
       if (skillsRes.ok) {
         const data = await skillsRes.json();
         setInstalledSkills(data.skills || data || []);
+      }
+      if (workflowsRes.ok) {
+        const data = await workflowsRes.json();
+        setWorkflows(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -170,6 +185,27 @@ export default function AgentsPage() {
             body: JSON.stringify({ skill_ids: selectedSkillIds }),
           });
         }
+        // Save workflow assignment
+        if (selectedWorkflowId) {
+          await fetch(`/api/agents/${savedAgent.id}/workflow`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workflow_id: selectedWorkflowId,
+              requires_workflow: requiresWorkflow,
+            }),
+          });
+        } else if (editingAgent) {
+          // No workflow selected — remove any existing assignment
+          await fetch(`/api/agents/${savedAgent.id}/workflow`, { method: 'DELETE' });
+          if (requiresWorkflow) {
+            await fetch(`/api/agents/${savedAgent.id}/workflow`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ requires_workflow: false }),
+            });
+          }
+        }
         fetchAgents();
         closeModal();
       } else {
@@ -200,6 +236,8 @@ export default function AgentsPage() {
   const openCreateModal = () => {
     setEditingAgent(null);
     setSelectedSkillIds([]);
+    setSelectedWorkflowId('');
+    setRequiresWorkflow(false);
     setFormData({
       name: '',
       specialization: specializations[0]?.name || 'Full Stack Developer',
@@ -225,15 +263,30 @@ export default function AgentsPage() {
       avatar_color: agent.avatar_color,
       is_active: agent.is_active,
     });
-    // Fetch current skills for this agent
+    // Fetch current skills and workflow for this agent
     try {
-      const res = await fetch(`/api/agents/${agent.id}/skills`);
-      if (res.ok) {
-        const data = await res.json();
+      const [skillsRes, workflowRes] = await Promise.all([
+        fetch(`/api/agents/${agent.id}/skills`),
+        fetch(`/api/agents/${agent.id}/workflow`),
+      ]);
+      if (skillsRes.ok) {
+        const data = await skillsRes.json();
         setSelectedSkillIds((data.skills || []).map((s: { skill_id: string }) => s.skill_id));
+      } else {
+        setSelectedSkillIds([]);
+      }
+      if (workflowRes.ok) {
+        const data = await workflowRes.json();
+        setSelectedWorkflowId(data.workflow_id || '');
+        setRequiresWorkflow(data.requires_workflow || false);
+      } else {
+        setSelectedWorkflowId('');
+        setRequiresWorkflow(false);
       }
     } catch {
       setSelectedSkillIds([]);
+      setSelectedWorkflowId('');
+      setRequiresWorkflow(false);
     }
     setShowModal(true);
   };
@@ -579,6 +632,48 @@ export default function AgentsPage() {
                   <p className="text-[10px] text-white/30 mt-1">
                     {selectedSkillIds.length} skill{selectedSkillIds.length !== 1 ? 's' : ''} selected
                   </p>
+                </div>
+              )}
+
+              {/* Workflow Assignment */}
+              {workflows.length > 0 && (
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">Workflow</label>
+                  <select
+                    value={selectedWorkflowId}
+                    onChange={(e) => setSelectedWorkflowId(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500/50"
+                  >
+                    <option value="" className="bg-slate-800">None</option>
+                    {workflows.filter(w => w.published_version_id).map((w) => (
+                      <option key={w.id} value={w.id} className="bg-slate-800">
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                  {workflows.filter(w => !w.published_version_id).length > 0 && (
+                    <p className="text-[10px] text-white/30 mt-1">
+                      {workflows.filter(w => !w.published_version_id).length} unpublished workflow{workflows.filter(w => !w.published_version_id).length !== 1 ? 's' : ''} hidden
+                    </p>
+                  )}
+                  {selectedWorkflowId && (
+                    <div className="flex items-center gap-3 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setRequiresWorkflow(!requiresWorkflow)}
+                        className={`w-12 h-6 rounded-full transition-colors ${
+                          requiresWorkflow ? 'bg-blue-500' : 'bg-white/20'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                          requiresWorkflow ? 'translate-x-6' : 'translate-x-0.5'
+                        }`} />
+                      </button>
+                      <span className="text-sm text-white/70">
+                        Require workflow - {requiresWorkflow ? 'Agent will not run without it' : 'Workflow is optional'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
