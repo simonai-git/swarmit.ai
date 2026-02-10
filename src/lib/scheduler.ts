@@ -1,5 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { Task, getUsersWithApiKeys, getTasksByUserEmail, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject, getAgent, getAgentWorkflow, getAgentTypeFromSpecialization } from './db';
+import { Task, getUsersWithApiKeys, getTasksByUserId, getAgentRunsByTask, updateTask, getOrphanedTasks, assignOrphanedTasks, cleanupOldTaskLogs, getProject, getAgent, getAgentWorkflow, getAgentTypeFromSpecialization } from './db';
 import { agentQueue } from './agent-queue';
 import { taskLogBuffer } from './task-log-buffer';
 
@@ -67,9 +67,9 @@ function getPriorityValue(priority: string): number {
 /**
  * Process tasks for a single user
  */
-async function processUserTasks(userEmail: string): Promise<void> {
+async function processUserTasks(userId: string): Promise<void> {
   // Get tasks owned by this user
-  const allTasks = await getTasksByUserEmail(userEmail);
+  const allTasks = await getTasksByUserId(userId);
 
   // Build set of cancelled/completed project IDs to skip their tasks
   const projectIds = [...new Set(allTasks.map(t => t.project_id).filter(Boolean))] as string[];
@@ -87,7 +87,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
   let queuedTaskIds = new Set<string>();
   let activeTaskIds = new Set<string>();
   try {
-    const queueStatus = await agentQueue.getStatus(userEmail);
+    const queueStatus = await agentQueue.getStatus(userId);
     queuedTaskIds = new Set(
       queueStatus.jobs
         .filter(j => ['pending', 'running'].includes(j.status))
@@ -117,14 +117,14 @@ async function processUserTasks(userEmail: string): Promise<void> {
       }
     }
   } catch (error) {
-    console.warn(`[Scheduler] Failed to get queue status for ${userEmail}, proceeding without queue dedup:`, error instanceof Error ? error.message : String(error));
+    console.warn(`[Scheduler] Failed to get queue status for ${userId}, proceeding without queue dedup:`, error instanceof Error ? error.message : String(error));
   }
 
   // Get or create per-user recently enqueued set
-  if (!recentlyEnqueued.has(userEmail)) {
-    recentlyEnqueued.set(userEmail, new Set<string>());
+  if (!recentlyEnqueued.has(userId)) {
+    recentlyEnqueued.set(userId, new Set<string>());
   }
-  const userRecentlyEnqueued = recentlyEnqueued.get(userEmail)!;
+  const userRecentlyEnqueued = recentlyEnqueued.get(userId)!;
 
   // Filter to tasks that need agent work
   const tasksNeedingWork: Task[] = [];
@@ -133,11 +133,11 @@ async function processUserTasks(userEmail: string): Promise<void> {
     if (task.project_id && inactiveProjectIds.has(task.project_id)) continue;
     if (!task.assignee) continue;
     if (queuedTaskIds.has(task.id)) {
-      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} already queued for ${userEmail}, skipping`);
+      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} already queued for ${userId}, skipping`);
       continue;
     }
     if (activeTaskIds.has(task.id)) {
-      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} has active agent for ${userEmail}, skipping`);
+      console.log(`[Scheduler] Task ${task.id.slice(0, 8)} has active agent for ${userId}, skipping`);
       continue;
     }
     if (userRecentlyEnqueued.has(task.id)) continue;
@@ -220,7 +220,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
     tasksNeedingWork.push(task);
   }
 
-  console.log(`[Scheduler] Found ${tasksNeedingWork.length} tasks needing work for ${userEmail}`);
+  console.log(`[Scheduler] Found ${tasksNeedingWork.length} tasks needing work for ${userId}`);
 
   // Enqueue tasks (limit to prevent flooding)
   const maxToEnqueue = 5;
@@ -231,14 +231,14 @@ async function processUserTasks(userEmail: string): Promise<void> {
       const agentType = await getAgentTypeForTask(task);
       const priority = getPriorityValue(task.priority);
 
-      console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent [${userEmail}]`);
+      console.log(`[Scheduler] Enqueuing task ${task.id.slice(0, 8)} (${task.title}) for ${agentType} agent [${userId}]`);
 
       await agentQueue.enqueue({
         taskId: task.id,
         agentType,
         priority,
-        tenantId: userEmail,
-        userEmail,
+        tenantId: userId,
+        userId,
       });
 
       userRecentlyEnqueued.add(task.id);
@@ -249,7 +249,7 @@ async function processUserTasks(userEmail: string): Promise<void> {
       }, 60000);
 
     } catch (error) {
-      console.error(`[Scheduler] Failed to enqueue task ${task.id} for ${userEmail}:`, error);
+      console.error(`[Scheduler] Failed to enqueue task ${task.id} for ${userId}:`, error);
     }
   }
 }
@@ -274,17 +274,17 @@ async function schedulerTick(): Promise<void> {
     // Process each user's tasks independently
     for (const user of users) {
       try {
-        await processUserTasks(user.email);
+        await processUserTasks(user.id);
       } catch (error) {
-        console.error(`[Scheduler] Error processing tasks for ${user.email}:`, error);
+        console.error(`[Scheduler] Error processing tasks for ${user.id}:`, error);
       }
     }
 
-    // Backfill orphaned tasks (user_email IS NULL) to first available user
+    // Backfill orphaned tasks (user_id IS NULL) to first available user
     const orphanedTasks = await getOrphanedTasks();
     if (orphanedTasks.length > 0 && users.length > 0) {
-      console.warn(`[Scheduler] Found ${orphanedTasks.length} orphaned tasks, assigning to ${users[0].email}`);
-      await assignOrphanedTasks(users[0].email);
+      console.warn(`[Scheduler] Found ${orphanedTasks.length} orphaned tasks, assigning to ${users[0].id}`);
+      await assignOrphanedTasks(users[0].id);
     }
 
     // Log summary

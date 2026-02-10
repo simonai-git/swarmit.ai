@@ -1,5 +1,24 @@
 import { NextAuthOptions } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
+import { getOrCreateUser } from './db';
+
+// Extend NextAuth types to include user.id
+declare module 'next-auth' {
+  interface Session {
+    user: {
+      id: string;
+      email: string;
+      name?: string | null;
+      image?: string | null;
+    };
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT {
+    userId?: string;
+  }
+}
 
 // Allowed emails - only these can access the app
 const ALLOWED_EMAILS = [
@@ -25,7 +44,18 @@ export const authOptions: NextAuthOptions = {
       }
       return false;
     },
+    async jwt({ token, user }) {
+      // On first sign-in, resolve stable user_id
+      if (user?.email) {
+        const profile = await getOrCreateUser(user.email, user.name || undefined, user.image || undefined);
+        token.userId = profile.id;
+      }
+      return token;
+    },
     async session({ session, token }) {
+      if (session.user && token.userId) {
+        session.user.id = token.userId as string;
+      }
       return session;
     },
   },

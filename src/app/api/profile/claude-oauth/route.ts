@@ -6,15 +6,16 @@ import pool from '@/lib/db';
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const result = await pool.query(
-      `SELECT claude_email, claude_connected_at 
+      `SELECT claude_email, claude_connected_at
        FROM user_integrations
-       WHERE user_email = $1 AND claude_token IS NOT NULL`,
-      [session.user.email]
+       WHERE user_id = $1 AND claude_token IS NOT NULL`,
+      [userId]
     );
 
     if (result.rows.length === 0) {
@@ -36,15 +37,16 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     await pool.query(
-      `UPDATE user_integrations 
+      `UPDATE user_integrations
        SET claude_token = NULL, claude_email = NULL, claude_connected_at = NULL
-       WHERE user_email = $1`,
-      [session.user.email]
+       WHERE user_id = $1`,
+      [userId]
     );
 
     return NextResponse.json({ success: true });

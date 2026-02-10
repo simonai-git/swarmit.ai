@@ -33,7 +33,7 @@ import {
 import { getServerSession } from 'next-auth';
 
 const mockAgent = { id: 'agent-123', name: 'TestAgent', requires_workflow: false };
-const mockWorkflow = { id: 'wf-1', name: 'Test Workflow', published_version_id: 'wfv-1', user_email: 'test@test.com' };
+const mockWorkflow = { id: 'wf-1', name: 'Test Workflow', published_version_id: 'wfv-1', user_id: 'user-test-123' };
 const mockWorkflowVersion = { id: 'wfv-1', workflow_id: 'wf-1', version_number: 1, nodes: [], edges: [] };
 const mockAgentWorkflow = { id: 'aw-1', agent_id: 'agent-123', workflow_id: 'wf-1', workflow_version_id: 'wfv-1' };
 
@@ -41,7 +41,7 @@ describe('API /api/agents/[id]/workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.FEATURE_WORKFLOWS = 'true';
-    vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@test.com' } });
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@test.com' } });
   });
 
   describe('GET /api/agents/:id/workflow', () => {
@@ -244,7 +244,7 @@ describe('API /api/agents/[id]/workflow', () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual(mockAgentWorkflow);
-      expect(setAgentWorkflow).toHaveBeenCalledWith('agent-123', 'wf-1', 'wfv-1', 'test@test.com');
+      expect(setAgentWorkflow).toHaveBeenCalledWith('agent-123', 'wf-1', 'wfv-1', 'user-test-123');
     });
 
     it('should assign workflow with explicit workflow_version_id', async () => {
@@ -269,7 +269,7 @@ describe('API /api/agents/[id]/workflow', () => {
       expect(response.status).toBe(200);
       expect(data.workflow_version_id).toBe(explicitVersionId);
       expect(getWorkflowVersion).toHaveBeenCalledWith(explicitVersionId);
-      expect(setAgentWorkflow).toHaveBeenCalledWith('agent-123', 'wf-1', explicitVersionId, 'test@test.com');
+      expect(setAgentWorkflow).toHaveBeenCalledWith('agent-123', 'wf-1', explicitVersionId, 'user-test-123');
     });
   });
 

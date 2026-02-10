@@ -12,7 +12,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/db', () => ({
   getTask: vi.fn(),
-  getAutomationUserEmail: vi.fn(),
+  getAutomationUserId: vi.fn(),
 }));
 
 vi.mock('@/lib/agent-queue', () => ({
@@ -24,7 +24,7 @@ vi.mock('@/lib/agent-queue', () => ({
 
 import { POST, GET } from '@/app/api/tasks/[id]/run/route';
 import { getServerSession } from 'next-auth';
-import { getTask, getAutomationUserEmail } from '@/lib/db';
+import { getTask, getAutomationUserId } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 describe('API /api/tasks/[id]/run', () => {
@@ -64,7 +64,7 @@ describe('API /api/tasks/[id]/run', () => {
 
       vi.mocked(getServerSession).mockResolvedValue(null);
       vi.mocked(getTask).mockResolvedValue(task as any);
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@example.com');
+      vi.mocked(getAutomationUserId).mockResolvedValue('automation@example.com');
       vi.mocked(agentQueue.enqueue).mockResolvedValue(job as any);
 
       const request = new NextRequest('http://localhost/api/tasks/task-123/run', {
@@ -80,7 +80,7 @@ describe('API /api/tasks/[id]/run', () => {
     });
 
     it('should return 400 for invalid agentType', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@example.com' } } as any);
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@example.com' } } as any);
 
       const request = new NextRequest('http://localhost/api/tasks/task-123/run', {
         method: 'POST',
@@ -94,7 +94,7 @@ describe('API /api/tasks/[id]/run', () => {
     });
 
     it('should return 404 if task not found', async () => {
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@example.com' } } as any);
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@example.com' } } as any);
       vi.mocked(getTask).mockResolvedValue(null);
 
       const request = new NextRequest('http://localhost/api/tasks/task-123/run', {
@@ -122,7 +122,7 @@ describe('API /api/tasks/[id]/run', () => {
         createdAt: new Date().toISOString(),
       };
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@example.com' } } as any);
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@example.com' } } as any);
       vi.mocked(getTask).mockResolvedValue(task as any);
       vi.mocked(agentQueue.enqueue).mockResolvedValue(job as any);
 
@@ -136,12 +136,12 @@ describe('API /api/tasks/[id]/run', () => {
         taskId: 'task-123',
         agentType: 'developer',
         priority: 10, // high priority
-        tenantId: 'test@example.com',
-        userEmail: 'test@example.com',
+        tenantId: 'user-test-123',
+        userId: 'user-test-123',
       });
     });
 
-    it('should use session email as userEmail', async () => {
+    it('should use session id as userId', async () => {
       const task = {
         id: 'task-123',
         title: 'Test Task',
@@ -155,7 +155,7 @@ describe('API /api/tasks/[id]/run', () => {
         createdAt: new Date().toISOString(),
       };
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'user@example.com' } } as any);
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-456', email: 'user@example.com' } } as any);
       vi.mocked(getTask).mockResolvedValue(task as any);
       vi.mocked(agentQueue.enqueue).mockResolvedValue(job as any);
 
@@ -167,12 +167,12 @@ describe('API /api/tasks/[id]/run', () => {
 
       expect(agentQueue.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          userEmail: 'user@example.com',
+          userId: 'user-456',
         })
       );
     });
 
-    it('should fall back to getAutomationUserEmail() when no session (BUG 6 fix regression test)', async () => {
+    it('should fall back to getAutomationUserId() when no session (BUG 6 fix regression test)', async () => {
       const task = {
         id: 'task-123',
         title: 'Test Task',
@@ -188,7 +188,7 @@ describe('API /api/tasks/[id]/run', () => {
 
       vi.mocked(getServerSession).mockResolvedValue(null);
       vi.mocked(getTask).mockResolvedValue(task as any);
-      vi.mocked(getAutomationUserEmail).mockResolvedValue('automation@example.com');
+      vi.mocked(getAutomationUserId).mockResolvedValue('automation@example.com');
       vi.mocked(agentQueue.enqueue).mockResolvedValue(job as any);
 
       const request = new NextRequest('http://localhost/api/tasks/task-123/run', {
@@ -198,10 +198,10 @@ describe('API /api/tasks/[id]/run', () => {
       });
       await POST(request, { params: Promise.resolve({ id: 'task-123' }) });
 
-      expect(getAutomationUserEmail).toHaveBeenCalled();
+      expect(getAutomationUserId).toHaveBeenCalled();
       expect(agentQueue.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          userEmail: 'automation@example.com',
+          userId: 'automation@example.com',
         })
       );
     });
@@ -220,7 +220,7 @@ describe('API /api/tasks/[id]/run', () => {
         createdAt: new Date().toISOString(),
       };
 
-      vi.mocked(getServerSession).mockResolvedValue({ user: { email: 'test@example.com' } } as any);
+      vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'user-test-123', email: 'test@example.com' } } as any);
       vi.mocked(getTask).mockResolvedValue(task as any);
       vi.mocked(agentQueue.enqueue).mockResolvedValue(job as any);
 

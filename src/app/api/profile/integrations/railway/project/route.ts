@@ -6,7 +6,8 @@ import pool from '@/lib/db';
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -18,10 +19,10 @@ export async function POST(request: NextRequest) {
     }
 
     await pool.query(
-      `UPDATE user_integrations 
+      `UPDATE user_integrations
        SET railway_selected_project = $2
-       WHERE user_email = $1`,
-      [session.user.email, projectId]
+       WHERE user_id = $1`,
+      [userId, projectId]
     );
 
     return NextResponse.json({ success: true });

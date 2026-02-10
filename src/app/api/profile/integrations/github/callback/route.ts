@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.redirect(`${redirectBase}?github=error&message=${encodeURIComponent('Not authenticated')}`);
     }
 
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
 
     // Store in DB
     await setUserGitHubIntegration(
-      session.user.email,
+      userId,
       access_token,
       username,
       'oauth',

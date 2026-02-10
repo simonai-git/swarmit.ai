@@ -47,7 +47,7 @@ export interface AgentJob {
   error?: string;
   retryCount: number;
   tenantId?: string; // Tenant/user scope for multi-tenancy
-  userEmail?: string; // User email to fetch their Claude API key
+  userId?: string; // Stable user ID to fetch their Claude API key
 }
 
 export interface AgentRun {
@@ -130,7 +130,7 @@ function queueJobToAgentJob(qj: QueueJob): AgentJob {
     error: qj.error,
     retryCount: qj.retryCount,
     tenantId: qj.tenantId,
-    userEmail: qj.userEmail,
+    userId: qj.userId,
   };
 }
 
@@ -193,7 +193,7 @@ class AgentQueue {
   }
 
   // Enqueue a job
-  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager'; priority: number; tenantId?: string; userEmail?: string }): Promise<AgentJob> {
+  async enqueue(job: { taskId: string; agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager'; priority: number; tenantId?: string; userId?: string }): Promise<AgentJob> {
     const tenantId = job.tenantId || CONFIG.defaultTenantId;
 
     if (this.shouldUseRedis()) {
@@ -204,7 +204,7 @@ class AgentQueue {
           agentType: job.agentType,
           priority: job.priority,
           maxRetries: CONFIG.maxRetries,
-          userEmail: job.userEmail,
+          userId: job.userId,
         });
 
         // Auto-start processing
@@ -238,7 +238,7 @@ class AgentQueue {
       createdAt: new Date(),
       retryCount: 0,
       tenantId: job.tenantId || CONFIG.defaultTenantId,
-      userEmail: job.userEmail,
+      userId: job.userId,
     };
     
     this.jobs.push(newJob);
@@ -382,7 +382,7 @@ class AgentQueue {
             startedAt: job.startedAt?.toISOString(),
             retryCount: job.retryCount,
             maxRetries: CONFIG.maxRetries,
-            userEmail: job.userEmail,  // Include userEmail for Claude API key lookup
+            userId: job.userId,
           };
 
           await this.executeJob(queueJob);
@@ -723,7 +723,7 @@ class AgentQueue {
         addComment: async (taskId: string, author: string, content: string) => {
           await createComment({ id: uuidv4(), task_id: taskId, author, content });
         },
-        createTask: async (params: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }) => {
+        createTask: async (params: { title: string; description: string; assignee: string; priority: string; projectId: string; userId: string | null }) => {
           // Dedup: if a task with the same title already exists in this project, return its ID
           const existing = await getTasksByProjectId(params.projectId);
           const dup = existing.find(t => t.title === params.title);
@@ -741,7 +741,7 @@ class AgentQueue {
             priority: (params.priority as 'low' | 'medium' | 'high') || 'medium',
             status: 'todo',
             project_id: params.projectId,
-            user_email: params.userEmail,
+            user_id: params.userId,
             is_blocked: true,
             blocked_reason: 'Waiting on: PM plan finalization',
           });
@@ -763,8 +763,8 @@ class AgentQueue {
 
       // Get user's Claude API key if available
       let userApiKey: string | undefined;
-      if (job.userEmail) {
-        userApiKey = await getUserClaudeKey(job.userEmail) || undefined;
+      if (job.userId) {
+        userApiKey = await getUserClaudeKey(job.userId) || undefined;
         console.log(`[Agent] Using ${userApiKey ? 'user' : 'env'} API key for task ${job.taskId}`);
       }
 
@@ -859,7 +859,7 @@ class AgentQueue {
               const depTask = await getTask(dep.task_id);
               if (depTask && !depTask.is_blocked && depTask.status === 'todo') {
                 const { onTaskCreated } = await import('./task-lifecycle');
-                await onTaskCreated(depTask, job.userEmail);
+                await onTaskCreated(depTask, job.userId);
                 console.log(`[Agent] Task ${dep.task_id.slice(0, 8)} unblocked → enqueued agent`);
               }
             }
@@ -906,7 +906,7 @@ class AgentQueue {
                 const refreshed = await getTask(ct.id);
                 if (refreshed && !refreshed.is_blocked && refreshed.status === 'todo') {
                   const { onTaskCreated } = await import('./task-lifecycle');
-                  await onTaskCreated(refreshed, job.userEmail);
+                  await onTaskCreated(refreshed, job.userId);
                   console.log(`[Agent] Root task ${ct.id.slice(0, 8)} unblocked → enqueued agent`);
                 }
               }
@@ -969,11 +969,11 @@ class AgentQueue {
                     assignee: project.project_manager || null,
                     priority: 'high',
                     project_id: task.project_id,
-                    user_email: task.user_email,
+                    user_id: task.user_id,
                   });
                   // Trigger lifecycle to enqueue PM agent
                   const { onTaskCreated } = await import('./task-lifecycle');
-                  await onTaskCreated(pmPlanTask, task.user_email || undefined);
+                  await onTaskCreated(pmPlanTask, task.user_id || undefined);
                   console.log(`[Agent] PRD complete → created PM Plan task ${pmPlanTaskId.slice(0, 8)} for project ${task.project_id}`);
                   taskLogBuffer.append({
                     task_id: job.taskId,
@@ -1024,7 +1024,7 @@ class AgentQueue {
                 agentType: nextAgentType,
                 priority,
                 tenantId: job.tenantId,
-                userEmail: job.userEmail,
+                userId: job.userId,
               });
             }
           }
@@ -1156,7 +1156,7 @@ class AgentQueue {
       const isDevOps = task.assignee ? (await getAgent(task.assignee))?.specialization.toLowerCase().includes('devops') : false;
       if (result.success && repoName && isDevOps) {
         try {
-          const railwayResult = await deployToRailway(job.userEmail || '', repoName, job.taskId, task.title);
+          const railwayResult = await deployToRailway(job.userId || '', repoName, job.taskId, task.title);
           if (railwayResult) {
             taskLogBuffer.append({
               task_id: job.taskId,

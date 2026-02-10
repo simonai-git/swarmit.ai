@@ -35,32 +35,32 @@ function createModel(modelId: string): Model<'anthropic-messages'> {
 }
 
 // Get user's Claude API key from database (decrypted)
-export async function getUserClaudeKey(userEmail: string): Promise<string | null> {
-  console.log(`[Claude] Looking up API key for user: ${userEmail}`);
+export async function getUserClaudeKey(userId: string): Promise<string | null> {
+  console.log(`[Claude] Looking up API key for user: ${userId}`);
   const client = await pool.connect();
   try {
     const result = await client.query(
-      'SELECT claude_api_key FROM user_profiles WHERE email = $1',
-      [userEmail]
+      'SELECT claude_api_key FROM user_profiles WHERE id = $1',
+      [userId]
     );
-    
+
     if (result.rows.length === 0) {
-      console.log(`[Claude] No user profile found for email: ${userEmail}`);
+      console.log(`[Claude] No user profile found for id: ${userId}`);
       return null;
     }
-    
+
     const storedKey = result.rows[0].claude_api_key;
     if (!storedKey) {
-      console.log(`[Claude] No Claude API key stored for user: ${userEmail}`);
+      console.log(`[Claude] No Claude API key stored for user: ${userId}`);
       return null;
     }
-    
+
     // Decrypt (base64 decode)
     const decoded = Buffer.from(storedKey, 'base64').toString('utf-8');
-    console.log(`[Claude] Decoded key for ${userEmail}, starts with: ${decoded.slice(0, 15)}...`);
+    console.log(`[Claude] Decoded key for ${userId}, starts with: ${decoded.slice(0, 15)}...`);
     return decoded;
   } catch (error) {
-    console.error(`[Claude] Error fetching API key for ${userEmail}:`, error);
+    console.error(`[Claude] Error fetching API key for ${userId}:`, error);
     return null;
   } finally {
     client.release();
@@ -654,7 +654,7 @@ export interface ToolExecutor {
 export interface TaskAPI {
   updateTask(taskId: string, updates: Partial<Task>): Promise<void>;
   addComment(taskId: string, author: string, content: string): Promise<void>;
-  createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userEmail: string | null }): Promise<{ id: string }>;
+  createTask?(task: { title: string; description: string; assignee: string; priority: string; projectId: string; userId: string | null }): Promise<{ id: string }>;
   addDependency?(taskId: string, dependsOnId: string): Promise<void>;
   listProjectTasks?(projectId: string): Promise<Array<{ id: string; title: string; status: string; assignee: string | null }>>;
   updateProject?(projectId: string, updates: Partial<Project>): Promise<void>;
@@ -782,7 +782,7 @@ async function executeTool(
           assignee: agentId,
           priority: (toolInput.priority as string) || 'medium',
           projectId,
-          userEmail: context.task.user_email,
+          userId: context.task.user_id,
         });
         return `Task created: ${created.id} — "${toolInput.title}"`;
       }
@@ -799,8 +799,8 @@ async function executeTool(
         return JSON.stringify(tasks, null, 2);
       }
       case 'list_available_agents': {
-        const userEmail = context.task.user_email || 'default';
-        const agents = await getAllActiveAgents(userEmail);
+        const userId = context.task.user_id || 'default';
+        const agents = await getAllActiveAgents(userId);
         const agentList = agents.map(a => ({
           id: a.id,
           name: a.name,

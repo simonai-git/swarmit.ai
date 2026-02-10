@@ -66,9 +66,11 @@ export async function POST(
     let defaultAssignee = body.assignee || null;
     if (!defaultAssignee) {
       const session2 = await getServerSession(authOptions);
-      const userEmail = session2?.user?.email || 'default';
-      const activeAgents = await getActiveAgents(userEmail);
-      defaultAssignee = activeAgents.length > 0 ? activeAgents[0].id : null;
+      const userId = session2?.user?.id;
+      if (userId) {
+        const activeAgents = await getActiveAgents(userId);
+        defaultAssignee = activeAgents.length > 0 ? activeAgents[0].id : null;
+      }
     }
 
     // Create task from feedback

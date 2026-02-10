@@ -102,7 +102,8 @@ async function fetchRailwayProjects(token: string) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -151,11 +152,11 @@ export async function POST(request: NextRequest) {
     // Store the token, account info, and projects
     const railwayData = { account, projects };
     await pool.query(
-      `INSERT INTO user_integrations (user_email, railway_token, railway_projects, railway_connected_at)
+      `INSERT INTO user_integrations (user_id, railway_token, railway_projects, railway_connected_at)
        VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_email) DO UPDATE SET
+       ON CONFLICT (user_id) DO UPDATE SET
          railway_token = $2, railway_projects = $3, railway_connected_at = NOW()`,
-      [session.user.email, token, JSON.stringify(railwayData)]
+      [userId, token, JSON.stringify(railwayData)]
     );
 
     return NextResponse.json({
@@ -173,7 +174,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(_request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -181,8 +183,8 @@ export async function DELETE(_request: NextRequest) {
       `UPDATE user_integrations
        SET railway_token = NULL, railway_projects = NULL, railway_selected_project = NULL, railway_connected_at = NULL,
            railway_refresh_token = NULL, railway_token_expires_at = NULL, railway_auth_method = NULL
-       WHERE user_email = $1`,
-      [session.user.email]
+       WHERE user_id = $1`,
+      [userId]
     );
 
     return NextResponse.json({ success: true });

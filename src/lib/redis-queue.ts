@@ -42,7 +42,7 @@ export interface QueueJob {
   retryCount: number;
   maxRetries: number;
   workerId?: string;          // ID of worker processing this job
-  userEmail?: string;         // User email for Claude API key lookup
+  userId?: string;             // Stable user ID for Claude API key lookup
   metadata?: Record<string, unknown>;  // Additional data
 }
 
@@ -106,7 +106,7 @@ export class RedisQueue {
     agentType: 'developer' | 'qa' | 'reviewer' | 'pm' | 'devops' | 'product_manager';
     priority?: number;
     maxRetries?: number;
-    userEmail?: string;
+    userId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<QueueJob> {
     const r = getRedis();
@@ -124,7 +124,7 @@ export class RedisQueue {
       createdAt: now,
       retryCount: 0,
       maxRetries: params.maxRetries ?? 3,
-      userEmail: params.userEmail,
+      userId: params.userId,
       metadata: params.metadata,
     };
 
@@ -469,7 +469,7 @@ export class RedisQueue {
       retryCount: String(job.retryCount),
       maxRetries: String(job.maxRetries),
       workerId: job.workerId || '',
-      userEmail: job.userEmail || '',
+      userId: job.userId || '',
       metadata: JSON.stringify(job.metadata || {}),
     };
   }
@@ -490,7 +490,7 @@ export class RedisQueue {
       retryCount: parseInt(hash.retryCount) || 0,
       maxRetries: parseInt(hash.maxRetries) || 3,
       workerId: hash.workerId || undefined,
-      userEmail: hash.userEmail || undefined,
+      userId: hash.userId || undefined,
       metadata: hash.metadata ? JSON.parse(hash.metadata) : undefined,
     };
   }

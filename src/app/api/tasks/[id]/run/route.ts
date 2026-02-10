@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getTask, getAutomationUserEmail } from '@/lib/db';
+import { getTask, getAutomationUserId } from '@/lib/db';
 import { agentQueue } from '@/lib/agent-queue';
 
 // Verify API key
@@ -18,7 +18,7 @@ export async function POST(
 ) {
   // Allow either API key OR authenticated session
   const session = await getServerSession(authOptions);
-  if (!verifyApiKey(request) && !session?.user?.email) {
+  if (!verifyApiKey(request) && !session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -45,17 +45,17 @@ export async function POST(
     const priorityMap = { high: 10, medium: 5, low: 1 };
     const priority = priorityMap[task.priority] || 5;
 
-    // Get user email: from request body, from session, from task owner, or look up automation user
-    const { userEmail: requestUserEmail } = body;
-    let userEmail = requestUserEmail || session?.user?.email || task.user_email;
+    // Get user ID: from request body, from session, from task owner, or look up automation user
+    const { userId: requestUserId } = body;
+    let userId = requestUserId || session?.user?.id || task.user_id;
 
-    // If no user email provided, look up the automation user dynamically
-    if (!userEmail) {
-      userEmail = await getAutomationUserEmail();
+    // If no user ID provided, look up the automation user dynamically
+    if (!userId) {
+      userId = await getAutomationUserId();
     }
 
     // tenantId for multi-tenant support (scoped to user)
-    const tenantId = userEmail || 'default';
+    const tenantId = userId || 'default';
 
     // Enqueue the job
     const job = await agentQueue.enqueue({
@@ -63,7 +63,7 @@ export async function POST(
       agentType: agentType as 'developer' | 'qa' | 'reviewer',
       priority,
       tenantId,
-      userEmail,
+      userId,
     });
 
     return NextResponse.json({

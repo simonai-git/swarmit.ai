@@ -69,7 +69,7 @@ describe('RedisQueue', () => {
   });
 
   describe('enqueue', () => {
-    it('should create a job with correct fields including userEmail', async () => {
+    it('should create a job with correct fields including userId', async () => {
       mockRedis.zrange.mockResolvedValueOnce([]);
       mockRedis.smembers.mockResolvedValueOnce([]);
       mockRedis.hset.mockResolvedValueOnce(1);
@@ -81,7 +81,7 @@ describe('RedisQueue', () => {
         agentType: 'developer' as const,
         priority: 8,
         maxRetries: 2,
-        userEmail: 'user@example.com',
+        userId: 'user-123',
         metadata: { customField: 'value' },
       };
 
@@ -95,7 +95,7 @@ describe('RedisQueue', () => {
       expect(job.status).toBe('pending');
       expect(job.retryCount).toBe(0);
       expect(job.maxRetries).toBe(2);
-      expect(job.userEmail).toBe('user@example.com');
+      expect(job.userId).toBe('user-123');
       expect(job.metadata).toEqual({ customField: 'value' });
       expect(job.createdAt).toBeDefined();
     });
@@ -110,7 +110,7 @@ describe('RedisQueue', () => {
         tenantId: 'tenant-1',
         taskId: 'task-1',
         agentType: 'developer' as const,
-        userEmail: 'user@example.com',
+        userId: 'user-123',
       };
 
       await queue.enqueue(params);
@@ -126,7 +126,7 @@ describe('RedisQueue', () => {
           status: 'pending',
           retryCount: '0',
           maxRetries: '3',
-          userEmail: 'user@example.com',
+          userId: 'user-123',
         })
       );
     });
@@ -196,7 +196,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -230,7 +230,7 @@ describe('RedisQueue', () => {
         completedAt: new Date().toISOString(),
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
       mockRedis.hset.mockResolvedValueOnce(1);
@@ -287,7 +287,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -316,7 +316,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: 'user@example.com',
+        userId: 'user-123',
         metadata: '{}',
       });
 
@@ -377,7 +377,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -402,7 +402,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -432,7 +432,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -471,7 +471,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -524,7 +524,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -580,7 +580,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -608,7 +608,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -651,7 +651,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: 'user@example.com',
+        userId: 'user-123',
         metadata: JSON.stringify({ key: 'value' }),
       });
 
@@ -664,7 +664,7 @@ describe('RedisQueue', () => {
       expect(job?.agentType).toBe('developer');
       expect(job?.priority).toBe(7);
       expect(job?.status).toBe('pending');
-      expect(job?.userEmail).toBe('user@example.com');
+      expect(job?.userId).toBe('user-123');
       expect(job?.metadata).toEqual({ key: 'value' });
     });
 
@@ -676,7 +676,7 @@ describe('RedisQueue', () => {
       expect(job).toBeNull();
     });
 
-    it('should handle empty userEmail correctly', async () => {
+    it('should handle empty userId correctly', async () => {
       mockRedis.hgetall.mockResolvedValueOnce({
         id: 'job-1',
         tenantId: 'tenant-1',
@@ -691,13 +691,13 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
       const job = await queue.getJob('job-1');
 
-      expect(job?.userEmail).toBeUndefined();
+      expect(job?.userId).toBeUndefined();
     });
   });
 
@@ -721,7 +721,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -738,7 +738,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -755,7 +755,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: 'worker-1',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         });
 
@@ -795,7 +795,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -827,7 +827,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -844,7 +844,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -861,7 +861,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: 'worker-1',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         });
 
@@ -890,7 +890,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -907,7 +907,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: 'worker-1',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         });
 
@@ -936,7 +936,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       };
       const job2Hash = {
@@ -953,7 +953,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-2',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       };
 
@@ -988,7 +988,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: 'worker-1',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -1063,7 +1063,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -1107,7 +1107,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -1124,7 +1124,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: 'worker-1',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         });
 
@@ -1167,7 +1167,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: '',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         })
         .mockResolvedValueOnce({
@@ -1184,7 +1184,7 @@ describe('RedisQueue', () => {
           completedAt: '',
           error: '',
           workerId: 'worker-1',
-          userEmail: '',
+          userId: '',
           metadata: '{}',
         });
 
@@ -1207,7 +1207,7 @@ describe('RedisQueue', () => {
   });
 
   describe('jobToHash and hashToJob', () => {
-    it('should include userEmail in serialization', async () => {
+    it('should include userId in serialization', async () => {
       mockRedis.zrange.mockResolvedValueOnce([]);
       mockRedis.smembers.mockResolvedValueOnce([]);
       mockRedis.hset.mockResolvedValueOnce(1);
@@ -1217,22 +1217,22 @@ describe('RedisQueue', () => {
         tenantId: 'tenant-1',
         taskId: 'task-1',
         agentType: 'developer' as const,
-        userEmail: 'user@example.com',
+        userId: 'user-123',
         metadata: { key: 'value' },
       };
 
       await queue.enqueue(params);
 
-      // Verify userEmail was included in hash
+      // Verify userId was included in hash
       expect(mockRedis.hset).toHaveBeenCalledWith(
         KEYS.job('test-uuid-123'),
         expect.objectContaining({
-          userEmail: 'user@example.com',
+          userId: 'user-123',
         })
       );
     });
 
-    it('should deserialize userEmail correctly via getJob', async () => {
+    it('should deserialize userId correctly via getJob', async () => {
       mockRedis.hgetall.mockResolvedValueOnce({
         id: 'job-1',
         tenantId: 'tenant-1',
@@ -1247,13 +1247,13 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: 'test@example.com',
+        userId: 'user-test-456',
         metadata: JSON.stringify({ foo: 'bar' }),
       });
 
       const job = await queue.getJob('job-1');
 
-      expect(job?.userEmail).toBe('test@example.com');
+      expect(job?.userId).toBe('user-test-456');
       expect(job?.metadata).toEqual({ foo: 'bar' });
     });
 
@@ -1272,7 +1272,7 @@ describe('RedisQueue', () => {
         completedAt: '',
         error: '',
         workerId: '',
-        userEmail: '',
+        userId: '',
         metadata: '{}',
       });
 
@@ -1282,7 +1282,7 @@ describe('RedisQueue', () => {
       expect(job?.completedAt).toBeUndefined();
       expect(job?.error).toBeUndefined();
       expect(job?.workerId).toBeUndefined();
-      expect(job?.userEmail).toBeUndefined();
+      expect(job?.userId).toBeUndefined();
     });
   });
 

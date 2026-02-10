@@ -49,7 +49,8 @@ export async function refreshGitHubToken(refreshToken: string): Promise<{
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Store the token (PAT-based auth method)
-    await setUserGitHubIntegration(session.user.email, token, userInfo.username, 'token');
+    await setUserGitHubIntegration(userId, token, userInfo.username, 'token');
 
     return NextResponse.json({
       success: true,
@@ -88,11 +89,12 @@ export async function POST(request: NextRequest) {
 export async function DELETE() {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    await clearUserGitHubIntegration(session.user.email);
+    await clearUserGitHubIntegration(userId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

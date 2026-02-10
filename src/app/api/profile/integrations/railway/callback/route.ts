@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.redirect(`${redirectBase}?railway=error&message=${encodeURIComponent('Not authenticated')}`);
     }
 
@@ -164,13 +165,13 @@ export async function GET(request: NextRequest) {
     // Store everything in DB
     const railwayData = { account, projects };
     await pool.query(
-      `INSERT INTO user_integrations (user_email, railway_token, railway_projects, railway_connected_at, railway_refresh_token, railway_token_expires_at, railway_auth_method)
+      `INSERT INTO user_integrations (user_id, railway_token, railway_projects, railway_connected_at, railway_refresh_token, railway_token_expires_at, railway_auth_method)
        VALUES ($1, $2, $3, NOW(), $4, $5, 'oauth')
-       ON CONFLICT (user_email) DO UPDATE SET
+       ON CONFLICT (user_id) DO UPDATE SET
          railway_token = $2, railway_projects = $3, railway_connected_at = NOW(),
          railway_refresh_token = $4, railway_token_expires_at = $5, railway_auth_method = 'oauth',
          updated_at = NOW()`,
-      [session.user.email, access_token, JSON.stringify(railwayData), refresh_token || null, expiresAt]
+      [userId, access_token, JSON.stringify(railwayData), refresh_token || null, expiresAt]
     );
 
     return NextResponse.redirect(`${redirectBase}?railway=connected`);

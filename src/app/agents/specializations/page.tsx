@@ -8,7 +8,7 @@ interface Specialization {
   description: string | null;
   system_prompt: string | null;
   icon: string;
-  user_email: string;
+  user_id: string;
   is_default: boolean;
   created_at: string;
   updated_at: string;

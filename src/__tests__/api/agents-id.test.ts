@@ -22,7 +22,7 @@ const mockAgent = {
   avatar_color: '#3B82F6',
   is_active: true,
   tasks_completed: 5,
-  user_email: null,
+  user_id: null,
   requires_workflow: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',

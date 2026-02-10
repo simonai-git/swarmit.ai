@@ -17,11 +17,12 @@ export async function GET(_request: NextRequest) {
 
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const workflows = await getWorkflowsByUser(session.user.email);
+    const workflows = await getWorkflowsByUser(userId);
     return NextResponse.json(workflows);
   } catch (error) {
     console.error('Error fetching workflows:', error);
@@ -37,7 +38,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -52,7 +54,7 @@ export async function POST(request: NextRequest) {
       description: body.description || null,
       nodes: body.nodes || [],
       edges: body.edges || [],
-      user_email: session.user.email,
+      user_id: userId,
     });
 
     return NextResponse.json(workflow, { status: 201 });

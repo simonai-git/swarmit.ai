@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import pool from '@/lib/db';
 
 // GET /api/profile - Get user profile
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.email) {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const result = await pool.query(
-      'SELECT * FROM user_profiles WHERE email = $1',
-      [session.user.email]
+      'SELECT * FROM user_profiles WHERE id = $1',
+      [userId]
     );
 
     if (result.rows.length === 0) {
@@ -35,8 +37,9 @@ export async function GET(request: NextRequest) {
 // POST /api/profile - Save user profile
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.email) {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -45,11 +48,11 @@ export async function POST(request: NextRequest) {
 
     // Upsert profile
     await pool.query(
-      `INSERT INTO user_profiles (email, name, company, location, bio, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       ON CONFLICT (email) DO UPDATE SET
-         name = $2, company = $3, location = $4, bio = $5, updated_at = NOW()`,
-      [session.user.email, name, company, location, bio]
+      `INSERT INTO user_profiles (id, email, name, company, location, bio, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         name = $3, company = $4, location = $5, bio = $6, updated_at = NOW()`,
+      [userId, session.user.email, name, company, location, bio]
     );
 
     return NextResponse.json({ success: true });

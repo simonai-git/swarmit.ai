@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import pool from '@/lib/db';
 
 // DELETE /api/profile/api-keys/:id - Revoke an API key
@@ -8,8 +9,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.email) {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -17,11 +19,11 @@ export async function DELETE(
 
     // Soft delete (revoke) the key
     const result = await pool.query(
-      `UPDATE user_api_keys 
+      `UPDATE user_api_keys
        SET revoked_at = NOW()
-       WHERE id = $1 AND user_email = $2 AND revoked_at IS NULL
+       WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
        RETURNING id`,
-      [id, session.user.email]
+      [id, userId]
     );
 
     if (result.rowCount === 0) {

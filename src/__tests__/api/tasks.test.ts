@@ -4,13 +4,13 @@ import { NextRequest } from 'next/server';
 // Mock modules before importing the route
 vi.mock('@/lib/db', () => ({
   getAllTasks: vi.fn(),
-  getTasksByUserEmail: vi.fn(),
+  getTasksByUserId: vi.fn(),
   createTask: vi.fn(),
   getTask: vi.fn(),
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
   searchTasks: vi.fn(),
-  getAutomationUserEmail: vi.fn(() => Promise.resolve(undefined)),
+  getAutomationUserId: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock('@/lib/webhook', () => ({

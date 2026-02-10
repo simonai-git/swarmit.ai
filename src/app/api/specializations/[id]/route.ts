@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSpecialization, updateSpecialization, deleteSpecialization, getSpecializationAgentCount } from '@/lib/db';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 // GET /api/specializations/[id]
 export async function GET(
@@ -49,8 +50,11 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const session = await getServerSession();
-    const userEmail = session?.user?.email || 'default';
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const spec = await getSpecialization(id);
     if (!spec) {
@@ -58,7 +62,7 @@ export async function DELETE(
     }
 
     // Check if agents reference this specialization
-    const count = await getSpecializationAgentCount(spec.name, userEmail);
+    const count = await getSpecializationAgentCount(spec.name, userId);
     if (count > 0) {
       return NextResponse.json(
         { error: `Cannot delete: ${count} agent(s) use this specialization` },

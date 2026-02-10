@@ -7,11 +7,12 @@ import { listUserRepos } from '@/lib/github';
 export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession();
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const github = await getUserGitHubToken(session.user.email);
+    const github = await getUserGitHubToken(userId);
     if (!github) {
       return NextResponse.json({ error: 'GitHub not connected' }, { status: 400 });
     }
