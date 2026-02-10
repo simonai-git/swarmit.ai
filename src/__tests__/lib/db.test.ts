@@ -831,6 +831,7 @@ describe('Database Module', () => {
             is_active: true,
             tasks_completed: 5,
             user_email: null,
+            requires_workflow: false,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
           },
@@ -870,6 +871,7 @@ describe('Database Module', () => {
             is_active: true,
             tasks_completed: 0,
             user_email: null,
+            requires_workflow: false,
             created_at: '2026-02-01T00:00:00Z',
             updated_at: '2026-02-05T00:00:00Z',
           },
@@ -900,6 +902,7 @@ describe('Database Module', () => {
           is_active: true,
           tasks_completed: 5,
           user_email: null,
+          requires_workflow: false,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -938,6 +941,7 @@ describe('Database Module', () => {
           is_active: true,
           tasks_completed: 5,
           user_email: null,
+          requires_workflow: false,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -983,6 +987,7 @@ describe('Database Module', () => {
           is_active: true,
           tasks_completed: 0,
           user_email: null,
+          requires_workflow: false,
           created_at: '2026-02-05T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -1018,6 +1023,7 @@ describe('Database Module', () => {
           is_active: false,
           tasks_completed: 5,
           user_email: null,
+          requires_workflow: false,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -1081,6 +1087,7 @@ describe('Database Module', () => {
           is_active: true,
           tasks_completed: 6,
           user_email: null,
+          requires_workflow: false,
           created_at: '2026-02-01T00:00:00Z',
           updated_at: '2026-02-05T00:00:00Z',
         };
@@ -2830,7 +2837,7 @@ describe('Database Module', () => {
             id: 'agent-1', name: 'Simon', specialization: 'Full Stack',
             description: null, system_prompt: null, memory: null,
             avatar_emoji: '🦊', avatar_color: 'from-orange-500 to-amber-500',
-            is_active: true, tasks_completed: 0, user_email: 'user@test.com',
+            is_active: true, tasks_completed: 0, user_email: 'user@test.com', requires_workflow: false,
             created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
           },
         ];
@@ -2885,7 +2892,7 @@ describe('Database Module', () => {
           id: 'agent-new', name: 'NewAgent', specialization: 'Testing',
           description: null, system_prompt: null, memory: null,
           avatar_emoji: '🤖', avatar_color: 'from-blue-500 to-purple-500',
-          is_active: true, tasks_completed: 0, user_email: 'owner@test.com',
+          is_active: true, tasks_completed: 0, user_email: 'owner@test.com', requires_workflow: false,
           created_at: '2026-02-05T00:00:00Z', updated_at: '2026-02-05T00:00:00Z',
         };
         mockQuery.mockResolvedValueOnce({ rows: [createdAgent], rowCount: 1 });

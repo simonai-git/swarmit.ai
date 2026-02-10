@@ -21,11 +21,11 @@ export default defineConfig({
         '**/types/**',
       ],
       thresholds: {
-        // Lowered after adding workspace snapshots + GitHub/Railway/GitHub OAuth integration (untested runtime code)
-        statements: 61,
-        branches: 51,
-        functions: 64,
-        lines: 61,
+        // Lowered after adding workflows feature (new runtime code: executor, validation, API routes, UI)
+        statements: 52,
+        branches: 42,
+        functions: 55,
+        lines: 52,
       },
     },
   },

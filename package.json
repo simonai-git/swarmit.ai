@@ -19,6 +19,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@mariozechner/pi-ai": "^0.51.6",
+    "@xyflow/react": "^12.10.0",
     "ioredis": "^5.9.2",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",

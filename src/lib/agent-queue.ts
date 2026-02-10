@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents } from './db';
+import pool, { getTask, getProject, getCommentsByTaskId, updateTask, updateProject, createTask, createComment, Task, Project, getWorkspaceSnapshot, saveWorkspaceSnapshot, deleteWorkspaceSnapshot, claimTaskRun, releaseTaskRun, getUserGitHubToken, getTaskDependents, recalculateBlockedStatus, completeProject, addTaskDependency, getTasksByProjectId, getAgentByName, getAgentSkillContents, getAgentWorkflow, getWorkflowVersion } from './db';
 import { runAgent, AgentContext, calculateCost, AGENT_PROMPTS, getUserClaudeKey } from './claude';
 import { SandboxToolExecutor } from './sandbox-executor';
 import { cleanupTaskVolume } from './sandbox';
@@ -8,6 +8,7 @@ import { taskLogBuffer } from './task-log-buffer';
 import { pushToGitHub } from './github';
 import { deployToRailway } from './railway-deploy';
 import { searchAgentMemory, addAgentMemory } from './supermemory';
+import { serializeWorkflowToPrompt, parseStepMarkers, initializeExecution, advanceExecution } from './workflow-executor';
 
 /**
  * When an agent succeeds without calling task_complete, determine the
@@ -571,6 +572,40 @@ class AgentQueue {
             } catch (err) {
               console.warn('[Agent] Supermemory read failed (non-blocking):', err);
             }
+          }
+        }
+      }
+
+      // Inject workflow instructions if agent has an assigned workflow
+      if (process.env.FEATURE_WORKFLOWS === 'true') {
+        const agentRecord = task.assignee ? await getAgentByName(task.assignee) : null;
+        if (agentRecord) {
+          try {
+            const agentWorkflow = await getAgentWorkflow(agentRecord.id);
+            if (agentWorkflow) {
+              const version = await getWorkflowVersion(agentWorkflow.workflow_version_id);
+              if (version) {
+                // Initialize execution state for this run
+                const execState = await initializeExecution(run.id, job.taskId, version.id);
+
+                // Serialize workflow to prompt instructions
+                const workflowPrompt = serializeWorkflowToPrompt(version, execState);
+                if (workflowPrompt) {
+                  context.agentMemory = (context.agentMemory || '') + '\n\n' + workflowPrompt;
+                  console.log(`[Agent] Injected workflow "${agentWorkflow.workflow_name}" (v${version.version_number}) for ${task.assignee}`);
+                  taskLogBuffer.append({
+                    task_id: job.taskId,
+                    run_id: run.id,
+                    agent_type: job.agentType,
+                    stream: 'system',
+                    content: `Workflow "${agentWorkflow.workflow_name}" (v${version.version_number}) loaded`,
+                    timestamp: Date.now(),
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[Agent] Failed to load workflow (non-blocking):', err);
           }
         }
       }
