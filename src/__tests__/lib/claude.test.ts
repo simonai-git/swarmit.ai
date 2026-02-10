@@ -291,14 +291,14 @@ describe('claude utilities', () => {
         rows: [{ claude_api_key: encodedKey }],
       });
 
-      const key = await getUserClaudeKey('test@example.com');
+      const key = await getUserClaudeKey('user-test-123');
       expect(key).toBe('sk-ant-test-key');
     });
 
     it('should return null when user not found', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [] });
 
-      const key = await getUserClaudeKey('unknown@example.com');
+      const key = await getUserClaudeKey('user-unknown');
       expect(key).toBeNull();
     });
 
@@ -307,17 +307,17 @@ describe('claude utilities', () => {
         rows: [{ claude_api_key: null }],
       });
 
-      const key = await getUserClaudeKey('test@example.com');
+      const key = await getUserClaudeKey('user-test-123');
       expect(key).toBeNull();
     });
 
-    it('should query with correct email', async () => {
+    it('should query with correct userId', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [] });
 
-      await getUserClaudeKey('specific@example.com');
+      await getUserClaudeKey('user-specific-456');
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('email'),
-        ['specific@example.com']
+        expect.stringContaining('id'),
+        ['user-specific-456']
       );
     });
   });
