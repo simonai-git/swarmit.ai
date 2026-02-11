@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
-import Link from 'next/link';
 
 interface RunItem {
   id: string;
@@ -72,7 +70,6 @@ function formatDuration(startedAt: string, completedAt: string): string {
 }
 
 export default function RunsPage() {
-  const { data: session } = useSession();
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -154,27 +151,16 @@ export default function RunsPage() {
   const totalTokens = runs.reduce((sum, r) => sum + r.inputTokens + r.outputTokens, 0);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="glass rounded-2xl p-4 sm:p-6 mb-6 animate-fade-in">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold gradient-text">Agent Runs</h1>
-            <p className="text-white/50 text-xs sm:text-sm mt-1">
-              {total} runs &middot; {totalTokens.toLocaleString()} tokens &middot; ${(totalCost / 100).toFixed(2)} total cost
-            </p>
-          </div>
-          <Link
-            href="/"
-            className="flex items-center gap-2 px-3 py-2 bg-white/10 text-white rounded-xl text-sm hover:bg-white/20 transition-all border border-white/10"
-          >
-            <span>📋</span>
-            <span>Board</span>
-          </Link>
-        </div>
+      <div className="mb-6 animate-fade-in">
+        <h1 className="text-xl sm:text-2xl font-bold gradient-text">Agent Runs</h1>
+        <p className="text-white/50 text-xs sm:text-sm mt-1">
+          {total} runs &middot; {totalTokens.toLocaleString()} tokens &middot; ${(totalCost / 100).toFixed(2)} total cost
+        </p>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/10 flex-wrap">
+        <div className="flex items-center gap-2 mt-4 flex-wrap">
           <select
             value={filterAgentType}
             onChange={(e) => setFilterAgentType(e.target.value)}

@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo, useMemo } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   DndContext,
@@ -22,7 +20,6 @@ import TaskDetailModal from './TaskDetailModal';
 import MetricsPanel from './MetricsPanel';
 import ConfirmModal from './ConfirmModal';
 import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
-import UserMenu from './UserMenu';
 
 const columns = [
   { id: 'todo', title: 'To Do', icon: '📋', gradient: 'from-slate-500 to-slate-600' },
@@ -149,7 +146,6 @@ export default function KanbanBoard() {
   const [dependencyCounts, setDependencyCounts] = useState<Record<string, number>>({});
   const [agents, setAgents] = useState<Array<{ id: string; name: string; avatar_emoji: string; avatar_color: string }>>([]);
   const [projectsList, setProjectsList] = useState<Array<{ id: string; title: string }>>([]);
-  const { data: session } = useSession();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -497,27 +493,10 @@ export default function KanbanBoard() {
   }
 
   return (
-    <div className="p-3 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="glass rounded-2xl p-4 sm:p-6 mb-4 sm:mb-8 animate-fade-in relative z-50">
-        {/* Row 1: Title left, User info right */}
-        <div className="flex items-center justify-between gap-3">
-          {/* Title */}
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold gradient-text truncate">
-              Swarm It
-            </h1>
-            <p className="text-white/50 text-xs sm:text-sm hidden md:block">
-              AI Agentic Autonomous Project Factory
-            </p>
-          </div>
-          
-          {/* User menu */}
-          {session && <UserMenu session={session} />}
-        </div>
-        
-        {/* Row 2: New Task + Agents left, Search + Live + Watcher right */}
-        <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
+    <div className="p-3 sm:p-6 lg:p-8">
+      {/* Toolbar: New Task + Search + Live + Watcher */}
+      <div className="glass rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 animate-fade-in relative z-50">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2">
             {/* New Task Button */}
             <button
@@ -527,51 +506,6 @@ export default function KanbanBoard() {
               <span className="text-base sm:text-lg group-hover:rotate-90 transition-transform duration-200">+</span>
               <span className="hidden sm:inline">New Task</span>
             </button>
-            
-            {/* Projects Button */}
-            <Link
-              href="/projects"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">📁</span>
-              <span className="hidden sm:inline">Projects</span>
-            </Link>
-            
-            {/* Agents Button */}
-            <Link
-              href="/agents"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">🤖</span>
-              <span className="hidden sm:inline">Agents</span>
-            </Link>
-
-            {/* Workflows Button */}
-            <Link
-              href="/workflows"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">🔀</span>
-              <span className="hidden sm:inline">Workflows</span>
-            </Link>
-
-            {/* Runs Button */}
-            <Link
-              href="/runs"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">📊</span>
-              <span className="hidden sm:inline">Runs</span>
-            </Link>
-
-            {/* Dashboard Button */}
-            <Link
-              href="/dashboard"
-              className="group flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg sm:rounded-xl font-medium hover:bg-white/20 hover:scale-105 active:scale-95 text-xs sm:text-sm transition-all border border-white/10"
-            >
-              <span className="text-base sm:text-lg">📈</span>
-              <span className="hidden sm:inline">Dashboard</span>
-            </Link>
           </div>
 
           <div className="flex items-center gap-2">
@@ -587,7 +521,7 @@ export default function KanbanBoard() {
                 placeholder="Search tasks or projects..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-80 lg:w-[420px] pl-9 pr-7 py-2 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500/50 focus:bg-white/8 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                className="w-64 lg:w-80 pl-9 pr-7 py-2 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500/50 focus:bg-white/8 focus:ring-2 focus:ring-blue-500/20 transition-all"
               />
               {searchQuery && (
                 <button
@@ -601,7 +535,7 @@ export default function KanbanBoard() {
                 </button>
               )}
             </div>
-            
+
             {/* Mobile Search Toggle Button */}
             <button
               onClick={() => setIsSearchOpen(!isSearchOpen)}
@@ -616,10 +550,10 @@ export default function KanbanBoard() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </button>
-            
+
             {/* Live Updates Toggle */}
             <LiveIndicator enabled={sseEnabled} onToggle={() => setSseEnabled(!sseEnabled)} />
-            
+
             {/* Watcher Toggle */}
             <button
               onClick={toggleWatcher}
@@ -646,10 +580,10 @@ export default function KanbanBoard() {
             </button>
           </div>
         </div>
-        
+
         {/* Mobile Search Bar - Expandable row below controls */}
         {isSearchOpen && (
-          <div className="md:hidden mt-4 pt-4 border-t border-white/10 animate-fade-in">
+          <div className="md:hidden mt-3 pt-3 border-t border-white/10 animate-fade-in">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <svg className="h-4 w-4 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
