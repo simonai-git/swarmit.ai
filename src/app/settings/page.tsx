@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 
 interface AutomationSettings {
   autoAssign: boolean;
@@ -110,23 +109,15 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
-              <span>⚙️</span>
-              Settings
-            </h1>
-            <p className="text-white/50 mt-1">Configure automation and agent behavior</p>
-          </div>
-          <Link 
-            href="/"
-            className="px-4 py-2 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all text-sm"
-          >
-            ← Back to Board
-          </Link>
+        <div className="mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
+            <span>⚙️</span>
+            Settings
+          </h1>
+          <p className="text-white/50 mt-1">Configure automation and agent behavior</p>
         </div>
 
         {/* Message Toast */}
