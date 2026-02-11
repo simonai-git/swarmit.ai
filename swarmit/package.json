@@ -1,0 +1,27 @@
+{
+  "name": "swarmit",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:run": "turbo test:run",
+    "clean": "turbo clean",
+    "db:generate": "pnpm --filter @swarmit/db generate",
+    "db:push": "pnpm --filter @swarmit/db push",
+    "db:migrate": "pnpm --filter @swarmit/db migrate",
+    "db:studio": "pnpm --filter @swarmit/db studio",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.3"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  }
+}
