@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { setUserGitHubIntegration, clearUserGitHubIntegration } from '@/lib/db';
 import { validateGitHubToken } from '@/lib/github';
 
@@ -48,7 +49,7 @@ export async function refreshGitHubToken(refreshToken: string): Promise<{
 // POST /api/profile/integrations/github - Connect GitHub
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
 // DELETE /api/profile/integrations/github - Disconnect GitHub
 export async function DELETE() {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

@@ -50,6 +50,11 @@ export const authOptions: NextAuthOptions = {
         const profile = await getOrCreateUser(user.email, user.name || undefined, user.image || undefined);
         token.userId = profile.id;
       }
+      // Handle pre-migration tokens that don't have userId yet
+      if (!token.userId && token.email) {
+        const profile = await getOrCreateUser(token.email as string);
+        token.userId = profile.id;
+      }
       return token;
     },
     async session({ session, token }) {
