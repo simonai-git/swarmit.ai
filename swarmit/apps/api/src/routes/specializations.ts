@@ -1,0 +1,28 @@
+import type { FastifyInstance } from 'fastify';
+import { createSpecializationSchema } from '@swarmit/shared';
+
+export async function specializationRoutes(app: FastifyInstance) {
+  app.get('/', { preHandler: [app.authenticate] }, async (request) => {
+    const specs = await app.prisma.specialization.findMany({
+      where: { userId: request.userId },
+      orderBy: { name: 'asc' },
+    });
+    return specs;
+  });
+
+  app.post('/', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const data = createSpecializationSchema.parse(request.body);
+    const spec = await app.prisma.specialization.create({
+      data: { ...data, userId: request.userId },
+    });
+    return reply.code(201).send(spec);
+  });
+
+  app.delete<{ Params: { id: string } }>('/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const result = await app.prisma.specialization.deleteMany({
+      where: { id: request.params.id, userId: request.userId },
+    });
+    if (result.count === 0) return reply.code(404).send({ error: 'Specialization not found' });
+    return { success: true };
+  });
+}

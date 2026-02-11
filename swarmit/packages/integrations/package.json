@@ -1,0 +1,52 @@
+{
+  "name": "@swarmit/integrations",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "import": "./dist/llm/index.js"
+    },
+    "./github": {
+      "types": "./dist/github/index.d.ts",
+      "import": "./dist/github/index.js"
+    },
+    "./railway": {
+      "types": "./dist/railway/index.d.ts",
+      "import": "./dist/railway/index.js"
+    },
+    "./supermemory": {
+      "types": "./dist/supermemory/index.d.ts",
+      "import": "./dist/supermemory/index.js"
+    },
+    "./skillsmp": {
+      "types": "./dist/skillsmp/index.d.ts",
+      "import": "./dist/skillsmp/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
+    "@swarmit/logger": "workspace:*",
+    "@swarmit/shared": "workspace:*",
+    "bottleneck": "^2.19.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.1.1"
+  }
+}

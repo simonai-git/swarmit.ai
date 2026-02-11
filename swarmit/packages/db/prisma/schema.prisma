@@ -1,0 +1,366 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Users ────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  plan          Plan      @default(FREE)
+  claudeApiKey  String?   @map("claude_api_key")   // AES-256-GCM encrypted
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  projects        Project[]
+  tasks           Task[]
+  agents          Agent[]
+  specializations Specialization[]
+  workflows       Workflow[]
+  automationSetting AutomationSetting?
+  integrationTokens IntegrationToken[]
+
+  @@map("users")
+}
+
+enum Plan {
+  FREE
+  PRO
+  TEAM
+}
+
+model IntegrationToken {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  provider     String   // 'github', 'railway'
+  accessToken  String   @map("access_token")  // encrypted
+  refreshToken String?  @map("refresh_token") // encrypted
+  expiresAt    DateTime? @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("integration_tokens")
+}
+
+// ─── Projects ────────────────────────────────────────────────────
+
+model Project {
+  id             String        @id @default(cuid())
+  userId         String        @map("user_id")
+  title          String
+  description    String?
+  prd            String?       // product requirements doc
+  status         ProjectStatus @default(PLANNING)
+  projectManager String?       @map("project_manager") // agent name
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+// ─── Tasks ───────────────────────────────────────────────────────
+
+model Task {
+  id           String     @id @default(cuid())
+  userId       String     @map("user_id")
+  projectId    String?    @map("project_id")
+  title        String
+  description  String?
+  status       TaskStatus @default(TODO)
+  priority     Int        @default(0)
+  assigneeId   String?    @map("assignee_id")
+  isBlocked    Boolean    @default(false) @map("is_blocked")
+  currentRunId String?    @unique @map("current_run_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assignee   Agent?   @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  currentRun TaskRun? @relation("CurrentRun", fields: [currentRunId], references: [id])
+
+  runs         TaskRun[]        @relation("TaskRuns")
+  comments     TaskComment[]
+  dependsOn    TaskDependency[] @relation("DependsOn")
+  dependedOnBy TaskDependency[] @relation("DependedOnBy")
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([status])
+  @@map("tasks")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  TESTING
+  IN_REVIEW
+  DONE
+}
+
+model TaskDependency {
+  id          String @id @default(cuid())
+  taskId      String @map("task_id")
+  dependsOnId String @map("depends_on_id")
+
+  task      Task @relation("DependsOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("DependedOnBy", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnId])
+  @@map("task_dependencies")
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  author    String
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_comments")
+}
+
+// ─── Task Runs & Logs ────────────────────────────────────────────
+
+model TaskRun {
+  id        String    @id @default(cuid())
+  taskId    String    @map("task_id")
+  agentType String    @map("agent_type")
+  status    RunStatus @default(QUEUED)
+  tokens    Int       @default(0)
+  cost      Float     @default(0)
+  startedAt DateTime? @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  task           Task               @relation("TaskRuns", fields: [taskId], references: [id], onDelete: Cascade)
+  currentForTask Task?              @relation("CurrentRun")
+  logs           TaskLog[]
+  executionState WorkflowExecutionState?
+
+  @@index([taskId])
+  @@index([status])
+  @@map("task_runs")
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+model TaskLog {
+  id        String    @id @default(cuid())
+  runId     String    @map("run_id")
+  stream    LogStream @default(stdout)
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  run TaskRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("task_logs")
+}
+
+enum LogStream {
+  stdout
+  stderr
+  system
+  tool
+  assistant
+}
+
+// ─── Agents ──────────────────────────────────────────────────────
+
+model Agent {
+  id              String  @id @default(cuid())
+  userId          String  @map("user_id")
+  name            String
+  specialization  String?
+  systemPrompt    String? @map("system_prompt")
+  model           String  @default("claude-sonnet-4-5-20250929")
+  temperature     Float   @default(0.7)
+  maxTokens       Int     @default(8192) @map("max_tokens")
+  dockerImage     String? @map("docker_image")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks           Task[]
+  skills          AgentSkill[]
+  agentWorkflows  AgentWorkflow[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("agents")
+}
+
+model AgentSkill {
+  agentId String @map("agent_id")
+  skillId String @map("skill_id")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, skillId])
+  @@map("agent_skills")
+}
+
+model Skill {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String?
+  sourceUrl   String? @map("source_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  agents AgentSkill[]
+
+  @@map("skills")
+}
+
+model Specialization {
+  id       String   @id @default(cuid())
+  userId   String   @map("user_id")
+  name     String
+  keywords String[]
+  agentType String  @map("agent_type")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("specializations")
+}
+
+// ─── Workflows ───────────────────────────────────────────────────
+
+model Workflow {
+  id          String  @id @default(cuid())
+  userId      String  @map("user_id")
+  name        String
+  description String?
+  isPublished Boolean @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions WorkflowVersion[]
+  agents   AgentWorkflow[]
+
+  @@index([userId])
+  @@map("workflows")
+}
+
+model WorkflowVersion {
+  id         String @id @default(cuid())
+  workflowId String @map("workflow_id")
+  version    Int
+  nodes      Json   // WorkflowNode[]
+  edges      Json   // WorkflowEdge[]
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  workflow        Workflow                 @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  executionStates WorkflowExecutionState[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+  @@map("workflow_versions")
+}
+
+model AgentWorkflow {
+  agentId    String @map("agent_id")
+  workflowId String @map("workflow_id")
+
+  agent    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, workflowId])
+  @@map("agent_workflows")
+}
+
+model WorkflowExecutionState {
+  id                String @id @default(cuid())
+  runId             String @unique @map("run_id")
+  workflowVersionId String @map("workflow_version_id")
+  currentNodeId     String? @map("current_node_id")
+  completedNodes    String[] @map("completed_nodes")
+  variables         Json     @default("{}")
+  status            WorkflowExecStatus @default(RUNNING)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  run             TaskRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion   @relation(fields: [workflowVersionId], references: [id])
+  events          WorkflowExecutionEvent[]
+
+  @@map("workflow_execution_states")
+}
+
+enum WorkflowExecStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model WorkflowExecutionEvent {
+  id               String @id @default(cuid())
+  executionStateId String @map("execution_state_id")
+  nodeId           String @map("node_id")
+  type             String // step_started, step_completed, condition_evaluated, checkpoint_reached
+  nodeLabel        String? @map("node_label")
+  data             Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  executionState WorkflowExecutionState @relation(fields: [executionStateId], references: [id], onDelete: Cascade)
+
+  @@index([executionStateId])
+  @@map("workflow_execution_events")
+}
+
+// ─── Settings ────────────────────────────────────────────────────
+
+model AutomationSetting {
+  id                   String  @id @default(cuid())
+  userId               String  @unique @map("user_id")
+  autoAssign           Boolean @default(true) @map("auto_assign")
+  autoSpawn            Boolean @default(true) @map("auto_spawn")
+  defaultModel         String  @default("claude-sonnet-4-5-20250929") @map("default_model")
+  maxConcurrentAgents  Int     @default(3) @map("max_concurrent_agents")
+  dailyBudgetCents     Int     @default(1000) @map("daily_budget_cents")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("automation_settings")
+}

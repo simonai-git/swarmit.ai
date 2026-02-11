@@ -1,0 +1,70 @@
+name: Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/simonai-git
+
+jobs:
+  build-base:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: docker/base
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/swarmit-base:latest
+            ${{ env.IMAGE_PREFIX }}/swarmit-base:${{ github.sha }}
+
+  build-agents:
+    runs-on: ubuntu-latest
+    needs: build-base
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        agent:
+          - product-manager
+          - project-manager
+          - backend
+          - frontend
+          - qa
+          - reviewer
+          - ai-ml
+          - fullstack
+          - devops
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: docker/${{ matrix.agent }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/swarmit-${{ matrix.agent }}:latest
+            ${{ env.IMAGE_PREFIX }}/swarmit-${{ matrix.agent }}:${{ github.sha }}

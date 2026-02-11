@@ -1,0 +1,28 @@
+export { prisma } from './client.js';
+export { PrismaClient, Prisma } from '@prisma/client';
+export type {
+  User,
+  Project,
+  Task,
+  TaskDependency,
+  TaskComment,
+  TaskRun,
+  TaskLog,
+  Agent,
+  AgentSkill,
+  Skill,
+  Specialization,
+  Workflow,
+  WorkflowVersion,
+  AgentWorkflow,
+  WorkflowExecutionState,
+  WorkflowExecutionEvent,
+  AutomationSetting,
+  IntegrationToken,
+  Plan,
+  ProjectStatus,
+  TaskStatus,
+  RunStatus,
+  LogStream,
+  WorkflowExecStatus,
+} from '@prisma/client';

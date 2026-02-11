@@ -1,0 +1,41 @@
+{
+  "name": "@swarmit/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.2",
+    "@fastify/websocket": "^11.0.2",
+    "@swarmit/db": "workspace:*",
+    "@swarmit/logger": "workspace:*",
+    "@swarmit/shared": "workspace:*",
+    "bullmq": "^5.34.8",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^5.0.1",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "ioredis": "^5.4.2",
+    "jose": "^6.0.10",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.1.1"
+  }
+}
