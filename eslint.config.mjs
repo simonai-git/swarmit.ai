@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // Additional ignores:
     "coverage/**",
     "node_modules/**",
+    "swarmit/**",
   ]),
   // Project-wide rule adjustments
   {
