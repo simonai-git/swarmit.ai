@@ -108,7 +108,13 @@ function makeBaseTaskCtx() {
       assignee: {
         id: 'agent-1',
         name: 'DevBot',
-        specialization: 'developer',
+        specialization: {
+          id: 'spec-dev',
+          name: 'developer',
+          keywords: ['dev', 'code'],
+          description: null,
+          systemPrompt: null,
+        },
         systemPrompt: null,
         model: 'claude-sonnet-4-20250514',
         temperature: 0.7,

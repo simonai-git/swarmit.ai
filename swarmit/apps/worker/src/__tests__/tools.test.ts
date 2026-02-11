@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Sandbox } from '@swarmit/sandbox';
 import {
   getSandboxTools,
+  getTaskStatusTool,
   getPMTools,
   getToolsForAgent,
   extractToolCalls,
@@ -72,39 +73,39 @@ describe('getSandboxTools', () => {
 });
 
 describe('getPMTools', () => {
-  it('returns four PM tools', () => {
+  it('returns three PM tools', () => {
     const tools = getPMTools();
-    expect(tools).toHaveLength(4);
+    expect(tools).toHaveLength(3);
     const names = tools.map(t => t.name);
     expect(names).toEqual([
       'create_task',
       'add_dependency',
       'list_project_tasks',
-      'update_task_status',
     ]);
   });
 });
 
 describe('getToolsForAgent', () => {
-  it('returns only sandbox tools for a developer agent', () => {
-    const tools = getToolsForAgent('developer');
-    expect(tools).toHaveLength(5);
+  it('returns sandbox + status tools for a developer agent', () => {
+    const tools = getToolsForAgent({ name: 'developer', keywords: ['dev', 'code'] });
+    expect(tools).toHaveLength(6);
     const names = tools.map(t => t.name);
+    expect(names).toContain('update_task_status');
     expect(names).not.toContain('create_task');
   });
 
-  it('returns only sandbox tools for a qa agent', () => {
-    const tools = getToolsForAgent('qa');
-    expect(tools).toHaveLength(5);
+  it('returns sandbox + status tools for a qa agent', () => {
+    const tools = getToolsForAgent({ name: 'qa', keywords: ['test', 'quality'] });
+    expect(tools).toHaveLength(6);
   });
 
-  it('returns only sandbox tools for null specialization', () => {
+  it('returns sandbox + status tools for null specialization', () => {
     const tools = getToolsForAgent(null);
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
   });
 
   it('returns sandbox + PM tools for project-manager', () => {
-    const tools = getToolsForAgent('project-manager');
+    const tools = getToolsForAgent({ name: 'project-manager', keywords: ['plan', 'project'] });
     expect(tools).toHaveLength(9);
     const names = tools.map(t => t.name);
     expect(names).toContain('read_file');
@@ -115,10 +116,21 @@ describe('getToolsForAgent', () => {
   });
 
   it('returns sandbox + PM tools for product-manager', () => {
-    const tools = getToolsForAgent('product-manager');
+    const tools = getToolsForAgent({ name: 'product-manager', keywords: ['manage'] });
     expect(tools).toHaveLength(9);
     const names = tools.map(t => t.name);
     expect(names).toContain('create_task');
+  });
+});
+
+
+describe('getTaskStatusTool', () => {
+  it('returns a single update_task_status tool', () => {
+    const tool = getTaskStatusTool();
+    expect(tool.name).toBe('update_task_status');
+    expect(tool.description).toBeTruthy();
+    expect(tool.input_schema.type).toBe('object');
+    expect(tool.input_schema.required).toEqual(['taskId', 'status']);
   });
 });
 

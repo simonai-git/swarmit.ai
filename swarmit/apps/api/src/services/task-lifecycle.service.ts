@@ -3,16 +3,11 @@ import { createLogger } from '@swarmit/logger';
 
 const logger = createLogger('task-lifecycle');
 
-// Built-in specialization keywords for auto-assignment
-const SPECIALIZATION_KEYWORDS: Record<string, string[]> = {
-  frontend: ['ui', 'css', 'react', 'component', 'button', 'modal', 'layout', 'style', 'responsive', 'tailwind', 'design', 'animation'],
-  backend: ['api', 'database', 'endpoint', 'server', 'query', 'sql', 'postgres', 'auth', 'middleware', 'route'],
-  devops: ['deploy', 'docker', 'railway', 'ci', 'cd', 'pipeline', 'kubernetes', 'infrastructure', 'env', 'ssl', 'domain'],
-  qa: ['test', 'bug', 'fix', 'verify', 'validate', 'check', 'broken', 'issue', 'error'],
-  'ai-ml': ['llm', 'claude', 'openai', 'prompt', 'agent', 'ml', 'model', 'embedding', 'vector'],
-  'project-manager': ['plan', 'prd', 'requirements', 'roadmap', 'milestone', 'sprint', 'epic'],
-  'product-manager': ['user story', 'feature', 'product', 'market', 'customer', 'persona', 'ux'],
-  reviewer: ['review', 'code review', 'pull request', 'pr', 'audit', 'lint', 'refactor'],
+// Status-to-keyword mapping for finding the right agent per pipeline state
+const STATUS_KEYWORDS: Record<string, string[]> = {
+  TESTING: ['qa', 'test', 'quality', 'verification'],
+  IN_REVIEW: ['review', 'reviewer', 'code review', 'audit'],
+  IN_PROGRESS: ['developer', 'dev', 'engineer', 'frontend', 'backend'],
 };
 
 export class TaskLifecycleService {
@@ -20,7 +15,7 @@ export class TaskLifecycleService {
 
   /**
    * Detect the best specialization for a task based on title/description keywords.
-   * Also checks user-defined specializations in the DB.
+   * Returns specialization ID (not agentType string).
    */
   async detectSpecialization(
     title: string,
@@ -29,25 +24,18 @@ export class TaskLifecycleService {
   ): Promise<string | null> {
     const text = `${title} ${description || ''}`.toLowerCase();
 
-    // Check user-defined specializations first
     const userSpecs = await this.prisma.specialization.findMany({
       where: { userId },
     });
 
-    for (const spec of userSpecs) {
-      const score = spec.keywords.filter(kw => text.includes(kw.toLowerCase())).length;
-      if (score > 0) return spec.agentType;
-    }
-
-    // Fall back to built-in keywords
     let bestMatch: string | null = null;
     let bestScore = 0;
 
-    for (const [spec, keywords] of Object.entries(SPECIALIZATION_KEYWORDS)) {
-      const score = keywords.filter(kw => text.includes(kw)).length;
+    for (const spec of userSpecs) {
+      const score = spec.keywords.filter(kw => text.includes(kw.toLowerCase())).length;
       if (score > bestScore) {
         bestScore = score;
-        bestMatch = spec;
+        bestMatch = spec.id;
       }
     }
 
@@ -62,34 +50,16 @@ export class TaskLifecycleService {
     description: string | null | undefined,
     userId: string
   ): Promise<string | null> {
-    const specialization = await this.detectSpecialization(title, description, userId);
+    const specializationId = await this.detectSpecialization(title, description, userId);
 
-    if (specialization) {
-      // Find agent matching this specialization
+    if (specializationId) {
       const agent = await this.prisma.agent.findFirst({
-        where: {
-          userId,
-          specialization: { contains: specialization, mode: 'insensitive' },
-        },
+        where: { userId, specializationId },
       });
       if (agent) return agent.id;
     }
 
-    // Fallback: first agent with 'fullstack' or 'general' specialization
-    const fallback = await this.prisma.agent.findFirst({
-      where: {
-        userId,
-        OR: [
-          { specialization: { contains: 'fullstack', mode: 'insensitive' } },
-          { specialization: { contains: 'full stack', mode: 'insensitive' } },
-          { specialization: { contains: 'general', mode: 'insensitive' } },
-        ],
-      },
-    });
-
-    if (fallback) return fallback.id;
-
-    // Last resort: any agent
+    // Fallback: any agent
     const any = await this.prisma.agent.findFirst({
       where: { userId },
       orderBy: { createdAt: 'asc' },
@@ -122,26 +92,40 @@ export class TaskLifecycleService {
 
   /**
    * Called when a task status changes.
+   * Finds an agent whose specialization keywords match the target status.
    */
   async onStatusChanged(
     task: Task,
     oldStatus: string,
     newStatus: string
-  ): Promise<{ shouldSpawnAgent: boolean; agentType?: string }> {
+  ): Promise<{ shouldSpawnAgent: boolean; agentId?: string }> {
     const settings = await this.getSettings(task.userId);
+    if (!settings.autoSpawn) return { shouldSpawnAgent: false };
 
-    // Spawn QA when moved to testing
-    if (settings.autoSpawn && newStatus === 'TESTING') {
-      logger.info({ taskId: task.id }, 'Auto-spawning QA agent');
-      return { shouldSpawnAgent: true, agentType: 'qa' };
+    const targetKeywords = STATUS_KEYWORDS[newStatus];
+    if (!targetKeywords) return { shouldSpawnAgent: false };
+
+    // Find agents whose specialization name or keywords match
+    const agents = await this.prisma.agent.findMany({
+      where: { userId: task.userId },
+      include: { specialization: true },
+    });
+
+    for (const agent of agents) {
+      if (!agent.specialization) continue;
+      const specName = agent.specialization.name.toLowerCase();
+      const specKeywords = agent.specialization.keywords.map(k => k.toLowerCase());
+
+      const nameMatch = targetKeywords.some(kw => specName.includes(kw));
+      const keywordMatch = targetKeywords.some(kw => specKeywords.includes(kw));
+
+      if (nameMatch || keywordMatch) {
+        logger.info({ taskId: task.id, agentId: agent.id, newStatus }, 'Auto-spawning agent for status change');
+        return { shouldSpawnAgent: true, agentId: agent.id };
+      }
     }
 
-    // Spawn reviewer when moved to in_review
-    if (settings.autoSpawn && newStatus === 'IN_REVIEW') {
-      logger.info({ taskId: task.id }, 'Auto-spawning reviewer agent');
-      return { shouldSpawnAgent: true, agentType: 'reviewer' };
-    }
-
+    // No matching agent
     return { shouldSpawnAgent: false };
   }
 

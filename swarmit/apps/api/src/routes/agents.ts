@@ -10,6 +10,7 @@ export async function agentRoutes(app: FastifyInstance) {
       app.prisma.agent.findMany({
         where: { userId: request.userId },
         include: {
+          specialization: true,
           skills: { include: { skill: true } },
           agentWorkflows: { include: { workflow: { select: { id: true, name: true } } } },
           _count: { select: { tasks: true } },
@@ -28,6 +29,7 @@ export async function agentRoutes(app: FastifyInstance) {
     const agent = await app.prisma.agent.findFirst({
       where: { id: request.params.id, userId: request.userId },
       include: {
+        specialization: true,
         skills: { include: { skill: true } },
         agentWorkflows: { include: { workflow: true } },
         tasks: { take: 10, orderBy: { updatedAt: 'desc' } },

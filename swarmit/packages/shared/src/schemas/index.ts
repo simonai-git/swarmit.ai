@@ -12,6 +12,7 @@ export {
   addDependencySchema,
   triggerRunSchema,
   createSpecializationSchema,
+  updateSpecializationSchema,
   updateAutomationSettingSchema,
   updateProfileSchema,
   paginationSchema,

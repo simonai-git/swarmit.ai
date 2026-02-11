@@ -11,7 +11,7 @@ export interface LifecycleJobData {
   type: 'unblock-dependents' | 'check-project-completion' | 'auto-spawn-agent';
   taskId: string;
   userId: string;
-  agentType?: string;
+  agentId?: string;
 }
 
 export interface SchedulerJobData {

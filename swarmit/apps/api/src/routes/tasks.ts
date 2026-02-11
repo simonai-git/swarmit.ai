@@ -30,7 +30,7 @@ export async function taskRoutes(app: FastifyInstance) {
       app.prisma.task.findMany({
         where,
         include: {
-          assignee: { select: { id: true, name: true, specialization: true } },
+          assignee: { select: { id: true, name: true, specialization: { select: { name: true } } } },
           project: { select: { id: true, title: true } },
           dependsOn: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
           _count: { select: { comments: true, runs: true } },
@@ -119,12 +119,12 @@ export async function taskRoutes(app: FastifyInstance) {
       await taskService.recalculateBlocked(updated.id);
 
       // Enqueue auto-spawned agent via lifecycle queue
-      if (statusResult.shouldSpawnAgent && statusResult.agentType) {
+      if (statusResult.shouldSpawnAgent && statusResult.agentId) {
         await app.lifecycleQueue.add('auto-spawn-agent', {
           type: 'auto-spawn-agent',
           taskId: updated.id,
           userId: request.userId,
-          agentType: statusResult.agentType,
+          agentId: statusResult.agentId,
         });
       }
     }
@@ -242,14 +242,14 @@ export async function taskRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/:id/run', { preHandler: [app.authenticate] }, async (request, reply) => {
     const task = await app.prisma.task.findFirst({
       where: { id: request.params.id, userId: request.userId },
-      include: { assignee: true },
+      include: { assignee: { include: { specialization: true } } },
     });
     if (!task) return reply.code(404).send({ error: 'Task not found' });
 
     const run = await app.prisma.taskRun.create({
       data: {
         taskId: task.id,
-        agentType: task.assignee?.specialization || 'developer',
+        agentType: task.assignee?.specialization?.name || 'general',
         status: 'QUEUED',
       },
     });

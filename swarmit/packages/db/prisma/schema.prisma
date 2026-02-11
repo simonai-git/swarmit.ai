@@ -201,25 +201,27 @@ enum LogStream {
 // ─── Agents ──────────────────────────────────────────────────────
 
 model Agent {
-  id              String  @id @default(cuid())
-  userId          String  @map("user_id")
-  name            String
-  specialization  String?
-  systemPrompt    String? @map("system_prompt")
-  model           String  @default("claude-sonnet-4-5-20250929")
-  temperature     Float   @default(0.7)
-  maxTokens       Int     @default(8192) @map("max_tokens")
-  dockerImage     String? @map("docker_image")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id               String  @id @default(cuid())
+  userId           String  @map("user_id")
+  name             String
+  specializationId String? @map("specialization_id")
+  systemPrompt     String? @map("system_prompt")
+  model            String  @default("claude-sonnet-4-5-20250929")
+  temperature      Float   @default(0.7)
+  maxTokens        Int     @default(8192) @map("max_tokens")
+  dockerImage      String? @map("docker_image")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization  Specialization? @relation(fields: [specializationId], references: [id], onDelete: SetNull)
   tasks           Task[]
   skills          AgentSkill[]
   agentWorkflows  AgentWorkflow[]
 
   @@unique([userId, name])
   @@index([userId])
+  @@index([specializationId])
   @@map("agents")
 }
 
@@ -247,14 +249,16 @@ model Skill {
 }
 
 model Specialization {
-  id       String   @id @default(cuid())
-  userId   String   @map("user_id")
-  name     String
-  keywords String[]
-  agentType String  @map("agent_type")
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  name         String
+  keywords     String[]
+  description  String?
+  systemPrompt String?  @map("system_prompt")
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agents Agent[]
 
   @@unique([userId, name])
   @@index([userId])

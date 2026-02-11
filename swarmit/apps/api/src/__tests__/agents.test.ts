@@ -100,7 +100,8 @@ describe('agent routes', () => {
         {
           id: 'agent-1',
           name: 'Dev Bot',
-          specialization: 'developer',
+          specializationId: 'spec-1',
+          specialization: { id: 'spec-1', name: 'developer' },
           skills: [],
           agentWorkflows: [],
           _count: { tasks: 5 },
@@ -108,7 +109,8 @@ describe('agent routes', () => {
         {
           id: 'agent-2',
           name: 'QA Bot',
-          specialization: 'qa',
+          specializationId: 'spec-2',
+          specialization: { id: 'spec-2', name: 'qa' },
           skills: [],
           agentWorkflows: [],
           _count: { tasks: 2 },
@@ -201,6 +203,7 @@ describe('agent routes', () => {
       expect(prisma.agent.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           include: {
+            specialization: true,
             skills: { include: { skill: true } },
             agentWorkflows: { include: { workflow: { select: { id: true, name: true } } } },
             _count: { select: { tasks: true } },
@@ -217,7 +220,8 @@ describe('agent routes', () => {
       const mockAgent = {
         id: 'agent-1',
         name: 'Dev Bot',
-        specialization: 'developer',
+        specializationId: 'spec-1',
+        specialization: { id: 'spec-1', name: 'developer' },
         systemPrompt: 'You are a developer.',
         model: 'claude-sonnet-4-20250514',
         temperature: 0.7,
@@ -293,6 +297,7 @@ describe('agent routes', () => {
       expect(prisma.agent.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           include: expect.objectContaining({
+            specialization: true,
             tasks: { take: 10, orderBy: { updatedAt: 'desc' } },
           }),
         }),
@@ -307,6 +312,7 @@ describe('agent routes', () => {
       const mockAgent = {
         id: 'agent-new',
         name: 'New Agent',
+        specializationId: null,
         specialization: null,
         systemPrompt: null,
         model: null,
@@ -334,7 +340,7 @@ describe('agent routes', () => {
     it('should create an agent with all fields and return 201', async () => {
       const fullPayload = {
         name: 'Full Agent',
-        specialization: 'developer',
+        specializationId: 'spec-dev-1',
         systemPrompt: 'You are an expert developer.',
         model: 'claude-sonnet-4-20250514',
         temperature: 0.5,
@@ -361,7 +367,7 @@ describe('agent routes', () => {
       const body = res.json();
       expect(body.id).toBe('agent-full');
       expect(body.name).toBe('Full Agent');
-      expect(body.specialization).toBe('developer');
+      expect(body.specializationId).toBe('spec-dev-1');
       expect(body.systemPrompt).toBe('You are an expert developer.');
       expect(body.model).toBe('claude-sonnet-4-20250514');
       expect(body.temperature).toBe(0.5);
