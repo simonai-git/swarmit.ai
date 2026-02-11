@@ -21,26 +21,11 @@ import { api, type Agent, type Skill, type Workflow, type Specialization } from 
 
 // ─── Constants ──────────────────────────────────────────────
 
-const SPECIALIZATION_OPTIONS = [
-  'developer',
-  'qa',
-  'reviewer',
-  'project-manager',
-  'product-manager',
-  'frontend',
-  'backend',
-  'fullstack',
-  'devops',
-  'ai-ml',
-];
-
 const MODEL_OPTIONS = [
   'claude-sonnet-4-20250514',
   'claude-opus-4-20250514',
   'claude-haiku-4-5-20251001',
 ];
-
-const AGENT_TYPE_OPTIONS = ['developer', 'qa', 'reviewer', 'pm'];
 
 type TabId = 'agents' | 'specializations' | 'skills';
 
@@ -180,7 +165,7 @@ function AgentsTab() {
               </div>
               {agent.specialization && (
                 <span className="inline-block px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded-full mb-3">
-                  {agent.specialization}
+                  {agent.specialization.name}
                 </span>
               )}
               <div className="space-y-1.5 text-xs text-zinc-500">
@@ -245,12 +230,15 @@ function AgentDetail({
 
   // Editable fields
   const [name, setName] = useState('');
-  const [specialization, setSpecialization] = useState('');
+  const [specializationId, setSpecializationId] = useState('');
   const [model, setModel] = useState('');
   const [temperature, setTemperature] = useState(0);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [dockerImage, setDockerImage] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
+
+  // Specializations list
+  const [specializations, setSpecializations] = useState<Specialization[]>([]);
 
   // Skill search
   const [skillSearch, setSkillSearch] = useState('');
@@ -264,10 +252,14 @@ function AgentDetail({
   const fetchAgent = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.agents.get(agentId);
+      const [data, specs] = await Promise.all([
+        api.agents.get(agentId),
+        api.specializations.list(),
+      ]);
       setAgent(data);
+      setSpecializations(specs);
       setName(data.name);
-      setSpecialization(data.specialization ?? '');
+      setSpecializationId(data.specializationId ?? '');
       setModel(data.model);
       setTemperature(data.temperature);
       setMaxTokens(data.maxTokens);
@@ -290,7 +282,7 @@ function AgentDetail({
     try {
       await api.agents.update(agent.id, {
         name: name.trim(),
-        specialization: specialization || undefined,
+        specializationId: specializationId || null,
         model,
         temperature,
         maxTokens,
@@ -444,14 +436,14 @@ function AgentDetail({
         <div>
           <label className="block text-sm text-zinc-400 mb-1">Specialization</label>
           <select
-            value={specialization}
-            onChange={(e) => setSpecialization(e.target.value)}
+            value={specializationId}
+            onChange={(e) => setSpecializationId(e.target.value)}
             className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">None</option>
-            {SPECIALIZATION_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {specializations.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
               </option>
             ))}
           </select>
@@ -699,9 +691,14 @@ function CreateAgentModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState('');
-  const [specialization, setSpecialization] = useState('');
+  const [specializationId, setSpecializationId] = useState('');
   const [model, setModel] = useState(MODEL_OPTIONS[0]);
   const [creating, setCreating] = useState(false);
+  const [specializations, setSpecializations] = useState<Specialization[]>([]);
+
+  useEffect(() => {
+    api.specializations.list().then(setSpecializations).catch(console.error);
+  }, []);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -709,7 +706,7 @@ function CreateAgentModal({
     try {
       const agent = await api.agents.create({
         name: name.trim(),
-        specialization: specialization || undefined,
+        specializationId: specializationId || undefined,
         model,
       });
       onCreated(agent);
@@ -750,14 +747,14 @@ function CreateAgentModal({
           <div>
             <label className="block text-sm text-zinc-400 mb-1">Specialization</label>
             <select
-              value={specialization}
-              onChange={(e) => setSpecialization(e.target.value)}
+              value={specializationId}
+              onChange={(e) => setSpecializationId(e.target.value)}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">None</option>
-              {SPECIALIZATION_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {specializations.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
                 </option>
               ))}
             </select>
@@ -807,7 +804,8 @@ function SpecializationsTab() {
   const [showForm, setShowForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKeywords, setNewKeywords] = useState('');
-  const [newAgentType, setNewAgentType] = useState(AGENT_TYPE_OPTIONS[0]);
+  const [newDescription, setNewDescription] = useState('');
+  const [newSystemPrompt, setNewSystemPrompt] = useState('');
   const [creating, setCreating] = useState(false);
 
   const fetchSpecializations = useCallback(async () => {
@@ -836,12 +834,14 @@ function SpecializationsTab() {
       const created = await api.specializations.create({
         name: newName.trim(),
         keywords,
-        agentType: newAgentType,
+        description: newDescription.trim() || undefined,
+        systemPrompt: newSystemPrompt.trim() || undefined,
       });
       setSpecializations((prev) => [...prev, created]);
       setNewName('');
       setNewKeywords('');
-      setNewAgentType(AGENT_TYPE_OPTIONS[0]);
+      setNewDescription('');
+      setNewSystemPrompt('');
       setShowForm(false);
     } catch (err) {
       console.error('Failed to create specialization:', err);
@@ -884,7 +884,7 @@ function SpecializationsTab() {
       {showForm && (
         <div className="mb-6 bg-zinc-900 border border-zinc-800 rounded-lg p-6">
           <h3 className="text-sm font-semibold text-white mb-4">New Specialization</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Name</label>
               <input
@@ -908,19 +908,25 @@ function SpecializationsTab() {
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Agent Type</label>
-              <select
-                value={newAgentType}
-                onChange={(e) => setNewAgentType(e.target.value)}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {AGENT_TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+            <div className="md:col-span-2">
+              <label className="block text-sm text-zinc-400 mb-1">Description</label>
+              <input
+                type="text"
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                placeholder="What does this specialization cover?"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm text-zinc-400 mb-1">System Prompt</label>
+              <textarea
+                value={newSystemPrompt}
+                onChange={(e) => setNewSystemPrompt(e.target.value)}
+                rows={3}
+                placeholder="Role-specific instructions for agents with this specialization..."
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              />
             </div>
           </div>
           <div className="flex gap-2 mt-4">
@@ -936,7 +942,8 @@ function SpecializationsTab() {
                 setShowForm(false);
                 setNewName('');
                 setNewKeywords('');
-                setNewAgentType(AGENT_TYPE_OPTIONS[0]);
+                setNewDescription('');
+                setNewSystemPrompt('');
               }}
               className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded transition-colors text-sm"
             >
@@ -966,7 +973,10 @@ function SpecializationsTab() {
                   Keywords
                 </th>
                 <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                  Agent Type
+                  Description
+                </th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  Agents
                 </th>
                 <th className="text-right px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Actions
@@ -991,9 +1001,13 @@ function SpecializationsTab() {
                       ))}
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded-full">
-                      {spec.agentType}
+                  <td className="px-6 py-4 text-sm text-zinc-400 max-w-xs truncate">
+                    {spec.description || <span className="text-zinc-600">--</span>}
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className="flex items-center gap-1 text-zinc-400">
+                      <Users className="w-3 h-3" />
+                      {spec._count?.agents ?? 0}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">

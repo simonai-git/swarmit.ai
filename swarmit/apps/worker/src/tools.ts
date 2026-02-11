@@ -73,6 +73,24 @@ export function getSandboxTools(): LLMTool[] {
 }
 
 /**
+ * Task status tool available to all agents.
+ */
+export function getTaskStatusTool(): LLMTool {
+  return {
+    name: 'update_task_status',
+    description: 'Update the status of a task.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'The task ID' },
+        status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'TESTING', 'IN_REVIEW', 'DONE'], description: 'New status' },
+      },
+      required: ['taskId', 'status'],
+    },
+  };
+}
+
+/**
  * PM-specific tools for task/project management.
  */
 export function getPMTools(): LLMTool[] {
@@ -111,32 +129,25 @@ export function getPMTools(): LLMTool[] {
         required: [],
       },
     },
-    {
-      name: 'update_task_status',
-      description: 'Update the status of a task.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          taskId: { type: 'string', description: 'The task ID' },
-          status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'TESTING', 'IN_REVIEW', 'DONE'], description: 'New status' },
-        },
-        required: ['taskId', 'status'],
-      },
-    },
   ];
 }
 
 /**
  * Get tools for an agent based on its specialization.
+ * All agents get sandbox tools + update_task_status.
+ * PM agents additionally get create_task, add_dependency, list_project_tasks.
  */
-export function getToolsForAgent(specialization: string | null): LLMTool[] {
-  const isPM = specialization === 'project-manager' || specialization === 'product-manager';
+export function getToolsForAgent(specialization: { name: string; keywords: string[] } | null): LLMTool[] {
+  const baseTools = [...getSandboxTools(), getTaskStatusTool()];
+
+  const isPM = specialization?.name.toLowerCase().includes('manager')
+    || specialization?.keywords.some(kw => ['plan', 'project', 'manage'].includes(kw.toLowerCase()));
 
   if (isPM) {
-    return [...getSandboxTools(), ...getPMTools()];
+    return [...baseTools, ...getPMTools()];
   }
 
-  return getSandboxTools();
+  return baseTools;
 }
 
 /**

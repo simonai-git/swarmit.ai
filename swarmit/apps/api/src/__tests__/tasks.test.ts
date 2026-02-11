@@ -694,7 +694,7 @@ describe('task routes', () => {
         title: 'Task 1',
         status: 'TODO',
         userId: 'test-user-id',
-        assignee: { id: 'agent-1', specialization: 'frontend' },
+        assignee: { id: 'agent-1', specialization: { name: 'frontend' } },
         assigneeId: 'agent-1',
       });
 
@@ -721,7 +721,7 @@ describe('task routes', () => {
       expect(body.agentType).toBe('frontend');
     });
 
-    it('should default to developer agentType if no assignee', async () => {
+    it('should default to general agentType if no assignee', async () => {
       prisma.task.findFirst.mockResolvedValueOnce({
         id: 'task-1',
         title: 'Task 1',
@@ -734,7 +734,7 @@ describe('task routes', () => {
       const mockRun = {
         id: 'run-2',
         taskId: 'task-1',
-        agentType: 'developer',
+        agentType: 'general',
         status: 'QUEUED',
       };
       prisma.taskRun.create.mockResolvedValueOnce(mockRun);
@@ -749,7 +749,7 @@ describe('task routes', () => {
       expect(res.statusCode).toBe(201);
       expect(prisma.taskRun.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ agentType: 'developer' }),
+          data: expect.objectContaining({ agentType: 'general' }),
         })
       );
     });

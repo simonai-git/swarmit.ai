@@ -48,7 +48,7 @@ export interface Task {
   userId: string;
   createdAt: string;
   updatedAt: string;
-  assignee?: { id: string; name: string; specialization: string | null } | null;
+  assignee?: { id: string; name: string; specialization: { name: string } | null } | null;
   project?: { id: string; title: string } | null;
   dependsOn?: Array<{ dependsOn: { id: string; title: string; status: string } }>;
   _count?: { comments: number; runs: number };
@@ -190,7 +190,8 @@ export const projects = {
 export interface Agent {
   id: string;
   name: string;
-  specialization: string | null;
+  specializationId: string | null;
+  specialization: Specialization | null;
   systemPrompt: string | null;
   model: string;
   temperature: number;
@@ -215,7 +216,7 @@ export const agents = {
 
   create: (data: {
     name: string;
-    specialization?: string;
+    specializationId?: string;
     systemPrompt?: string;
     model?: string;
     temperature?: number;
@@ -225,7 +226,7 @@ export const agents = {
 
   update: (id: string, data: {
     name?: string;
-    specialization?: string;
+    specializationId?: string | null;
     systemPrompt?: string;
     model?: string;
     temperature?: number;
@@ -361,14 +362,18 @@ export interface Specialization {
   id: string;
   name: string;
   keywords: string[];
-  agentType: string;
+  description: string | null;
+  systemPrompt: string | null;
   userId: string;
+  _count?: { agents: number };
 }
 
 export const specializations = {
   list: () => request<Specialization[]>('/specializations'),
-  create: (data: { name: string; keywords: string[]; agentType: string }) =>
+  create: (data: { name: string; keywords: string[]; description?: string; systemPrompt?: string }) =>
     request<Specialization>('/specializations', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; keywords?: string[]; description?: string | null; systemPrompt?: string | null }) =>
+    request<{ success: boolean }>(`/specializations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ success: boolean }>(`/specializations/${id}`, { method: 'DELETE' }),
 };
 

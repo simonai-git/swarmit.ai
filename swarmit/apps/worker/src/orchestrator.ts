@@ -34,6 +34,7 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
         comments: { orderBy: { createdAt: 'asc' } },
         assignee: {
           include: {
+            specialization: true,
             skills: { include: { skill: true } },
             agentWorkflows: {
               include: {
@@ -71,7 +72,7 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     // ── 3. CREATE_SANDBOX ─────────────────────────────────────────
     sandbox = createSandbox({
       dockerImage: task.assignee.dockerImage || undefined,
-      specialization: task.assignee.specialization || undefined,
+      specialization: task.assignee.specialization?.name || undefined,
     });
     await sandbox.init();
 
@@ -205,17 +206,19 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
     }
 
     case 'auto-spawn-agent': {
-      // Create a new run for the specified agent type
-      const agentType = data.agentType || 'qa';
+      const agentId = data.agentId;
+      if (!agentId) {
+        logger.warn({ userId, taskId }, 'No agentId provided for auto-spawn');
+        break;
+      }
+
       const agent = await prisma.agent.findFirst({
-        where: {
-          userId,
-          specialization: { contains: agentType, mode: 'insensitive' },
-        },
+        where: { id: agentId, userId },
+        include: { specialization: true },
       });
 
       if (!agent) {
-        logger.warn({ userId, agentType }, 'No agent found for auto-spawn');
+        logger.warn({ userId, agentId }, 'No agent found for auto-spawn');
         break;
       }
 
@@ -228,7 +231,7 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
       const run = await prisma.taskRun.create({
         data: {
           taskId,
-          agentType,
+          agentType: agent.specialization?.name || 'general',
           status: 'QUEUED',
         },
       });
@@ -238,8 +241,7 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
         data: { currentRunId: run.id },
       });
 
-      // Note: the caller should enqueue this to the agent-execution queue
-      logger.info({ taskId, agentType, runId: run.id }, 'Auto-spawn agent run created');
+      logger.info({ taskId, agentId: agent.id, runId: run.id }, 'Auto-spawn agent run created');
       break;
     }
 

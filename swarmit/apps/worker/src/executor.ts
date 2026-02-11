@@ -33,7 +33,13 @@ interface TaskContext {
     assignee: {
       id: string;
       name: string;
-      specialization: string | null;
+      specialization: {
+        id: string;
+        name: string;
+        keywords: string[];
+        description: string | null;
+        systemPrompt: string | null;
+      } | null;
       systemPrompt: string | null;
       model: string;
       temperature: number;
@@ -68,7 +74,7 @@ export async function executeAgent(ctx: ExecutorContext, taskCtx: TaskContext): 
   // Build system prompt
   const systemPrompt = buildSystemPrompt(task, agent, workflowCtx);
 
-  await publishLog(ctx, 'system', `Starting agent "${agent.name}" (${specialization || 'general'}) with ${tools.length} tools`);
+  await publishLog(ctx, 'system', `Starting agent "${agent.name}" (${specialization?.name || 'general'}) with ${tools.length} tools`);
 
   // Initialize conversation
   const messages: LLMMessage[] = [
@@ -193,11 +199,19 @@ function buildSystemPrompt(
 ): string {
   const parts: string[] = [];
 
-  // Agent identity
+  // Specialization system prompt (role context)
+  if (agent.specialization?.systemPrompt) {
+    parts.push(agent.specialization.systemPrompt);
+  }
+
+  // Agent-level system prompt (custom instructions)
   if (agent.systemPrompt) {
     parts.push(agent.systemPrompt);
-  } else {
-    parts.push(`You are ${agent.name}, a ${agent.specialization || 'general'} AI agent on the Swarmit platform.`);
+  }
+
+  // Fallback identity if neither specialization nor agent has a system prompt
+  if (!agent.specialization?.systemPrompt && !agent.systemPrompt) {
+    parts.push(`You are ${agent.name}, a ${agent.specialization?.name || 'general'} AI agent on the Swarmit platform.`);
     parts.push('Complete the assigned task to the best of your ability using the tools provided.');
   }
 

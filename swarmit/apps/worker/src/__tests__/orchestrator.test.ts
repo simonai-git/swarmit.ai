@@ -81,7 +81,13 @@ function makeFullTask() {
     assignee: {
       id: 'agent-1',
       name: 'DevBot',
-      specialization: 'developer',
+      specialization: {
+        id: 'spec-dev',
+        name: 'developer',
+        keywords: ['dev', 'code'],
+        description: null,
+        systemPrompt: null,
+      },
       systemPrompt: null,
       model: 'claude-sonnet-4-20250514',
       temperature: 0.7,
@@ -411,19 +417,23 @@ describe('processLifecycleJob', () => {
         type: 'auto-spawn-agent',
         taskId: 'task-1',
         userId: 'user-1',
-        agentType: 'qa',
+        agentId: 'qa-agent-1',
       };
 
-      mockPrisma.agent.findFirst.mockResolvedValue({ id: 'qa-agent-1' });
+      mockPrisma.agent.findFirst.mockResolvedValue({
+        id: 'qa-agent-1',
+        specialization: { name: 'qa' },
+      });
       mockPrisma.taskRun.create.mockResolvedValue({ id: 'auto-run-1' });
 
       await processLifecycleJob(jobData, redis);
 
       expect(mockPrisma.agent.findFirst).toHaveBeenCalledWith({
         where: {
+          id: 'qa-agent-1',
           userId: 'user-1',
-          specialization: { contains: 'qa', mode: 'insensitive' },
         },
+        include: { specialization: true },
       });
 
       expect(mockPrisma.task.update).toHaveBeenCalledWith({
@@ -445,25 +455,18 @@ describe('processLifecycleJob', () => {
       });
     });
 
-    it('defaults agentType to "qa" when not provided', async () => {
+    it('does nothing when no agentId provided', async () => {
       const jobData: LifecycleJobData = {
         type: 'auto-spawn-agent',
         taskId: 'task-1',
         userId: 'user-1',
       };
 
-      mockPrisma.agent.findFirst.mockResolvedValue({ id: 'qa-agent-2' });
-      mockPrisma.taskRun.create.mockResolvedValue({ id: 'auto-run-2' });
-
       await processLifecycleJob(jobData, redis);
 
-      expect(mockPrisma.agent.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            specialization: { contains: 'qa', mode: 'insensitive' },
-          }),
-        })
-      );
+      expect(mockPrisma.agent.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.task.update).not.toHaveBeenCalled();
+      expect(mockPrisma.taskRun.create).not.toHaveBeenCalled();
     });
 
     it('does nothing when no matching agent found', async () => {
@@ -471,7 +474,7 @@ describe('processLifecycleJob', () => {
         type: 'auto-spawn-agent',
         taskId: 'task-1',
         userId: 'user-1',
-        agentType: 'devops',
+        agentId: 'nonexistent-agent',
       };
 
       mockPrisma.agent.findFirst.mockResolvedValue(null);
