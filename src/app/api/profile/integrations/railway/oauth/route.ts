@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { randomBytes, createHash } from 'crypto';
 import { cookies } from 'next/headers';
 
@@ -13,7 +14,7 @@ function generatePKCE() {
 // GET /api/profile/integrations/railway/oauth - Initiate Railway OAuth flow
 export async function GET() {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

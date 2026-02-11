@@ -300,10 +300,14 @@ export default function KanbanBoard() {
   const fetchAgentsList = async () => {
     try {
       const res = await fetch('/api/agents');
-      const data = await res.json();
-      setAgents(data.map((a: { id: string; name: string; avatar_emoji: string; avatar_color: string }) => ({
-        id: a.id, name: a.name, avatar_emoji: a.avatar_emoji, avatar_color: a.avatar_color,
-      })));
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setAgents(data.map((a: { id: string; name: string; avatar_emoji: string; avatar_color: string }) => ({
+            id: a.id, name: a.name, avatar_emoji: a.avatar_emoji, avatar_color: a.avatar_color,
+          })));
+        }
+      }
     } catch (error) {
       console.error('Error fetching agents:', error);
     }

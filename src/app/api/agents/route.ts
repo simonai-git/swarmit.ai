@@ -3,6 +3,7 @@ import { getAllAgents, getActiveAgents, createAgent, Agent, seedDefaultAgents } 
 import pool from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export interface AgentWithMetrics extends Agent {
   assigned_count: number;
@@ -11,8 +12,8 @@ export interface AgentWithMetrics extends Agent {
 }
 
 // Compute metrics for all agents from tasks table
-async function computeAgentMetrics(): Promise<Record<string, { assigned: number; worked: number; completed: number }>> {
-  const result = await pool.query('SELECT assignee, status, worked_by FROM tasks');
+async function computeAgentMetrics(userId: string): Promise<Record<string, { assigned: number; worked: number; completed: number }>> {
+  const result = await pool.query('SELECT assignee, status, worked_by FROM tasks WHERE user_id = $1', [userId]);
   const tasks = result.rows;
   
   const metrics: Record<string, { assigned: number; worked: number; completed: number }> = {};
@@ -53,7 +54,7 @@ async function computeAgentMetrics(): Promise<Record<string, { assigned: number;
 export async function GET(request: NextRequest) {
 
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Compute metrics from tasks
-    const metrics = await computeAgentMetrics();
+    const metrics = await computeAgentMetrics(userId);
     
     // Add metrics to each agent (tasks now store agent IDs in assignee column)
     let agentsWithMetrics: AgentWithMetrics[] = agents.map(agent => ({
@@ -93,7 +94,8 @@ export async function GET(request: NextRequest) {
     // Filter for available agents (no in_progress tasks assigned to them)
     if (availableOnly) {
       const inProgressResult = await pool.query(
-        "SELECT DISTINCT assignee FROM tasks WHERE status = 'in_progress'"
+        "SELECT DISTINCT assignee FROM tasks WHERE status = 'in_progress' AND user_id = $1",
+        [userId]
       );
       const busyAgents = new Set(inProgressResult.rows.map(r => r.assignee));
       agentsWithMetrics = agentsWithMetrics.filter(agent => !busyAgents.has(agent.id));

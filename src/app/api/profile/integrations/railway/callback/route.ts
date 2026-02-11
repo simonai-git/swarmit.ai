@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import pool from '@/lib/db';
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
   const redirectBase = `${baseUrl}/profile/integrations`;
 
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.redirect(`${redirectBase}?railway=error&message=${encodeURIComponent('Not authenticated')}`);

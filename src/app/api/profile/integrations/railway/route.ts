@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import pool from '@/lib/db';
 
 // Refresh an OAuth access token using the refresh token
@@ -101,7 +102,7 @@ async function fetchRailwayProjects(token: string) {
 // POST /api/profile/integrations/railway - Connect Railway
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
 // DELETE /api/profile/integrations/railway - Disconnect Railway
 export async function DELETE(_request: NextRequest) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

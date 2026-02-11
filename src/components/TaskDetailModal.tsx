@@ -195,8 +195,12 @@ function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, isActive =
     const fetchAgents = async () => {
       try {
         const res = await fetch('/api/agents');
-        const data = await res.json();
-        setAgents(data);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setAgents(data);
+          }
+        }
       } catch (error) {
         console.error('Error fetching agents:', error);
       }
