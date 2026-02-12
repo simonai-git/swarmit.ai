@@ -29,6 +29,17 @@ const MODEL_OPTIONS = [
   'claude-haiku-4-5-20251001',
 ];
 
+const DOCKER_IMAGE_OPTIONS = [
+  'swarmitai/swarmit-base',
+  'swarmitai/swarmit-developer',
+  'swarmitai/swarmit-reviewer',
+  'swarmitai/swarmit-backend',
+  'swarmitai/swarmit-devops',
+  'swarmitai/swarmit-frontend',
+  'swarmitai/swarmit-qa',
+  'swarmitai/sandbox',
+];
+
 type TabId = 'agents' | 'specializations' | 'skills';
 
 // ─── Main Page ──────────────────────────────────────────────
@@ -835,7 +846,7 @@ function SpecializationsTab() {
   }, [fetchSpecializations]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!newName.trim() || !newDockerImage) return;
     setCreating(true);
     try {
       const keywords = newKeywords
@@ -847,7 +858,7 @@ function SpecializationsTab() {
         keywords,
         description: newDescription.trim() || undefined,
         systemPrompt: newSystemPrompt.trim() || undefined,
-        dockerImage: newDockerImage.trim() || undefined,
+        dockerImage: newDockerImage,
       });
       setSpecializations((prev) => [...prev, created]);
       setNewName('');
@@ -946,20 +957,27 @@ function SpecializationsTab() {
               />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm text-zinc-400 mb-1">Docker Image</label>
-              <input
-                type="text"
+              <label className="block text-sm text-zinc-400 mb-1">
+                Docker Image <span className="text-red-400">*</span>
+              </label>
+              <select
                 value={newDockerImage}
                 onChange={(e) => setNewDockerImage(e.target.value)}
-                placeholder="e.g., node:20-slim"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="" disabled>Select a sandbox image...</option>
+                {DOCKER_IMAGE_OPTIONS.map((img) => (
+                  <option key={img} value={img}>
+                    {img}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex gap-2 mt-4">
             <button
               onClick={handleCreate}
-              disabled={creating || !newName.trim()}
+              disabled={creating || !newName.trim() || !newDockerImage}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded transition-colors text-sm"
             >
               {creating ? 'Creating...' : 'Create'}
