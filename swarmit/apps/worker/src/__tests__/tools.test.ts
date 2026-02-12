@@ -1,9 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Sandbox } from '@swarmit/sandbox';
 import {
   getSandboxTools,
   getTaskStatusTool,
   getPMTools,
+  getMemoryTools,
+  getGitHubTools,
+  getCollaborationTools,
   getToolsForAgent,
   extractToolCalls,
   executeTool,
@@ -44,8 +47,26 @@ function createMockPrisma() {
     taskDependency: {
       create: vi.fn().mockResolvedValue({}),
     },
+    taskComment: {
+      create: vi.fn().mockResolvedValue({}),
+    },
+    integrationToken: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      count: vi.fn().mockResolvedValue(0),
+    },
   };
 }
+
+// Ensure env vars are clean for deterministic tests
+const originalSupermemoryKey = process.env.SUPERMEMORY_API_KEY;
+beforeEach(() => {
+  delete process.env.SUPERMEMORY_API_KEY;
+});
+afterEach(() => {
+  if (originalSupermemoryKey) {
+    process.env.SUPERMEMORY_API_KEY = originalSupermemoryKey;
+  }
+});
 
 describe('getSandboxTools', () => {
   it('returns five sandbox tools', () => {
@@ -85,41 +106,102 @@ describe('getPMTools', () => {
   });
 });
 
+describe('getMemoryTools', () => {
+  it('returns 2 memory tools', () => {
+    const tools = getMemoryTools();
+    expect(tools).toHaveLength(2);
+    expect(tools.map(t => t.name)).toEqual(['remember', 'recall']);
+  });
+});
+
+describe('getGitHubTools', () => {
+  it('returns 4 GitHub tools', () => {
+    const tools = getGitHubTools();
+    expect(tools).toHaveLength(4);
+    expect(tools.map(t => t.name)).toEqual([
+      'github_list_repos',
+      'github_clone_repo',
+      'github_push_files',
+      'github_create_pr',
+    ]);
+  });
+});
+
+describe('getCollaborationTools', () => {
+  it('returns 3 collaboration tools', () => {
+    const tools = getCollaborationTools();
+    expect(tools).toHaveLength(3);
+    expect(tools.map(t => t.name)).toEqual([
+      'handoff_to_agent',
+      'request_review',
+      'send_message_to_agent',
+    ]);
+  });
+});
+
 describe('getToolsForAgent', () => {
-  it('returns sandbox + status tools for a developer agent', () => {
+  // Base: 5 sandbox + 1 status + 3 collaboration = 9
+  it('returns sandbox + status + collaboration tools for a developer agent', () => {
     const tools = getToolsForAgent({ name: 'developer', keywords: ['dev', 'code'] });
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(9);
     const names = tools.map(t => t.name);
     expect(names).toContain('update_task_status');
+    expect(names).toContain('handoff_to_agent');
     expect(names).not.toContain('create_task');
   });
 
-  it('returns sandbox + status tools for a qa agent', () => {
+  it('returns 9 tools for a qa agent', () => {
     const tools = getToolsForAgent({ name: 'qa', keywords: ['test', 'quality'] });
-    expect(tools).toHaveLength(6);
-  });
-
-  it('returns sandbox + status tools for null specialization', () => {
-    const tools = getToolsForAgent(null);
-    expect(tools).toHaveLength(6);
-  });
-
-  it('returns sandbox + PM tools for project-manager', () => {
-    const tools = getToolsForAgent({ name: 'project-manager', keywords: ['plan', 'project'] });
     expect(tools).toHaveLength(9);
+  });
+
+  it('returns 9 tools for null specialization', () => {
+    const tools = getToolsForAgent(null);
+    expect(tools).toHaveLength(9);
+  });
+
+  // PM: 9 + 3 PM tools = 12
+  it('returns sandbox + PM + collaboration tools for project-manager', () => {
+    const tools = getToolsForAgent({ name: 'project-manager', keywords: ['plan', 'project'] });
+    expect(tools).toHaveLength(12);
     const names = tools.map(t => t.name);
     expect(names).toContain('read_file');
     expect(names).toContain('create_task');
     expect(names).toContain('add_dependency');
     expect(names).toContain('list_project_tasks');
     expect(names).toContain('update_task_status');
+    expect(names).toContain('handoff_to_agent');
   });
 
-  it('returns sandbox + PM tools for product-manager', () => {
+  it('returns 12 tools for product-manager', () => {
     const tools = getToolsForAgent({ name: 'product-manager', keywords: ['manage'] });
-    expect(tools).toHaveLength(9);
+    expect(tools).toHaveLength(12);
     const names = tools.map(t => t.name);
     expect(names).toContain('create_task');
+  });
+
+  it('includes memory tools when SUPERMEMORY_API_KEY is set', () => {
+    process.env.SUPERMEMORY_API_KEY = 'test-key';
+    const tools = getToolsForAgent(null);
+    expect(tools).toHaveLength(11); // 9 base + 2 memory
+    const names = tools.map(t => t.name);
+    expect(names).toContain('remember');
+    expect(names).toContain('recall');
+  });
+
+  it('includes GitHub tools when hasGitHub option is true', () => {
+    const tools = getToolsForAgent(null, { hasGitHub: true });
+    expect(tools).toHaveLength(13); // 9 base + 4 github
+    const names = tools.map(t => t.name);
+    expect(names).toContain('github_list_repos');
+    expect(names).toContain('github_push_files');
+  });
+
+  it('includes all tools when both supermemory and github are enabled', () => {
+    process.env.SUPERMEMORY_API_KEY = 'test-key';
+    const tools = getToolsForAgent({ name: 'project-manager', keywords: ['plan'] }, { hasGitHub: true });
+    // 5 sandbox + 1 status + 3 PM + 2 memory + 4 github + 3 collab = 18
+    expect(tools).toHaveLength(18);
   });
 });
 
@@ -464,6 +546,65 @@ describe('executeTool', () => {
     it('returns unknown tool message', async () => {
       const result = await executeTool('nonexistent_tool', {}, sandbox, context);
       expect(result).toBe('Unknown tool: nonexistent_tool');
+    });
+  });
+
+  describe('handoff_to_agent', () => {
+    it('updates task status and creates comment', async () => {
+      const result = await executeTool(
+        'handoff_to_agent',
+        { taskId: 'task-1', nextStatus: 'TESTING', context: 'Dev work complete, needs QA' },
+        sandbox,
+        { ...context, agentName: 'DevBot' }
+      );
+      expect(mockPrisma.task.update).toHaveBeenCalledWith({
+        where: { id: 'task-1' },
+        data: { status: 'TESTING' },
+      });
+      expect(mockPrisma.taskComment.create).toHaveBeenCalledWith({
+        data: {
+          taskId: 'task-1',
+          author: 'DevBot',
+          content: '[Handoff] Dev work complete, needs QA',
+        },
+      });
+      expect(result).toContain('handed off');
+    });
+  });
+
+  describe('request_review', () => {
+    it('sets task to IN_REVIEW and creates comment', async () => {
+      const result = await executeTool(
+        'request_review',
+        { taskId: 'task-1', summary: 'All tests pass, ready for review' },
+        sandbox,
+        { ...context, agentName: 'QABot' }
+      );
+      expect(mockPrisma.task.update).toHaveBeenCalledWith({
+        where: { id: 'task-1' },
+        data: { status: 'IN_REVIEW' },
+      });
+      expect(mockPrisma.taskComment.create).toHaveBeenCalled();
+      expect(result).toContain('IN_REVIEW');
+    });
+  });
+
+  describe('send_message_to_agent', () => {
+    it('creates a comment on the task', async () => {
+      const result = await executeTool(
+        'send_message_to_agent',
+        { taskId: 'task-1', message: 'Please check the API response format' },
+        sandbox,
+        { ...context, agentName: 'PMBot' }
+      );
+      expect(mockPrisma.taskComment.create).toHaveBeenCalledWith({
+        data: {
+          taskId: 'task-1',
+          author: 'PMBot',
+          content: 'Please check the API response format',
+        },
+      });
+      expect(result).toContain('Message sent');
     });
   });
 

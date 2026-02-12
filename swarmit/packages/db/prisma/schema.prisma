@@ -27,6 +27,7 @@ model User {
   workflows       Workflow[]
   automationSetting AutomationSetting?
   integrationTokens IntegrationToken[]
+  notifications     Notification[]
 
   @@map("users")
 }
@@ -51,6 +52,34 @@ model IntegrationToken {
 
   @@unique([userId, provider])
   @@map("integration_tokens")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false) @map("is_read")
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  TASK_STATUS_CHANGED
+  AGENT_RUN_COMPLETED
+  AGENT_RUN_FAILED
+  PROJECT_COMPLETED
+  COMMENT_ADDED
+  TASK_ASSIGNED
+  TASK_UNBLOCKED
+  BUDGET_EXCEEDED
 }
 
 // ─── Projects ────────────────────────────────────────────────────

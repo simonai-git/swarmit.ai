@@ -430,6 +430,62 @@ export const profile = {
     request<{ success: boolean }>('/profile/automation', { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
+// ─── Integrations ──────────────────────────────────────────
+
+export interface IntegrationToken {
+  id: string;
+  provider: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const integrations = {
+  listTokens: () => request<{ tokens: IntegrationToken[] }>('/integrations/tokens'),
+
+  upsertToken: (provider: string, accessToken: string) =>
+    request<IntegrationToken>('/integrations/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ provider, accessToken }),
+    }),
+
+  deleteToken: (provider: string) =>
+    request<{ success: boolean }>(`/integrations/tokens/${provider}`, { method: 'DELETE' }),
+};
+
+// ─── Notifications ──────────────────────────────────────────
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  isRead: boolean;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export const notifications = {
+  list: (params?: { page?: number; limit?: number; unreadOnly?: boolean }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.unreadOnly) searchParams.set('unreadOnly', 'true');
+    const qs = searchParams.toString();
+    return request<{ notifications: Notification[]; total: number; page: number; limit: number }>(
+      `/notifications${qs ? `?${qs}` : ''}`,
+    );
+  },
+
+  unreadCount: () => request<{ count: number }>('/notifications/unread-count'),
+
+  markAsRead: (id: string) =>
+    request<{ success: boolean }>(`/notifications/${id}/read`, { method: 'PATCH' }),
+
+  markAllAsRead: () =>
+    request<{ success: boolean }>('/notifications/read-all', { method: 'POST' }),
+};
+
 // ─── Export ────────────────────────────────────────────────
 
 export const api = {
@@ -443,4 +499,6 @@ export const api = {
   specializations,
   skills,
   profile,
+  notifications,
+  integrations,
 };

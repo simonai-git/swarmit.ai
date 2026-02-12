@@ -66,7 +66,13 @@ export async function executeAgent(ctx: ExecutorContext, taskCtx: TaskContext): 
   if (!agent) throw new Error('Task has no assigned agent');
 
   const specialization = agent.specialization || null;
-  const tools = getToolsForAgent(specialization);
+
+  // Check if user has GitHub integration
+  const hasGitHub = await ctx.prisma.integrationToken.count({
+    where: { userId: ctx.userId, provider: 'github' },
+  }).then(c => c > 0).catch(() => false);
+
+  const tools = getToolsForAgent(specialization, { hasGitHub });
 
   // Initialize workflow if agent has one
   const workflowCtx = await initWorkflow(ctx.prisma, ctx.runId, agent);
@@ -145,6 +151,8 @@ export async function executeAgent(ctx: ExecutorContext, taskCtx: TaskContext): 
             taskId: ctx.taskId,
             projectId: task.project?.id || null,
             userId: ctx.userId,
+            agentId: agent.id,
+            agentName: agent.name,
           }
         );
 
@@ -263,13 +271,15 @@ function buildInitialUserMessage(task: TaskContext['task']): string {
   if (task.comments.length > 0) {
     parts.push('');
     parts.push('## Recent Comments');
-    for (const comment of task.comments.slice(-10)) {
+    for (const comment of task.comments.slice(-15)) {
       parts.push(`**${comment.author}** (${comment.createdAt.toISOString()}): ${comment.content}`);
     }
   }
 
   parts.push('');
   parts.push('Please complete this task. Use the available tools to read, write, and execute code in the sandbox.');
+  parts.push('');
+  parts.push('If your work is complete and the task needs review or further work by another agent, use the handoff_to_agent or request_review tool to pass it along with context about what you did.');
 
   return parts.join('\n');
 }

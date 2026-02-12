@@ -20,6 +20,7 @@ const mockLifecycleService = vi.hoisted(() => ({
 const mockNotificationService = vi.hoisted(() => ({
   sendTaskNotification: vi.fn(),
   sendCommentNotification: vi.fn(),
+  createNotification: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../services/task.service.js', () => ({

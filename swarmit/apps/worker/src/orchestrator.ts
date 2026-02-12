@@ -2,6 +2,7 @@ import { prisma } from '@swarmit/db';
 import { createLLMClient } from '@swarmit/integrations';
 import { createSandbox } from '@swarmit/sandbox';
 import { createLogger } from '@swarmit/logger';
+import { decrypt, isEncrypted } from '@swarmit/shared';
 import type { Redis } from 'ioredis';
 import type { AgentJobData, LifecycleJobData } from './queues.js';
 import { executeAgent } from './executor.js';
@@ -64,7 +65,10 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
       select: { claudeApiKey: true },
     });
 
-    const apiKey = user?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
+    let apiKey = user?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
+    if (apiKey && isEncrypted(apiKey)) {
+      apiKey = decrypt(apiKey);
+    }
     if (!apiKey) {
       throw new Error('No API key configured. Set a key in Profile > Integrations or configure ANTHROPIC_API_KEY.');
     }
@@ -115,6 +119,15 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     // Notify via Redis for Socket.io broadcast
     await redis.publish('task-updates', JSON.stringify({ taskId, userId }));
 
+    // Publish notification for agent run completion
+    await redis.publish('notifications', JSON.stringify({
+      userId,
+      type: 'AGENT_RUN_COMPLETED',
+      title: 'Agent run completed',
+      message: `Agent run for task ${taskId} completed successfully`,
+      metadata: { taskId, runId },
+    }));
+
   } catch (err) {
     logger.error({ err, runId, taskId }, 'Agent execution failed');
 
@@ -133,6 +146,15 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
 
     await publishLog(redis, taskId, runId, 'system', `Agent run failed: ${String(err)}`);
     await redis.publish('task-updates', JSON.stringify({ taskId, userId }));
+
+    // Publish notification for agent run failure
+    await redis.publish('notifications', JSON.stringify({
+      userId,
+      type: 'AGENT_RUN_FAILED',
+      title: 'Agent run failed',
+      message: `Agent run for task ${taskId} failed: ${String(err).slice(0, 200)}`,
+      metadata: { taskId, runId },
+    }));
 
     throw err;
   } finally {
@@ -174,6 +196,14 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
 
         if (!isBlocked) {
           logger.info({ taskId: dep.taskId, unlockedBy: taskId }, 'Task unblocked');
+
+          await redis.publish('notifications', JSON.stringify({
+            userId,
+            type: 'TASK_UNBLOCKED',
+            title: 'Task unblocked',
+            message: `A task dependency has been resolved`,
+            metadata: { taskId: dep.taskId, unblockedBy: taskId },
+          }));
         }
       }
 
@@ -200,6 +230,15 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
         });
 
         await redis.publish('project-updates', JSON.stringify({ projectId: task.projectId, userId }));
+
+        await redis.publish('notifications', JSON.stringify({
+          userId,
+          type: 'PROJECT_COMPLETED',
+          title: 'Project completed',
+          message: 'All tasks in the project are done',
+          metadata: { projectId: task.projectId },
+        }));
+
         logger.info({ projectId: task.projectId }, 'Project auto-completed — all tasks done');
       }
       break;

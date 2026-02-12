@@ -1,7 +1,8 @@
-import { Worker } from 'bullmq';
+import { Worker, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { createLogger } from '@swarmit/logger';
 import { processAgentJob, processLifecycleJob } from './orchestrator.js';
+import { processSchedulerJob } from './scheduler.js';
 import type { AgentJobData, LifecycleJobData, SchedulerJobData } from './queues.js';
 
 const logger = createLogger('worker');
@@ -53,7 +54,7 @@ const schedulerWorker = new Worker<SchedulerJobData>(
   'scheduler',
   async (job) => {
     logger.info({ jobId: job.id, type: job.data.type }, 'Processing scheduler job');
-    // Scheduler handlers will be implemented when needed
+    await processSchedulerJob(job.data);
   },
   { connection }
 );
@@ -61,6 +62,30 @@ const schedulerWorker = new Worker<SchedulerJobData>(
 schedulerWorker.on('failed', (job, err) => {
   logger.error({ jobId: job?.id, err }, 'Scheduler job failed');
 });
+
+// Register repeatable scheduler jobs
+const schedulerQueue = new Queue<SchedulerJobData>('scheduler', { connection });
+
+async function registerRepeatableJobs() {
+  await schedulerQueue.add('check-stalled-runs', { type: 'check-stalled-runs' }, {
+    repeat: { every: 5 * 60 * 1000 }, // every 5 minutes
+    jobId: 'check-stalled-runs',
+  });
+
+  await schedulerQueue.add('cleanup-old-logs', { type: 'cleanup-old-logs' }, {
+    repeat: { every: 24 * 60 * 60 * 1000 }, // every 24 hours
+    jobId: 'cleanup-old-logs',
+  });
+
+  await schedulerQueue.add('check-budget-exceeded', { type: 'check-budget-exceeded' }, {
+    repeat: { every: 10 * 60 * 1000 }, // every 10 minutes
+    jobId: 'check-budget-exceeded',
+  });
+
+  logger.info('Repeatable scheduler jobs registered');
+}
+
+registerRepeatableJobs().catch(err => logger.error({ err }, 'Failed to register scheduler jobs'));
 
 logger.info('All workers started');
 
