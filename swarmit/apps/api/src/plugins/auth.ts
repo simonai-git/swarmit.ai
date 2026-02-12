@@ -20,7 +20,7 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7);
         const { payload } = await jwtVerify(token, secret);
-        request.userId = payload.sub as string;
+        request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
 
@@ -31,7 +31,7 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
 
       if (sessionToken) {
         const { payload } = await jwtVerify(sessionToken, secret);
-        request.userId = payload.sub as string;
+        request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
 
