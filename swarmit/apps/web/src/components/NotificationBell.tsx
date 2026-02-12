@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bell } from 'lucide-react';
+import { toast } from 'sonner';
 import { api, type Notification } from '@/lib/api';
 import { useNotifications } from '@/hooks/useSocket';
 
@@ -18,8 +19,9 @@ export function NotificationBell() {
   }, []);
 
   // Listen for new notifications
-  const handleNew = useCallback(() => {
+  const handleNew = useCallback((data: { type: string; title: string; message: string }) => {
     setUnreadCount(c => c + 1);
+    toast(data.title, { description: data.message });
   }, []);
   useNotifications(handleNew);
 

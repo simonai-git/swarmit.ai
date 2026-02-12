@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, Loader2, CheckCircle, AlertCircle, Github, Trash2 } from 'lucide-react';
+import { Settings, Save, Loader2, Github, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { api, type AutomationSettings, type IntegrationToken } from '@/lib/api';
 
 const MODEL_OPTIONS = [
@@ -14,7 +15,6 @@ export default function SettingsPage() {
   const [, setSettings] = useState<AutomationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Form state
   const [autoAssign, setAutoAssign] = useState(false);
@@ -46,7 +46,7 @@ export default function SettingsPage() {
         setDailyBudgetCents(data.dailyBudgetCents);
       } catch (err) {
         console.error('Failed to fetch automation settings:', err);
-        setFeedback({ type: 'error', message: 'Failed to load settings.' });
+        toast.error('Failed to load settings');
       } finally {
         setLoading(false);
       }
@@ -57,7 +57,6 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaving(true);
-    setFeedback(null);
 
     try {
       await api.profile.updateAutomation({
@@ -67,10 +66,10 @@ export default function SettingsPage() {
         maxConcurrentAgents,
         dailyBudgetCents,
       });
-      setFeedback({ type: 'success', message: 'Settings saved successfully.' });
+      toast.success('Settings saved');
     } catch (err) {
       console.error('Failed to save settings:', err);
-      setFeedback({ type: 'error', message: 'Failed to save settings. Please try again.' });
+      toast.error('Failed to save settings');
     } finally {
       setSaving(false);
     }
@@ -93,23 +92,6 @@ export default function SettingsPage() {
         <Settings className="w-7 h-7 text-zinc-400" />
         <h1 className="text-2xl font-bold text-white">Settings</h1>
       </div>
-
-      {feedback && (
-        <div
-          className={`mb-6 flex items-center gap-2 px-4 py-3 rounded-lg text-sm ${
-            feedback.type === 'success'
-              ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-              : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          }`}
-        >
-          {feedback.type === 'success' ? (
-            <CheckCircle className="w-4 h-4 shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 shrink-0" />
-          )}
-          {feedback.message}
-        </div>
-      )}
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
         <div className="p-6 border-b border-zinc-800">
@@ -270,7 +252,7 @@ export default function SettingsPage() {
                   onClick={async () => {
                     await api.integrations.deleteToken('github').catch(() => {});
                     setIntegrationTokens(prev => prev.filter(t => t.provider !== 'github'));
-                    setFeedback({ type: 'success', message: 'GitHub token removed.' });
+                    toast.success('GitHub token removed');
                   }}
                   className="p-1 text-red-400 hover:text-red-300 transition-colors"
                   title="Remove"
@@ -295,9 +277,9 @@ export default function SettingsPage() {
                       const token = await api.integrations.upsertToken('github', githubToken);
                       setIntegrationTokens(prev => [...prev, token]);
                       setGithubToken('');
-                      setFeedback({ type: 'success', message: 'GitHub token saved.' });
+                      toast.success('GitHub token saved');
                     } catch {
-                      setFeedback({ type: 'error', message: 'Failed to save GitHub token.' });
+                      toast.error('Failed to save GitHub token');
                     } finally {
                       setSavingGithub(false);
                     }

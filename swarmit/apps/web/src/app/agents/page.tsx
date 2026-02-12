@@ -17,6 +17,8 @@ import {
   Link as LinkIcon,
   Users,
 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { api, type Agent, type Skill, type Workflow, type Specialization } from '@/lib/api';
 
 // ─── Constants ──────────────────────────────────────────────
@@ -101,6 +103,7 @@ function AgentsTab() {
     setAgents((prev) => [agent, ...prev]);
     setShowCreateModal(false);
     setSelectedAgentId(agent.id);
+    toast.success(`Agent "${agent.name}" created`);
   };
 
   const handleUpdated = (updated: Agent) => {
@@ -289,8 +292,10 @@ function AgentDetail({
       const updated = await api.agents.get(agent.id);
       setAgent(updated);
       onUpdated(updated);
+      toast.success('Agent saved');
     } catch (err) {
       console.error('Failed to update agent:', err);
+      toast.error('Failed to save agent');
     } finally {
       setSaving(false);
     }
@@ -301,8 +306,10 @@ function AgentDetail({
     try {
       await api.agents.delete(agent.id);
       onDeleted(agent.id);
+      toast.success('Agent deleted');
     } catch (err) {
       console.error('Failed to delete agent:', err);
+      toast.error('Failed to delete agent');
     }
   };
 
@@ -634,7 +641,7 @@ function AgentDetail({
           disabled={saving || !name.trim()}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors text-sm"
         >
-          <Save className="w-4 h-4" />
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
         {!confirmDelete ? (
@@ -680,6 +687,7 @@ function CreateAgentModal({
   const [specializationId, setSpecializationId] = useState('');
   const [model, setModel] = useState(MODEL_OPTIONS[0]);
   const [creating, setCreating] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [specializations, setSpecializations] = useState<Specialization[]>([]);
 
   useEffect(() => {
@@ -687,6 +695,7 @@ function CreateAgentModal({
   }, []);
 
   const handleCreate = async () => {
+    setSubmitted(true);
     if (!name.trim() || !specializationId) return;
     setCreating(true);
     try {
@@ -698,6 +707,7 @@ function CreateAgentModal({
       onCreated(agent);
     } catch (err) {
       console.error('Failed to create agent:', err);
+      toast.error('Failed to create agent');
     } finally {
       setCreating(false);
     }
@@ -724,10 +734,15 @@ function CreateAgentModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Riley"
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full px-3 py-2 bg-zinc-800 border rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                submitted && !name.trim() ? 'border-red-500' : 'border-zinc-700'
+              }`}
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             />
+            {submitted && !name.trim() && (
+              <p className="text-xs text-red-400 mt-1">Name is required</p>
+            )}
           </div>
 
           <div>
@@ -737,7 +752,9 @@ function CreateAgentModal({
             <select
               value={specializationId}
               onChange={(e) => setSpecializationId(e.target.value)}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full px-3 py-2 bg-zinc-800 border rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                submitted && !specializationId ? 'border-red-500' : 'border-zinc-700'
+              }`}
             >
               <option value="" disabled>Select a specialization...</option>
               {specializations.map((s) => (
@@ -746,6 +763,9 @@ function CreateAgentModal({
                 </option>
               ))}
             </select>
+            {submitted && !specializationId && (
+              <p className="text-xs text-red-400 mt-1">Specialization is required</p>
+            )}
           </div>
 
           <div>
@@ -774,9 +794,10 @@ function CreateAgentModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || !name.trim() || !specializationId}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors text-sm"
+            disabled={creating}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors text-sm"
           >
+            {creating && <Loader2 className="w-4 h-4 animate-spin" />}
             {creating ? 'Creating...' : 'Create'}
           </button>
         </div>
@@ -835,8 +856,10 @@ function SpecializationsTab() {
       setNewSystemPrompt('');
       setNewDockerImage('');
       setShowForm(false);
+      toast.success(`Specialization "${created.name}" created`);
     } catch (err) {
       console.error('Failed to create specialization:', err);
+      toast.error('Failed to create specialization');
     } finally {
       setCreating(false);
     }
@@ -847,8 +870,10 @@ function SpecializationsTab() {
     try {
       await api.specializations.delete(id);
       setSpecializations((prev) => prev.filter((s) => s.id !== id));
+      toast.success('Specialization deleted');
     } catch (err) {
       console.error('Failed to delete specialization:', err);
+      toast.error('Failed to delete specialization');
     }
   };
 
@@ -1073,8 +1098,10 @@ function SkillsTab() {
       setNewDescription('');
       setNewSourceUrl('');
       setShowForm(false);
+      toast.success(`Skill "${created.name}" created`);
     } catch (err) {
       console.error('Failed to create skill:', err);
+      toast.error('Failed to create skill');
     } finally {
       setCreating(false);
     }
@@ -1085,8 +1112,10 @@ function SkillsTab() {
     try {
       await api.skills.delete(id);
       setSkills((prev) => prev.filter((s) => s.id !== id));
+      toast.success('Skill deleted');
     } catch (err) {
       console.error('Failed to delete skill:', err);
+      toast.error('Failed to delete skill');
     }
   };
 

@@ -22,6 +22,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Save, Upload, CheckCircle, AlertTriangle, Trash2, Plus } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { api, type Workflow } from '@/lib/api';
 
 // ─── Custom Node Components ───────────────────────────────
@@ -123,15 +124,42 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
         const latestVersion = data.versions?.[0];
         if (latestVersion) {
           const versionNodes = latestVersion.nodes as Node[];
-          const versionEdges = latestVersion.edges as Edge[];
+          const versionEdges = (latestVersion.edges as Edge[]) || [];
           setNodes(versionNodes || []);
-          setEdges(versionEdges || []);
+          // Apply edge labels to loaded edges from condition nodes
+          const loadedEdges = versionEdges.map(e => {
+            const label = e.sourceHandle === 'true' ? 'Yes' : e.sourceHandle === 'false' ? 'No' : undefined;
+            if (label && !e.label) {
+              return {
+                ...e,
+                label,
+                labelStyle: { fill: '#a1a1aa', fontSize: 12 },
+                labelBgStyle: { fill: '#18181b' },
+                labelBgPadding: [6, 4] as [number, number],
+              };
+            }
+            return e;
+          });
+          setEdges(loadedEdges);
           // Find highest existing node counter
           const maxNum = (versionNodes || []).reduce((max: number, n: Node) => {
             const match = n.id.match(/-(\d+)$/);
             return match ? Math.max(max, parseInt(match[1])) : max;
           }, 0);
           setNodeCounter(maxNum + 1);
+        } else {
+          // New workflow: initialize with default start + end nodes
+          setNodes([
+            { id: 'start-0', type: 'start', position: { x: 250, y: 50 }, data: { label: 'Start' } },
+            { id: 'end-0', type: 'end', position: { x: 250, y: 400 }, data: { label: 'End' } },
+          ]);
+          setEdges([{
+            id: 'e-start-end-default',
+            source: 'start-0',
+            target: 'end-0',
+            style: { stroke: '#52525b', strokeWidth: 2 },
+            type: 'smoothstep',
+          }]);
         }
       } catch (err) {
         console.error('Failed to load workflow:', err);
@@ -152,9 +180,16 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
   }, []);
 
   const onConnect = useCallback((connection: Connection) => {
+    const label = connection.sourceHandle === 'true' ? 'Yes' : connection.sourceHandle === 'false' ? 'No' : undefined;
     setEdges(eds => addEdge({
       ...connection,
       id: `e-${connection.source}-${connection.target}-${Date.now()}`,
+      ...(label ? {
+        label,
+        labelStyle: { fill: '#a1a1aa', fontSize: 12 },
+        labelBgStyle: { fill: '#18181b' },
+        labelBgPadding: [6, 4] as [number, number],
+      } : {}),
     }, eds));
     setHasUnsavedChanges(true);
   }, []);
@@ -166,6 +201,49 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
   const onPaneClick = useCallback(() => {
     setSelectedNode(null);
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ignore when typing in inputs
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedNode && selectedNode.type !== 'start' && selectedNode.type !== 'end') {
+          deleteSelectedNode();
+        }
+      }
+      if (e.key === 'Escape') {
+        setSelectedNode(null);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedNode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ctrl+S / Cmd+S save shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (hasUnsavedChanges && !saving) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [hasUnsavedChanges, saving]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   const addNode = (type: string) => {
     const labels: Record<string, string> = {
@@ -212,8 +290,10 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
     try {
       await api.workflows.saveVersion(id, nodes, edges);
       setHasUnsavedChanges(false);
+      toast.success('Workflow saved');
     } catch (err) {
       console.error('Failed to save:', err);
+      toast.error('Failed to save workflow');
     } finally {
       setSaving(false);
     }
@@ -223,8 +303,14 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
     try {
       const result = await api.workflows.validate(id, nodes, edges);
       setValidation(result);
+      if (result.valid) {
+        toast.success('Workflow is valid');
+      } else {
+        toast.error(`Validation failed: ${result.errors.length} error(s)`);
+      }
     } catch (err) {
       console.error('Failed to validate:', err);
+      toast.error('Failed to validate workflow');
     }
   };
 
@@ -239,8 +325,10 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
       await api.workflows.publish(id);
       setWorkflow(prev => prev ? { ...prev, isPublished: true } : prev);
       setValidation(null);
+      toast.success('Workflow published');
     } catch (err) {
       console.error('Failed to publish:', err);
+      toast.error('Failed to publish workflow');
       if (err instanceof Error && 'body' in err) {
         const body = (err as { body: { details?: ValidationResult } }).body;
         if (body?.details) {
