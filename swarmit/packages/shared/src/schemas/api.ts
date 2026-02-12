@@ -113,7 +113,7 @@ export const createSpecializationSchema = z.object({
   keywords: z.array(z.string()).min(1),
   description: z.string().max(5000).optional(),
   systemPrompt: z.string().max(50000).optional(),
-  dockerImage: z.string().max(500).optional(),
+  dockerImage: z.string().min(1).max(500),
 });
 
 export const updateSpecializationSchema = z.object({
