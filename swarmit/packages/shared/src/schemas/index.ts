@@ -16,4 +16,5 @@ export {
   updateAutomationSettingSchema,
   updateProfileSchema,
   paginationSchema,
+  createIntegrationTokenSchema,
 } from './api.js';

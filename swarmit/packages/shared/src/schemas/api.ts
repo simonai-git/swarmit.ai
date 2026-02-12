@@ -124,6 +124,13 @@ export const updateSpecializationSchema = z.object({
   systemPrompt: z.string().max(50000).nullable().optional(),
 });
 
+// ─── Integration Tokens ─────────────────────────────────────
+
+export const createIntegrationTokenSchema = z.object({
+  provider: z.string().min(1).max(50),
+  accessToken: z.string().min(1).max(2000),
+});
+
 // ─── Automation Settings ─────────────────────────────────────────
 
 export const updateAutomationSettingSchema = z.object({

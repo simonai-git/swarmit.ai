@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
 const navItems = [
   { href: '/', label: 'Kanban', icon: KanbanSquare },
@@ -48,13 +49,15 @@ export function AppSidebar() {
       } h-screen bg-zinc-900 border-r border-zinc-800 flex flex-col transition-all duration-200 shrink-0`}
     >
       {/* Logo */}
-      <div className="h-14 flex items-center px-4 border-b border-zinc-800">
-        {!collapsed && (
-          <Link href="/" className="text-lg font-bold text-white tracking-tight">
-            swarmit<span className="text-blue-500">.ai</span>
-          </Link>
-        )}
-        {collapsed && (
+      <div className="h-14 flex items-center justify-between px-4 border-b border-zinc-800">
+        {!collapsed ? (
+          <>
+            <Link href="/" className="text-lg font-bold text-white tracking-tight">
+              swarmit<span className="text-blue-500">.ai</span>
+            </Link>
+            <NotificationBell />
+          </>
+        ) : (
           <Link href="/" className="text-lg font-bold text-blue-500 mx-auto">
             S
           </Link>

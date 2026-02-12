@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { api, type AutomationSettings } from '@/lib/api';
+import { Settings, Save, Loader2, CheckCircle, AlertCircle, Github, Trash2 } from 'lucide-react';
+import { api, type AutomationSettings, type IntegrationToken } from '@/lib/api';
 
 const MODEL_OPTIONS = [
   { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
@@ -22,6 +22,17 @@ export default function SettingsPage() {
   const [defaultModel, setDefaultModel] = useState('claude-sonnet-4-20250514');
   const [maxConcurrentAgents, setMaxConcurrentAgents] = useState(3);
   const [dailyBudgetCents, setDailyBudgetCents] = useState(1000);
+
+  // Integration state
+  const [integrationTokens, setIntegrationTokens] = useState<IntegrationToken[]>([]);
+  const [githubToken, setGithubToken] = useState('');
+  const [savingGithub, setSavingGithub] = useState(false);
+
+  useEffect(() => {
+    api.integrations.listTokens()
+      .then(data => setIntegrationTokens(data.tokens))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -230,6 +241,78 @@ export default function SettingsPage() {
             )}
             {saving ? 'Saving...' : 'Save Settings'}
           </button>
+        </div>
+      </div>
+      {/* Integrations */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg mt-8">
+        <div className="p-6 border-b border-zinc-800">
+          <h2 className="text-lg font-semibold text-white">Integrations</h2>
+          <p className="text-sm text-zinc-400 mt-1">
+            Connect external services to enable agent tools.
+          </p>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* GitHub */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Github className="w-5 h-5 text-zinc-300" />
+              <span className="text-sm font-medium text-white">GitHub</span>
+              {integrationTokens.some(t => t.provider === 'github') && (
+                <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">Connected</span>
+              )}
+            </div>
+
+            {integrationTokens.some(t => t.provider === 'github') ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-zinc-400">Personal access token configured</span>
+                <button
+                  onClick={async () => {
+                    await api.integrations.deleteToken('github').catch(() => {});
+                    setIntegrationTokens(prev => prev.filter(t => t.provider !== 'github'));
+                    setFeedback({ type: 'success', message: 'GitHub token removed.' });
+                  }}
+                  className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                  title="Remove"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder="ghp_xxxxxxxxxxxx"
+                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={async () => {
+                    if (!githubToken.trim()) return;
+                    setSavingGithub(true);
+                    try {
+                      const token = await api.integrations.upsertToken('github', githubToken);
+                      setIntegrationTokens(prev => [...prev, token]);
+                      setGithubToken('');
+                      setFeedback({ type: 'success', message: 'GitHub token saved.' });
+                    } catch {
+                      setFeedback({ type: 'error', message: 'Failed to save GitHub token.' });
+                    } finally {
+                      setSavingGithub(false);
+                    }
+                  }}
+                  disabled={savingGithub || !githubToken.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {savingGithub ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-zinc-500 mt-1">
+              A GitHub personal access token with repo scope. Enables agents to clone, push, and create PRs.
+            </p>
+          </div>
         </div>
       </div>
     </div>

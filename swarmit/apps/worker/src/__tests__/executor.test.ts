@@ -49,6 +49,9 @@ function createMockPrisma() {
     taskLog: {
       create: vi.fn().mockResolvedValue({}),
     },
+    integrationToken: {
+      count: vi.fn().mockResolvedValue(0),
+    },
   };
 }
 

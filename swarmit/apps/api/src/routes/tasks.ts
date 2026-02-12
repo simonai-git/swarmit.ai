@@ -8,7 +8,7 @@ import { NotificationService } from '../services/notification.service.js';
 export async function taskRoutes(app: FastifyInstance) {
   const taskService = new TaskService(app.prisma);
   const lifecycleService = new TaskLifecycleService(app.prisma);
-  const notificationService = new NotificationService();
+  const notificationService = new NotificationService(app.prisma, app.io);
 
   // List tasks with filters
   app.get('/', { preHandler: [app.authenticate] }, async (request) => {
@@ -143,6 +143,17 @@ export async function taskRoutes(app: FastifyInstance) {
       },
     });
 
+    // Create in-app notification for status change
+    if (data.status && data.status !== oldTask.status) {
+      await notificationService.createNotification(
+        request.userId,
+        'TASK_STATUS_CHANGED',
+        `Task "${updated.title}" status changed`,
+        `Status changed from ${oldTask.status} to ${data.status}`,
+        { taskId: updated.id, oldStatus: oldTask.status, newStatus: data.status },
+      );
+    }
+
     app.io.emit('tasks:updated', { taskId: request.params.id, userId: request.userId });
     return updated;
   });
@@ -187,6 +198,15 @@ export async function taskRoutes(app: FastifyInstance) {
       task: { id: task.id, title: task.title, status: task.status },
       comment: { author, content },
     });
+
+    // Create in-app notification
+    await notificationService.createNotification(
+      request.userId,
+      'COMMENT_ADDED',
+      `New comment on "${task.title}"`,
+      `${author}: ${content.slice(0, 200)}`,
+      { taskId: task.id, author },
+    );
 
     return reply.code(201).send(comment);
   });

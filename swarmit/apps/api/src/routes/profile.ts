@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { updateProfileSchema, updateAutomationSettingSchema } from '@swarmit/shared';
+import { updateProfileSchema, updateAutomationSettingSchema, encrypt } from '@swarmit/shared';
 
 export async function profileRoutes(app: FastifyInstance) {
   app.get('/', { preHandler: [app.authenticate] }, async (request) => {
@@ -29,10 +29,15 @@ export async function profileRoutes(app: FastifyInstance) {
   app.patch('/', { preHandler: [app.authenticate] }, async (request) => {
     const data = updateProfileSchema.parse(request.body);
 
-    // TODO: Encrypt API key with AES-256-GCM in Batch 5
+    // Encrypt API key before storing
+    const updateData = { ...data };
+    if (updateData.claudeApiKey && process.env.ENCRYPTION_KEY) {
+      updateData.claudeApiKey = encrypt(updateData.claudeApiKey);
+    }
+
     await app.prisma.user.update({
       where: { id: request.userId },
-      data,
+      data: updateData,
     });
 
     return { success: true };

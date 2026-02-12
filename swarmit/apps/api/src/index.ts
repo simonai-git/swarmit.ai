@@ -18,6 +18,8 @@ import { runRoutes } from './routes/runs.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { skillRoutes } from './routes/skills.js';
 import { costRoutes } from './routes/costs.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { integrationRoutes } from './routes/integrations.js';
 
 const logger = createLogger('api');
 
@@ -56,6 +58,8 @@ export async function buildApp() {
   await app.register(dashboardRoutes, { prefix: '/dashboard' });
   await app.register(skillRoutes, { prefix: '/skills' });
   await app.register(costRoutes, { prefix: '/costs' });
+  await app.register(notificationRoutes, { prefix: '/notifications' });
+  await app.register(integrationRoutes, { prefix: '/integrations' });
 
   return app;
 }

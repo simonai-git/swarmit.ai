@@ -50,6 +50,10 @@ export const socketPlugin = fp(async (app: FastifyInstance) => {
       socket.leave(`project:${projectId}`);
     });
 
+    socket.on('user:subscribe', ({ userId }: { userId: string }) => {
+      socket.join(`user:${userId}`);
+    });
+
     socket.on('disconnect', () => {
       logger.info({ socketId: socket.id }, 'Client disconnected');
     });
@@ -58,7 +62,7 @@ export const socketPlugin = fp(async (app: FastifyInstance) => {
   // Subscribe to Redis channels for worker events
   if (redisUrl) {
     const subscriber = new Redis(redisUrl);
-    subscriber.subscribe('task-logs', 'task-updates', 'project-updates');
+    subscriber.subscribe('task-logs', 'task-updates', 'project-updates', 'notifications');
 
     subscriber.on('message', (channel, message) => {
       try {
@@ -72,6 +76,12 @@ export const socketPlugin = fp(async (app: FastifyInstance) => {
             break;
           case 'project-updates':
             io.emit('project:updated', data);
+            break;
+          case 'notifications':
+            if (data.userId) {
+              // Create notification in DB via prisma (if available on app)
+              io.to(`user:${data.userId}`).emit('notification:new', data);
+            }
             break;
         }
       } catch (err) {

@@ -15,7 +15,7 @@ export interface LifecycleJobData {
 }
 
 export interface SchedulerJobData {
-  type: 'check-stalled-runs' | 'cleanup-old-logs';
+  type: 'check-stalled-runs' | 'cleanup-old-logs' | 'check-budget-exceeded';
 }
 
 export function createQueues(connection: Redis) {

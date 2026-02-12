@@ -102,6 +102,23 @@ export interface TaskLogEvent {
   timestamp: string;
 }
 
+export function useNotifications(callback: (data: { type: string; title: string; message: string }) => void) {
+  const { on } = useSocket();
+
+  useEffect(() => {
+    return on('notification:new', callback as (...args: unknown[]) => void);
+  }, [on, callback]);
+}
+
+export function useUserSubscribe(userId: string | null) {
+  const { connected, emit } = useSocket();
+
+  useEffect(() => {
+    if (!userId || !connected) return;
+    emit('user:subscribe', { userId });
+  }, [userId, connected, emit]);
+}
+
 export function useTaskLogs(taskId: string | null, callback: (log: TaskLogEvent) => void) {
   const { connected, on, emit } = useSocket();
 
