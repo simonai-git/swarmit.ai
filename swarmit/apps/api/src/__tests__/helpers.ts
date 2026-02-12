@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 import { SignJWT, jwtVerify } from 'jose';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
+import { ZodError } from 'zod';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 const TEST_SECRET = new TextEncoder().encode('test-secret');
@@ -44,6 +45,17 @@ export async function buildTestApp() {
     } catch {
       reply.code(401).send({ error: 'Invalid token' });
     }
+  });
+
+  // Zod validation error handler
+  app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: 'Validation error',
+        details: error.flatten().fieldErrors,
+      });
+    }
+    reply.code(error.statusCode ?? 500).send({ error: error.message });
   });
 
   // Mock Socket.io

@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import { ZodError } from 'zod';
 import { createLogger } from '@swarmit/logger';
 import { prismaPlugin } from './plugins/prisma.js';
 import { authPlugin } from './plugins/auth.js';
@@ -45,6 +46,17 @@ export async function buildApp() {
   await app.register(authPlugin);
   await app.register(socketPlugin);
   await app.register(queuePlugin);
+
+  // Zod validation error handler
+  app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: 'Validation error',
+        details: error.flatten().fieldErrors,
+      });
+    }
+    reply.code(error.statusCode ?? 500).send({ error: error.message });
+  });
 
   // Routes
   await app.register(healthRoutes, { prefix: '/health' });

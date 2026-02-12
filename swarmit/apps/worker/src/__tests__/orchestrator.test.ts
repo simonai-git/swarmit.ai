@@ -92,7 +92,6 @@ function makeFullTask() {
       model: 'claude-sonnet-4-20250514',
       temperature: 0.7,
       maxTokens: 4096,
-      dockerImage: null,
       skills: [],
       agentWorkflows: [],
     },

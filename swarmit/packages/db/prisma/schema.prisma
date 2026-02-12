@@ -238,7 +238,6 @@ model Agent {
   model            String  @default("claude-sonnet-4-5-20250929")
   temperature      Float   @default(0.7)
   maxTokens        Int     @default(8192) @map("max_tokens")
-  dockerImage      String? @map("docker_image")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -284,6 +283,7 @@ model Specialization {
   keywords     String[]
   description  String?
   systemPrompt String?  @map("system_prompt")
+  dockerImage  String?  @map("docker_image")
   createdAt    DateTime @default(now()) @map("created_at")
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)

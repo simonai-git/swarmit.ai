@@ -47,12 +47,11 @@ export const updateProjectSchema = z.object({
 
 export const createAgentSchema = z.object({
   name: z.string().min(1).max(100),
-  specializationId: z.string().optional(),
+  specializationId: z.string().min(1, 'Specialization is required'),
   systemPrompt: z.string().max(50000).optional(),
   model: z.string().max(100).default('claude-sonnet-4-5-20250929'),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().int().min(256).max(200000).default(8192),
-  dockerImage: z.string().max(500).optional(),
 });
 
 export const updateAgentSchema = z.object({
@@ -62,7 +61,6 @@ export const updateAgentSchema = z.object({
   model: z.string().max(100).optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(256).max(200000).optional(),
-  dockerImage: z.string().max(500).nullable().optional(),
 });
 
 // ─── Workflows ───────────────────────────────────────────────────
@@ -115,6 +113,7 @@ export const createSpecializationSchema = z.object({
   keywords: z.array(z.string()).min(1),
   description: z.string().max(5000).optional(),
   systemPrompt: z.string().max(50000).optional(),
+  dockerImage: z.string().max(500).optional(),
 });
 
 export const updateSpecializationSchema = z.object({
@@ -122,6 +121,7 @@ export const updateSpecializationSchema = z.object({
   keywords: z.array(z.string()).min(1).optional(),
   description: z.string().max(5000).nullable().optional(),
   systemPrompt: z.string().max(50000).nullable().optional(),
+  dockerImage: z.string().max(500).nullable().optional(),
 });
 
 // ─── Integration Tokens ─────────────────────────────────────
