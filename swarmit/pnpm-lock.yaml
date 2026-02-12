@@ -93,6 +93,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.4)
+      '@swarmit/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@swarmit/shared':
         specifier: workspace:*
         version: link:../../packages/shared

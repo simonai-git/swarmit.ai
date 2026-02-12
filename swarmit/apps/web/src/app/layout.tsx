@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AppSidebar } from '@/components/AppSidebar';
+import { Providers } from '@/components/Providers';
 import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
@@ -16,11 +17,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-background text-foreground font-sans antialiased">
-        <div className="flex h-screen overflow-hidden">
-          <AppSidebar />
-          <main className="flex-1 overflow-y-auto">{children}</main>
-        </div>
-        <Toaster theme="dark" position="bottom-right" />
+        <Providers>
+          <div className="flex h-screen overflow-hidden">
+            <AppSidebar />
+            <main className="flex-1 overflow-y-auto">{children}</main>
+          </div>
+          <Toaster theme="dark" position="bottom-right" />
+        </Providers>
       </body>
     </html>
   );

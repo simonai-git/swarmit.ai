@@ -27,7 +27,7 @@ export async function buildTestApp() {
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7);
         const { payload } = await jwtVerify(token, TEST_SECRET);
-        request.userId = payload.sub as string;
+        request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
 
@@ -37,7 +37,7 @@ export async function buildTestApp() {
 
       if (sessionToken) {
         const { payload } = await jwtVerify(sessionToken, TEST_SECRET);
-        request.userId = payload.sub as string;
+        request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
 
@@ -74,7 +74,7 @@ export async function buildTestApp() {
  * Creates a valid JWT for test requests.
  */
 export async function createTestToken(userId: string = 'test-user-id') {
-  return new SignJWT({ sub: userId })
+  return new SignJWT({ sub: userId, userId })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('1h')
     .sign(TEST_SECRET);
