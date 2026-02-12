@@ -75,7 +75,7 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
 
     // ── 3. CREATE_SANDBOX ─────────────────────────────────────────
     sandbox = createSandbox({
-      dockerImage: task.assignee.dockerImage || undefined,
+      dockerImage: task.assignee.specialization?.dockerImage || undefined,
       specialization: task.assignee.specialization?.name || undefined,
     });
     await sandbox.init();

@@ -234,7 +234,6 @@ function AgentDetail({
   const [model, setModel] = useState('');
   const [temperature, setTemperature] = useState(0);
   const [maxTokens, setMaxTokens] = useState(4096);
-  const [dockerImage, setDockerImage] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
 
   // Specializations list
@@ -263,7 +262,6 @@ function AgentDetail({
       setModel(data.model);
       setTemperature(data.temperature);
       setMaxTokens(data.maxTokens);
-      setDockerImage(data.dockerImage ?? '');
       setSystemPrompt(data.systemPrompt ?? '');
     } catch (err) {
       console.error('Failed to fetch agent:', err);
@@ -286,7 +284,6 @@ function AgentDetail({
         model,
         temperature,
         maxTokens,
-        dockerImage: dockerImage.trim() || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
       });
       const updated = await api.agents.get(agent.id);
@@ -498,17 +495,6 @@ function AgentDetail({
           />
         </div>
 
-        {/* Docker Image */}
-        <div>
-          <label className="block text-sm text-zinc-400 mb-1">Docker Image</label>
-          <input
-            type="text"
-            value={dockerImage}
-            onChange={(e) => setDockerImage(e.target.value)}
-            placeholder="e.g., node:20-slim"
-            className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
       </div>
 
       {/* System Prompt */}
@@ -701,12 +687,12 @@ function CreateAgentModal({
   }, []);
 
   const handleCreate = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !specializationId) return;
     setCreating(true);
     try {
       const agent = await api.agents.create({
         name: name.trim(),
-        specializationId: specializationId || undefined,
+        specializationId,
         model,
       });
       onCreated(agent);
@@ -745,13 +731,15 @@ function CreateAgentModal({
           </div>
 
           <div>
-            <label className="block text-sm text-zinc-400 mb-1">Specialization</label>
+            <label className="block text-sm text-zinc-400 mb-1">
+              Specialization <span className="text-red-400">*</span>
+            </label>
             <select
               value={specializationId}
               onChange={(e) => setSpecializationId(e.target.value)}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">None</option>
+              <option value="" disabled>Select a specialization...</option>
               {specializations.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -774,6 +762,7 @@ function CreateAgentModal({
               ))}
             </select>
           </div>
+
         </div>
 
         <div className="flex justify-end gap-2 px-6 py-4 border-t border-zinc-800">
@@ -785,7 +774,7 @@ function CreateAgentModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || !name.trim()}
+            disabled={creating || !name.trim() || !specializationId}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors text-sm"
           >
             {creating ? 'Creating...' : 'Create'}
@@ -806,6 +795,7 @@ function SpecializationsTab() {
   const [newKeywords, setNewKeywords] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
+  const [newDockerImage, setNewDockerImage] = useState('');
   const [creating, setCreating] = useState(false);
 
   const fetchSpecializations = useCallback(async () => {
@@ -836,12 +826,14 @@ function SpecializationsTab() {
         keywords,
         description: newDescription.trim() || undefined,
         systemPrompt: newSystemPrompt.trim() || undefined,
+        dockerImage: newDockerImage.trim() || undefined,
       });
       setSpecializations((prev) => [...prev, created]);
       setNewName('');
       setNewKeywords('');
       setNewDescription('');
       setNewSystemPrompt('');
+      setNewDockerImage('');
       setShowForm(false);
     } catch (err) {
       console.error('Failed to create specialization:', err);
@@ -928,6 +920,16 @@ function SpecializationsTab() {
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
               />
             </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm text-zinc-400 mb-1">Docker Image</label>
+              <input
+                type="text"
+                value={newDockerImage}
+                onChange={(e) => setNewDockerImage(e.target.value)}
+                placeholder="e.g., node:20-slim"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
             <button
@@ -944,6 +946,7 @@ function SpecializationsTab() {
                 setNewKeywords('');
                 setNewDescription('');
                 setNewSystemPrompt('');
+                setNewDockerImage('');
               }}
               className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded transition-colors text-sm"
             >

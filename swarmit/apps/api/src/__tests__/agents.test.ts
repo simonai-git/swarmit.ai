@@ -226,7 +226,6 @@ describe('agent routes', () => {
         model: 'claude-sonnet-4-20250514',
         temperature: 0.7,
         maxTokens: 4096,
-        dockerImage: null,
         userId: 'test-user-id',
         skills: [
           { skill: { id: 'skill-1', name: 'Docker' } },
@@ -308,17 +307,16 @@ describe('agent routes', () => {
   // ─── POST /agents ─────────────────────────────────────────────
 
   describe('POST /agents', () => {
-    it('should create an agent with only name and return 201', async () => {
+    it('should create an agent with name and specializationId and return 201', async () => {
       const mockAgent = {
         id: 'agent-new',
         name: 'New Agent',
-        specializationId: null,
-        specialization: null,
+        specializationId: 'spec-1',
+        specialization: { id: 'spec-1', name: 'developer' },
         systemPrompt: null,
-        model: null,
-        temperature: null,
-        maxTokens: null,
-        dockerImage: null,
+        model: 'claude-sonnet-4-5-20250929',
+        temperature: 0.7,
+        maxTokens: 8192,
         userId: 'test-user-id',
       };
 
@@ -328,13 +326,25 @@ describe('agent routes', () => {
         method: 'POST',
         url: '/agents',
         headers: { authorization: `Bearer ${token}` },
-        payload: { name: 'New Agent' },
+        payload: { name: 'New Agent', specializationId: 'spec-1' },
       });
 
       expect(res.statusCode).toBe(201);
       const body = res.json();
       expect(body.id).toBe('agent-new');
       expect(body.name).toBe('New Agent');
+      expect(body.specializationId).toBe('spec-1');
+    });
+
+    it('should reject creation without specializationId', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: 'New Agent' },
+      });
+
+      expect(res.statusCode).toBe(400);
     });
 
     it('should create an agent with all fields and return 201', async () => {
@@ -345,7 +355,6 @@ describe('agent routes', () => {
         model: 'claude-sonnet-4-20250514',
         temperature: 0.5,
         maxTokens: 8192,
-        dockerImage: 'node:20-alpine',
       };
 
       const mockAgent = {
@@ -372,7 +381,6 @@ describe('agent routes', () => {
       expect(body.model).toBe('claude-sonnet-4-20250514');
       expect(body.temperature).toBe(0.5);
       expect(body.maxTokens).toBe(8192);
-      expect(body.dockerImage).toBe('node:20-alpine');
     });
 
     it('should pass userId from auth into create data', async () => {
@@ -382,12 +390,12 @@ describe('agent routes', () => {
         method: 'POST',
         url: '/agents',
         headers: { authorization: `Bearer ${token}` },
-        payload: { name: 'X' },
+        payload: { name: 'X', specializationId: 'spec-1' },
       });
 
       expect(prisma.agent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ userId: 'test-user-id' }),
+          data: expect.objectContaining({ userId: 'test-user-id', specializationId: 'spec-1' }),
         }),
       );
     });

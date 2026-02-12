@@ -196,7 +196,6 @@ export interface Agent {
   model: string;
   temperature: number;
   maxTokens: number;
-  dockerImage: string | null;
   userId: string;
   createdAt: string;
   updatedAt: string;
@@ -216,12 +215,11 @@ export const agents = {
 
   create: (data: {
     name: string;
-    specializationId?: string;
+    specializationId: string;
     systemPrompt?: string;
     model?: string;
     temperature?: number;
     maxTokens?: number;
-    dockerImage?: string;
   }) => request<Agent>('/agents', { method: 'POST', body: JSON.stringify(data) }),
 
   update: (id: string, data: {
@@ -231,7 +229,6 @@ export const agents = {
     model?: string;
     temperature?: number;
     maxTokens?: number;
-    dockerImage?: string;
   }) => request<{ success: boolean }>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   delete: (id: string) => request<{ success: boolean }>(`/agents/${id}`, { method: 'DELETE' }),
@@ -364,15 +361,16 @@ export interface Specialization {
   keywords: string[];
   description: string | null;
   systemPrompt: string | null;
+  dockerImage: string | null;
   userId: string;
   _count?: { agents: number };
 }
 
 export const specializations = {
   list: () => request<Specialization[]>('/specializations'),
-  create: (data: { name: string; keywords: string[]; description?: string; systemPrompt?: string }) =>
+  create: (data: { name: string; keywords: string[]; description?: string; systemPrompt?: string; dockerImage?: string }) =>
     request<Specialization>('/specializations', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { name?: string; keywords?: string[]; description?: string | null; systemPrompt?: string | null }) =>
+  update: (id: string, data: { name?: string; keywords?: string[]; description?: string | null; systemPrompt?: string | null; dockerImage?: string | null }) =>
     request<{ success: boolean }>(`/specializations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ success: boolean }>(`/specializations/${id}`, { method: 'DELETE' }),
 };
