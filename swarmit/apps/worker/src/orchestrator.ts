@@ -59,18 +59,29 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
 
     await publishLog(redis, taskId, runId, 'system', `Loaded context for task: ${task.title}`);
 
-    // Get user's API key
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { claudeApiKey: true },
+    // Get user's API key — prefer OAuth token over manual key
+    const anthropicToken = await prisma.integrationToken.findUnique({
+      where: { userId_provider: { userId, provider: 'anthropic' } },
+      select: { accessToken: true },
     });
 
-    let apiKey = user?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
-    if (apiKey && isEncrypted(apiKey)) {
-      apiKey = decrypt(apiKey);
+    let apiKey: string | undefined;
+    if (anthropicToken?.accessToken) {
+      apiKey = isEncrypted(anthropicToken.accessToken)
+        ? decrypt(anthropicToken.accessToken)
+        : anthropicToken.accessToken;
+    } else {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { claudeApiKey: true },
+      });
+      apiKey = user?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
+      if (apiKey && isEncrypted(apiKey)) {
+        apiKey = decrypt(apiKey);
+      }
     }
     if (!apiKey) {
-      throw new Error('No API key configured. Set a key in Profile > Integrations or configure ANTHROPIC_API_KEY.');
+      throw new Error('No API key configured. Connect Claude via OAuth, set a key in Profile > Integrations, or configure ANTHROPIC_API_KEY.');
     }
 
     // ── 3. CREATE_SANDBOX ─────────────────────────────────────────

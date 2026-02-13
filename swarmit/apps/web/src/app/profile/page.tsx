@@ -17,8 +17,10 @@ import {
   Train,
   Trash2,
   LogIn,
+  Bot,
 } from 'lucide-react';
 import { api, ApiError, type UserProfile, type IntegrationToken } from '@/lib/api';
+import ClaudeOAuthModal from '@/components/ClaudeOAuthModal';
 
 type Tab = 'general' | 'integrations';
 
@@ -38,6 +40,7 @@ export default function ProfilePage() {
   const [savingKey, setSavingKey] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [integrationTokens, setIntegrationTokens] = useState<IntegrationToken[]>([]);
+  const [showClaudeOAuth, setShowClaudeOAuth] = useState(false);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -376,6 +379,53 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
+
+          {/* Claude AI (OAuth) */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Bot className="w-5 h-5 text-zinc-300" />
+                <span className="text-sm font-medium text-white">Claude AI (OAuth)</span>
+                {integrationTokens.some(t => t.provider === 'anthropic') && (
+                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">Connected via OAuth</span>
+                )}
+              </div>
+
+              {integrationTokens.some(t => t.provider === 'anthropic') ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-400">Anthropic account connected via OAuth</span>
+                  <button
+                    onClick={() => handleDisconnectIntegration('anthropic')}
+                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    title="Disconnect"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowClaudeOAuth(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Bot className="w-4 h-4" />
+                  Connect Claude
+                </button>
+              )}
+              <p className="text-xs text-zinc-500 mt-2">
+                Connect your Anthropic account via OAuth. Preferred over manual API keys — uses your account&apos;s usage limits.
+              </p>
+            </div>
+          </div>
+
+          <ClaudeOAuthModal
+            open={showClaudeOAuth}
+            onClose={() => setShowClaudeOAuth(false)}
+            onConnected={() => {
+              api.integrations.listTokens()
+                .then(data => setIntegrationTokens(data.tokens))
+                .catch(() => {});
+            }}
+          />
 
           {/* GitHub */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg">

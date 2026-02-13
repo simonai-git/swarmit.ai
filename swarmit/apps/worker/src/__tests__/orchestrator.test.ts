@@ -20,6 +20,9 @@ const mockPrisma = vi.hoisted(() => ({
   user: {
     findUnique: vi.fn().mockResolvedValue(null),
   },
+  integrationToken: {
+    findUnique: vi.fn().mockResolvedValue(null),
+  },
   project: {
     update: vi.fn().mockResolvedValue({}),
   },
@@ -190,7 +193,11 @@ describe('processAgentJob', () => {
 
     await expect(processAgentJob(jobData, redis)).rejects.toThrow('No API key configured');
 
-    if (origKey) process.env.ANTHROPIC_API_KEY = origKey;
+    if (origKey) {
+      process.env.ANTHROPIC_API_KEY = origKey;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
   });
 
   it('marks run as FAILED and cleans up sandbox on execution error', async () => {
