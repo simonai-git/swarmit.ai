@@ -4,12 +4,16 @@ import { createIntegrationTokenSchema, encrypt } from '@swarmit/shared';
 export async function integrationRoutes(app: FastifyInstance) {
   // Upsert integration token
   app.post('/tokens', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const { provider, accessToken } = createIntegrationTokenSchema.parse(request.body);
+    const { provider, accessToken, refreshToken, expiresAt } = createIntegrationTokenSchema.parse(request.body);
 
-    // Encrypt token before storing
+    // Encrypt tokens before storing
     let encryptedToken = accessToken;
+    let encryptedRefresh = refreshToken || null;
     if (process.env.ENCRYPTION_KEY) {
       encryptedToken = encrypt(accessToken);
+      if (refreshToken) {
+        encryptedRefresh = encrypt(refreshToken);
+      }
     }
 
     const token = await app.prisma.integrationToken.upsert({
@@ -20,9 +24,13 @@ export async function integrationRoutes(app: FastifyInstance) {
         userId: request.userId,
         provider,
         accessToken: encryptedToken,
+        refreshToken: encryptedRefresh,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
       },
       update: {
         accessToken: encryptedToken,
+        refreshToken: encryptedRefresh,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
       },
       select: {
         id: true,

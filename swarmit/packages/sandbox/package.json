@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured'",
     "test": "vitest run --root . --passWithNoTests",
-    "test:run": "vitest run --root . --passWithNoTests"
+    "test:run": "vitest run --root . --passWithNoTests",
+    "test:coverage": "vitest run --root . --passWithNoTests --coverage"
   },
   "dependencies": {
     "@swarmit/logger": "workspace:*",

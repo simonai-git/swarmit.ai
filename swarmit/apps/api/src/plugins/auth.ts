@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
-import { jwtVerify } from 'jose';
+import { jwtDecrypt } from 'jose';
+import { hkdfSync } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
 declare module 'fastify' {
@@ -8,29 +9,40 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * Derive the encryption key the same way next-auth v4 does:
+ * HKDF(SHA-256, secret, "", "NextAuth.js Generated Encryption Key", 32)
+ */
+function getDerivedEncryptionKey(secret: string): Uint8Array {
+  return new Uint8Array(
+    hkdfSync('sha256', secret, '', 'NextAuth.js Generated Encryption Key', 32)
+  );
+}
+
 export const authPlugin = fp(async (app: FastifyInstance) => {
-  const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET || 'dev-secret');
+  const rawSecret = process.env.NEXTAUTH_SECRET || 'dev-secret-for-local-development-only';
+  const encryptionKey = getDerivedEncryptionKey(rawSecret);
 
   app.decorateRequest('userId', '');
 
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      // Try Bearer header first
+      // Try Bearer header first (next-auth encoded JWE)
       const authHeader = request.headers.authorization;
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7);
-        const { payload } = await jwtVerify(token, secret);
+        const { payload } = await jwtDecrypt(token, encryptionKey);
         request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
 
-      // Try next-auth session cookie
+      // Try next-auth session cookie (encrypted JWE)
       const sessionToken =
         request.cookies['next-auth.session-token'] ||
         request.cookies['__Secure-next-auth.session-token'];
 
       if (sessionToken) {
-        const { payload } = await jwtVerify(sessionToken, secret);
+        const { payload } = await jwtDecrypt(sessionToken, encryptionKey);
         request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
