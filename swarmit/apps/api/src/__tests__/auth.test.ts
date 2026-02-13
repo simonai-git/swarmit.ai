@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import { EncryptJWT } from 'jose';
 import { hkdfSync } from 'node:crypto';
@@ -34,7 +34,7 @@ describe('auth plugin', () => {
     await app.register(authPlugin);
 
     // Test route that requires auth
-    app.get('/protected', { preHandler: [app.authenticate] }, async (request) => {
+    app.get('/protected', { preHandler: [app.authenticate] }, async (request: FastifyRequest) => {
       return { userId: request.userId };
     });
 

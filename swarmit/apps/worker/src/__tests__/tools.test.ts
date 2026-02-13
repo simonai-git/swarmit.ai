@@ -133,6 +133,7 @@ function createMockPrisma() {
     integrationToken: {
       findUnique: vi.fn().mockResolvedValue(null),
       count: vi.fn().mockResolvedValue(0),
+      update: vi.fn().mockResolvedValue({}),
     },
   };
 }
