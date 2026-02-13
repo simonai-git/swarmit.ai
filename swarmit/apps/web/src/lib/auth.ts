@@ -33,6 +33,10 @@ async function getOrCreateUser(email: string, name?: string, image?: string) {
   return prisma.user.create({ data: { email, name, image } });
 }
 
+// In production, set cookie domain so the session cookie is sent to api.swarmit.ai
+const isProduction = process.env.NODE_ENV === 'production';
+const cookieDomain = isProduction ? '.swarmit.ai' : undefined;
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -63,6 +67,18 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.userId as string;
       }
       return session;
+    },
+  },
+  cookies: {
+    sessionToken: {
+      name: isProduction ? '__Secure-next-auth.session-token' : 'next-auth.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: isProduction,
+        domain: cookieDomain,
+      },
     },
   },
   pages: {

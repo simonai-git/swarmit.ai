@@ -20,7 +20,7 @@ function getDerivedEncryptionKey(secret: string): Uint8Array {
 }
 
 export const authPlugin = fp(async (app: FastifyInstance) => {
-  const rawSecret = process.env.NEXTAUTH_SECRET || 'dev-secret';
+  const rawSecret = process.env.NEXTAUTH_SECRET || 'dev-secret-for-local-development-only';
   const encryptionKey = getDerivedEncryptionKey(rawSecret);
 
   app.decorateRequest('userId', '');
