@@ -30,7 +30,7 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
       client_id: ANTHROPIC_CLIENT_ID,
       response_type: 'code',
       redirect_uri: ANTHROPIC_REDIRECT_URI,
-      scope: 'user:inference',
+      scope: 'org:create_api_key user:profile user:inference',
       code_challenge: pkce.codeChallenge,
       code_challenge_method: 'S256',
     });
