@@ -16,6 +16,7 @@
     }
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "build": "tsc",
     "clean": "rm -rf dist",
     "generate": "prisma generate",
