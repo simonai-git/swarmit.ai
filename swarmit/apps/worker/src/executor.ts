@@ -67,12 +67,17 @@ export async function executeAgent(ctx: ExecutorContext, taskCtx: TaskContext): 
 
   const specialization = agent.specialization || null;
 
-  // Check if user has GitHub integration
-  const hasGitHub = await ctx.prisma.integrationToken.count({
-    where: { userId: ctx.userId, provider: 'github' },
-  }).then(c => c > 0).catch(() => false);
+  // Check if user has GitHub and Railway integrations
+  const [hasGitHub, hasRailway] = await Promise.all([
+    ctx.prisma.integrationToken.count({
+      where: { userId: ctx.userId, provider: 'github' },
+    }).then(c => c > 0).catch(() => false),
+    ctx.prisma.integrationToken.count({
+      where: { userId: ctx.userId, provider: 'railway' },
+    }).then(c => c > 0).catch(() => false),
+  ]);
 
-  const tools = getToolsForAgent(specialization, { hasGitHub });
+  const tools = getToolsForAgent(specialization, { hasGitHub, hasRailway });
 
   // Initialize workflow if agent has one
   const workflowCtx = await initWorkflow(ctx.prisma, ctx.runId, agent);

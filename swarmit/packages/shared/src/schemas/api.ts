@@ -128,7 +128,9 @@ export const updateSpecializationSchema = z.object({
 
 export const createIntegrationTokenSchema = z.object({
   provider: z.string().min(1).max(50),
-  accessToken: z.string().min(1).max(2000),
+  accessToken: z.string().min(1).max(4000),
+  refreshToken: z.string().max(4000).optional(),
+  expiresAt: z.string().datetime().optional(),
 });
 
 // ─── Automation Settings ─────────────────────────────────────────

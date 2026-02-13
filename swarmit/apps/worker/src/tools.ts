@@ -171,7 +171,7 @@ export function getMemoryTools(): LLMTool[] {
  */
 export function getToolsForAgent(
   specialization: { name: string; keywords: string[] } | null,
-  options?: { hasGitHub?: boolean },
+  options?: { hasGitHub?: boolean; hasRailway?: boolean },
 ): LLMTool[] {
   const baseTools = [...getSandboxTools(), getTaskStatusTool()];
 
@@ -190,6 +190,11 @@ export function getToolsForAgent(
   // Add GitHub tools if user has GitHub integration
   if (options?.hasGitHub) {
     baseTools.push(...getGitHubTools());
+  }
+
+  // Add Railway tools if user has Railway integration
+  if (options?.hasRailway) {
+    baseTools.push(...getRailwayTools());
   }
 
   // Always add collaboration tools
@@ -312,6 +317,122 @@ export function getCollaborationTools(): LLMTool[] {
       },
     },
   ];
+}
+
+/**
+ * Railway tools for deployment and service management.
+ */
+export function getRailwayTools(): LLMTool[] {
+  return [
+    {
+      name: 'railway_list_services',
+      description: 'List services in a Railway project.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'The Railway project ID' },
+        },
+        required: ['projectId'],
+      },
+    },
+    {
+      name: 'railway_deploy_service',
+      description: 'Trigger a redeployment of a Railway service.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          serviceId: { type: 'string', description: 'The service ID to redeploy' },
+          environmentId: { type: 'string', description: 'The environment ID' },
+        },
+        required: ['serviceId', 'environmentId'],
+      },
+    },
+    {
+      name: 'railway_get_deployments',
+      description: 'Get recent deployments for a Railway service.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          serviceId: { type: 'string', description: 'The service ID' },
+        },
+        required: ['serviceId'],
+      },
+    },
+    {
+      name: 'railway_set_env_vars',
+      description: 'Set environment variables on a Railway service.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          environmentId: { type: 'string', description: 'The environment ID' },
+          serviceId: { type: 'string', description: 'The service ID' },
+          variables: {
+            type: 'object',
+            description: 'Key-value pairs of environment variables to set',
+            additionalProperties: { type: 'string' },
+          },
+        },
+        required: ['environmentId', 'serviceId', 'variables'],
+      },
+    },
+  ];
+}
+
+/**
+ * Get the user's Railway token from integration_tokens, decrypted.
+ * Refreshes the token if expired and a refresh token is available.
+ */
+async function getRailwayToken(prisma: PrismaClient, userId: string): Promise<string | null> {
+  const token = await prisma.integrationToken.findUnique({
+    where: { userId_provider: { userId, provider: 'railway' } },
+    select: { accessToken: true, refreshToken: true, expiresAt: true },
+  });
+  if (!token) return null;
+
+  const { isEncrypted, decrypt } = await import('@swarmit/shared');
+
+  let accessToken = token.accessToken;
+  if (isEncrypted(accessToken)) {
+    accessToken = decrypt(accessToken);
+  }
+
+  // Check if token is expired and we have a refresh token
+  if (token.expiresAt && token.refreshToken && new Date(token.expiresAt) < new Date()) {
+    let refreshTokenValue = token.refreshToken;
+    if (isEncrypted(refreshTokenValue)) {
+      refreshTokenValue = decrypt(refreshTokenValue);
+    }
+
+    const clientId = process.env.RAILWAY_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.RAILWAY_OAUTH_CLIENT_SECRET;
+    if (clientId && clientSecret) {
+      try {
+        const { refreshRailwayOAuthToken } = await import('@swarmit/integrations');
+        const refreshed = await refreshRailwayOAuthToken(refreshTokenValue, clientId, clientSecret);
+
+        // Store updated tokens
+        const { encrypt } = await import('@swarmit/shared');
+        const encryptedAccess = process.env.ENCRYPTION_KEY ? encrypt(refreshed.accessToken) : refreshed.accessToken;
+        const encryptedRefresh = refreshed.refreshToken && process.env.ENCRYPTION_KEY
+          ? encrypt(refreshed.refreshToken) : refreshed.refreshToken;
+
+        await prisma.integrationToken.update({
+          where: { userId_provider: { userId, provider: 'railway' } },
+          data: {
+            accessToken: encryptedAccess,
+            refreshToken: encryptedRefresh,
+            expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+          },
+        });
+
+        return refreshed.accessToken;
+      } catch (err) {
+        logger.error({ err }, 'Failed to refresh Railway token');
+      }
+    }
+  }
+
+  return accessToken;
 }
 
 /**
@@ -625,6 +746,85 @@ export async function executeTool(
         return `Message sent on task ${taskId}`;
       } catch (err) {
         return `Error sending message: ${String(err)}`;
+      }
+    }
+
+    // Railway tools
+    case 'railway_list_services': {
+      const projectId = toolInput.projectId as string;
+      try {
+        const token = await getRailwayToken(context.prisma, context.userId);
+        if (!token) return 'No Railway token configured. Connect Railway in Settings > Integrations.';
+        const { createRailwayClient } = await import('@swarmit/integrations');
+        const client = createRailwayClient(token);
+        const data = await client.query(`
+          query ($projectId: String!) {
+            project(id: $projectId) {
+              services {
+                edges {
+                  node { id name }
+                }
+              }
+              environments {
+                edges {
+                  node { id name }
+                }
+              }
+            }
+          }
+        `, { projectId });
+        return JSON.stringify(data, null, 2);
+      } catch (err) {
+        return `Error listing Railway services: ${String(err)}`;
+      }
+    }
+
+    case 'railway_deploy_service': {
+      const serviceId = toolInput.serviceId as string;
+      const environmentId = toolInput.environmentId as string;
+      try {
+        const token = await getRailwayToken(context.prisma, context.userId);
+        if (!token) return 'No Railway token configured.';
+        const { createRailwayClient } = await import('@swarmit/integrations');
+        const client = createRailwayClient(token);
+        const data = await client.query(`
+          mutation ($serviceId: String!, $environmentId: String!) {
+            serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+          }
+        `, { serviceId, environmentId });
+        return `Redeployment triggered. ${JSON.stringify(data)}`;
+      } catch (err) {
+        return `Error triggering deployment: ${String(err)}`;
+      }
+    }
+
+    case 'railway_get_deployments': {
+      const serviceId = toolInput.serviceId as string;
+      try {
+        const token = await getRailwayToken(context.prisma, context.userId);
+        if (!token) return 'No Railway token configured.';
+        const { createRailwayClient } = await import('@swarmit/integrations');
+        const client = createRailwayClient(token);
+        const data = await client.getDeployments(serviceId);
+        return JSON.stringify(data, null, 2);
+      } catch (err) {
+        return `Error getting deployments: ${String(err)}`;
+      }
+    }
+
+    case 'railway_set_env_vars': {
+      const environmentId = toolInput.environmentId as string;
+      const serviceId = toolInput.serviceId as string;
+      const variables = toolInput.variables as Record<string, string>;
+      try {
+        const token = await getRailwayToken(context.prisma, context.userId);
+        if (!token) return 'No Railway token configured.';
+        const { createRailwayClient } = await import('@swarmit/integrations');
+        const client = createRailwayClient(token);
+        await client.setEnvVars(environmentId, serviceId, variables);
+        return `Environment variables set: ${Object.keys(variables).join(', ')}`;
+      } catch (err) {
+        return `Error setting env vars: ${String(err)}`;
       }
     }
 

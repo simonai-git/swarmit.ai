@@ -1,11 +1,15 @@
 import { vi } from 'vitest';
-import { SignJWT, jwtVerify } from 'jose';
+import { EncryptJWT, jwtDecrypt } from 'jose';
+import { hkdfSync } from 'node:crypto';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { ZodError } from 'zod';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
-const TEST_SECRET = new TextEncoder().encode('test-secret');
+const TEST_SECRET_RAW = 'test-secret';
+const TEST_ENCRYPTION_KEY = new Uint8Array(
+  hkdfSync('sha256', TEST_SECRET_RAW, '', 'NextAuth.js Generated Encryption Key', 32)
+);
 
 /**
  * Creates a minimal Fastify app with mocked prisma, auth, and socket.io
@@ -26,7 +30,7 @@ export async function buildTestApp() {
       const authHeader = request.headers.authorization;
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7);
-        const { payload } = await jwtVerify(token, TEST_SECRET);
+        const { payload } = await jwtDecrypt(token, TEST_ENCRYPTION_KEY);
         request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
@@ -36,7 +40,7 @@ export async function buildTestApp() {
         request.cookies?.['__Secure-next-auth.session-token'];
 
       if (sessionToken) {
-        const { payload } = await jwtVerify(sessionToken, TEST_SECRET);
+        const { payload } = await jwtDecrypt(sessionToken, TEST_ENCRYPTION_KEY);
         request.userId = (payload.userId as string) || (payload.sub as string);
         return;
       }
@@ -71,13 +75,15 @@ export async function buildTestApp() {
 }
 
 /**
- * Creates a valid JWT for test requests.
+ * Creates a valid encrypted JWT (JWE) matching next-auth v4 format.
  */
 export async function createTestToken(userId: string = 'test-user-id') {
-  return new SignJWT({ sub: userId, userId })
-    .setProtectedHeader({ alg: 'HS256' })
+  return new EncryptJWT({ sub: userId, userId })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+    .setIssuedAt()
     .setExpirationTime('1h')
-    .sign(TEST_SECRET);
+    .setJti(crypto.randomUUID())
+    .encrypt(TEST_ENCRYPTION_KEY);
 }
 
 /**
