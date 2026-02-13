@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   User,
   Mail,
@@ -12,14 +13,19 @@ import {
   CheckCircle,
   AlertCircle,
   Unlink,
+  Github,
+  Train,
+  Trash2,
+  LogIn,
 } from 'lucide-react';
-import { api, type UserProfile } from '@/lib/api';
+import { api, ApiError, type UserProfile, type IntegrationToken } from '@/lib/api';
 
 type Tab = 'general' | 'integrations';
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -31,6 +37,7 @@ export default function ProfilePage() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [integrationTokens, setIntegrationTokens] = useState<IntegrationToken[]>([]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -40,13 +47,24 @@ export default function ProfilePage() {
         setName(data.name || '');
       } catch (err) {
         console.error('Failed to fetch profile:', err);
-        setFeedback({ type: 'error', message: 'Failed to load profile.' });
+        if (err instanceof ApiError && err.status === 401) {
+          setAuthError(true);
+        } else {
+          setFeedback({ type: 'error', message: 'Failed to load profile. Make sure the API server is running.' });
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchProfile();
+  }, []);
+
+  // Fetch integration tokens independently
+  useEffect(() => {
+    api.integrations.listTokens()
+      .then(data => setIntegrationTokens(data.tokens))
+      .catch(() => {});
   }, []);
 
   const showFeedback = (type: 'success' | 'error', message: string) => {
@@ -108,12 +126,47 @@ export default function ProfilePage() {
     }
   };
 
+  const handleDisconnectIntegration = async (provider: string) => {
+    try {
+      await api.integrations.deleteToken(provider);
+      setIntegrationTokens(prev => prev.filter(t => t.provider !== provider));
+      showFeedback('success', `${provider.charAt(0).toUpperCase() + provider.slice(1)} disconnected.`);
+    } catch {
+      showFeedback('error', `Failed to disconnect ${provider}.`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="h-64 bg-zinc-800 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (authError) {
+    return (
+      <div className="p-8 max-w-3xl mx-auto">
+        <div className="flex items-center gap-3 mb-8">
+          <User className="w-7 h-7 text-zinc-400" />
+          <h1 className="text-2xl font-bold text-white">Profile</h1>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-8 text-center">
+          <AlertCircle className="w-10 h-10 text-zinc-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-white mb-2">Not signed in</h2>
+          <p className="text-sm text-zinc-400 mb-6">
+            Sign in to view your profile and manage integrations.
+          </p>
+          <Link
+            href="/login"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <LogIn className="w-4 h-4" />
+            Sign in
+          </Link>
         </div>
       </div>
     );
@@ -246,77 +299,154 @@ export default function ProfilePage() {
       )}
 
       {/* Integrations Tab */}
-      {activeTab === 'integrations' && profile && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
-          <div className="p-6 border-b border-zinc-800">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Key className="w-5 h-5 text-zinc-400" />
-              Claude API Key
-            </h2>
-            <p className="text-sm text-zinc-400 mt-1">
-              Required for running agents. Supports both standard API keys and OAuth Access Tokens (OAT).
-            </p>
+      {activeTab === 'integrations' && (
+        <div className="space-y-6">
+          {/* Claude API Key */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Key className="w-5 h-5 text-zinc-400" />
+                Claude API Key
+              </h2>
+              <p className="text-sm text-zinc-400 mt-1">
+                Required for running agents. Supports both standard API keys and OAuth Access Tokens (OAT).
+              </p>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Current key status */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                  Current Key
+                </label>
+                {profile?.claudeApiKey ? (
+                  <div className="flex items-center gap-3">
+                    <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono">
+                      {profile.claudeApiKey}
+                    </code>
+                    <button
+                      onClick={handleDisconnectKey}
+                      disabled={disconnecting}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {disconnecting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Unlink className="w-3.5 h-3.5" />
+                      )}
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-500 italic">Not configured</p>
+                )}
+              </div>
+
+              {/* Set/update key */}
+              <div>
+                <label className="block text-sm font-medium text-white mb-1.5">
+                  {profile?.claudeApiKey ? 'Update Key' : 'Set Key'}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder="sk-ant-api... or sk-ant-oat..."
+                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
+                  />
+                  <button
+                    onClick={handleSaveApiKey}
+                    disabled={savingKey || !apiKeyInput.trim()}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    {savingKey ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-500 mt-2">
+                  Supports both standard API keys (<code className="text-zinc-400">sk-ant-api...</code>) and
+                  OAuth Access Tokens (<code className="text-zinc-400">sk-ant-oat...</code>).
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="p-6 space-y-5">
-            {/* Current key status */}
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Current Key
-              </label>
-              {profile.claudeApiKey ? (
-                <div className="flex items-center gap-3">
-                  <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono">
-                    {profile.claudeApiKey}
-                  </code>
+          {/* GitHub */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Github className="w-5 h-5 text-zinc-300" />
+                <span className="text-sm font-medium text-white">GitHub</span>
+                {integrationTokens.some(t => t.provider === 'github') && (
+                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">Connected</span>
+                )}
+              </div>
+
+              {integrationTokens.some(t => t.provider === 'github') ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-400">GitHub account connected</span>
                   <button
-                    onClick={handleDisconnectKey}
-                    disabled={disconnecting}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
+                    onClick={() => handleDisconnectIntegration('github')}
+                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    title="Disconnect"
                   >
-                    {disconnecting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Unlink className="w-3.5 h-3.5" />
-                    )}
-                    Disconnect
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
-                <p className="text-sm text-zinc-500 italic">Not configured</p>
-              )}
-            </div>
-
-            {/* Set/update key */}
-            <div>
-              <label className="block text-sm font-medium text-white mb-1.5">
-                {profile.claudeApiKey ? 'Update Key' : 'Set Key'}
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  placeholder="sk-ant-api... or sk-ant-oat..."
-                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
-                />
-                <button
-                  onClick={handleSaveApiKey}
-                  disabled={savingKey || !apiKeyInput.trim()}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
+                <a
+                  href="/api/integrations/github/connect"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  {savingKey ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  Save
-                </button>
-              </div>
+                  <Github className="w-4 h-4" />
+                  Connect GitHub
+                </a>
+              )}
               <p className="text-xs text-zinc-500 mt-2">
-                Supports both standard API keys (<code className="text-zinc-400">sk-ant-api...</code>) and
-                OAuth Access Tokens (<code className="text-zinc-400">sk-ant-oat...</code>).
+                Connect your GitHub account via OAuth. Enables agents to clone, push, and create PRs.
+              </p>
+            </div>
+          </div>
+
+          {/* Railway */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Train className="w-5 h-5 text-zinc-300" />
+                <span className="text-sm font-medium text-white">Railway</span>
+                {integrationTokens.some(t => t.provider === 'railway') && (
+                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">Connected</span>
+                )}
+              </div>
+
+              {integrationTokens.some(t => t.provider === 'railway') ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-zinc-400">Railway account connected</span>
+                  <button
+                    onClick={() => handleDisconnectIntegration('railway')}
+                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    title="Disconnect"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <a
+                  href="/api/integrations/railway/connect"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Train className="w-4 h-4" />
+                  Connect Railway
+                </a>
+              )}
+              <p className="text-xs text-zinc-500 mt-2">
+                Connect your Railway account via OAuth to let agents deploy and manage services.
               </p>
             </div>
           </div>
