@@ -793,7 +793,7 @@ export default function KanbanPage() {
   // Fetch tasks
   const fetchTasks = useCallback(async () => {
     try {
-      const data = await api.tasks.list({ limit: 200 });
+      const data = await api.tasks.list({ limit: 100 });
       setTasks(data.tasks);
     } catch (err) {
       console.error('Failed to fetch tasks:', err);
