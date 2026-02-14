@@ -20,17 +20,27 @@ export async function POST(req: NextRequest) {
   const { code, codeVerifier } = body as { code: string; codeVerifier: string };
 
   try {
+    // Anthropic returns code as "code#state" — split to extract both
+    const splits = code.split('#');
+    const authCode = splits[0];
+    const state = splits[1] || undefined;
+
     // Exchange authorization code for access token at Anthropic
+    const exchangeBody: Record<string, string> = {
+      grant_type: 'authorization_code',
+      code: authCode,
+      client_id: ANTHROPIC_CLIENT_ID,
+      redirect_uri: ANTHROPIC_REDIRECT_URI,
+      code_verifier: codeVerifier,
+    };
+    if (state) {
+      exchangeBody.state = state;
+    }
+
     const tokenResponse = await fetch(ANTHROPIC_TOKEN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: ANTHROPIC_CLIENT_ID,
-        redirect_uri: ANTHROPIC_REDIRECT_URI,
-        code_verifier: codeVerifier,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(exchangeBody),
     });
 
     if (!tokenResponse.ok) {

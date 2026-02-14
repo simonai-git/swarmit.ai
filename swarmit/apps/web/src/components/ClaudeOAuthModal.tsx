@@ -26,16 +26,17 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
     const pkce = await generatePKCE();
     setCodeVerifier(pkce.codeVerifier);
 
-    const params = new URLSearchParams({
-      client_id: ANTHROPIC_CLIENT_ID,
-      response_type: 'code',
-      redirect_uri: ANTHROPIC_REDIRECT_URI,
-      scope: 'org:create_api_key user:profile user:inference',
-      code_challenge: pkce.codeChallenge,
-      code_challenge_method: 'S256',
-    });
+    const url = new URL(ANTHROPIC_AUTH_URL);
+    url.searchParams.set('code', 'true');
+    url.searchParams.set('client_id', ANTHROPIC_CLIENT_ID);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('redirect_uri', ANTHROPIC_REDIRECT_URI);
+    url.searchParams.set('scope', 'org:create_api_key user:profile user:inference');
+    url.searchParams.set('code_challenge', pkce.codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('state', pkce.codeVerifier);
 
-    window.open(`${ANTHROPIC_AUTH_URL}?${params.toString()}`, '_blank');
+    window.open(url.toString(), '_blank');
     setAuthOpened(true);
   };
 
