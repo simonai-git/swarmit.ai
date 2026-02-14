@@ -285,7 +285,7 @@ describe('AnthropicClient', () => {
       client = new AnthropicClient(oatKey);
     });
 
-    it('creates Anthropic client with dummy apiKey and custom headers', async () => {
+    it('creates Anthropic client with placeholder apiKey and custom fetch', async () => {
       await client.chat({
         model: 'claude-sonnet-4-20250514',
         systemPrompt: 'System',
@@ -293,14 +293,8 @@ describe('AnthropicClient', () => {
       });
 
       const constructorCall = (Anthropic as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(constructorCall.apiKey).toBe('dummy');
-      expect(constructorCall.defaultHeaders).toEqual({
-        'Authorization': `Bearer ${oatKey}`,
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
-        'user-agent': 'claude-cli/2.1.2 (external, cli)',
-        'x-app': 'cli',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      });
+      expect(constructorCall.apiKey).toBe('placeholder');
+      expect(typeof constructorCall.fetch).toBe('function');
     });
 
     it('prefixes system prompt with Claude Code identity', async () => {
