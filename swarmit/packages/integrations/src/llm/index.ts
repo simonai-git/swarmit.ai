@@ -14,9 +14,9 @@ export interface LLMClient {
   }): Promise<LLMResponse>;
 }
 
-export function createLLMClient(apiKey: string): LLMClient {
+export function createLLMClient(apiKey: string, options?: { isOAuth?: boolean }): LLMClient {
   if (flags.LLM_PROVIDER === 'mock') {
     return new MockLLMClient();
   }
-  return new AnthropicClient(apiKey);
+  return new AnthropicClient(apiKey, options?.isOAuth);
 }

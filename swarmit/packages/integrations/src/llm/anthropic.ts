@@ -19,9 +19,11 @@ const limiter = new Bottleneck({
 
 export class AnthropicClient implements LLMClient {
   private apiKey: string;
+  private isOAuth: boolean;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, isOAuth?: boolean) {
     this.apiKey = apiKey;
+    this.isOAuth = isOAuth ?? false;
   }
 
   async chat(params: {
@@ -32,7 +34,7 @@ export class AnthropicClient implements LLMClient {
     maxTokens?: number;
     temperature?: number;
   }): Promise<LLMResponse> {
-    const isOAT = isOATToken(this.apiKey);
+    const isOAT = isOATToken(this.apiKey) || this.isOAuth;
 
     // Build Anthropic client with appropriate auth
     const clientOptions: Record<string, unknown> = {};
