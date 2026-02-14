@@ -40,13 +40,20 @@ export class AnthropicClient implements LLMClient {
     const clientOptions: Record<string, unknown> = {};
 
     if (isOAT) {
-      clientOptions.apiKey = 'dummy'; // SDK requires apiKey but we override headers
-      clientOptions.defaultHeaders = {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
-        'user-agent': 'claude-cli/2.1.2 (external, cli)',
-        'x-app': 'cli',
-        'anthropic-dangerous-direct-browser-access': 'true',
+      const oauthToken = this.apiKey;
+      clientOptions.apiKey = 'placeholder'; // SDK requires apiKey
+      clientOptions.fetch = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const headers = new Headers(init?.headers);
+        headers.delete('x-api-key');
+        headers.set('Authorization', `Bearer ${oauthToken}`);
+        // Merge required beta headers
+        const existing = headers.get('anthropic-beta') || '';
+        const existingList = existing.split(',').map(b => b.trim()).filter(Boolean);
+        const required = ['oauth-2025-04-20', 'interleaved-thinking-2025-05-14'];
+        const merged = [...new Set([...required, ...existingList])].join(',');
+        headers.set('anthropic-beta', merged);
+        headers.set('user-agent', 'claude-cli/2.1.2 (external, cli)');
+        return fetch(input, { ...init, headers });
       };
     } else {
       clientOptions.apiKey = this.apiKey;
