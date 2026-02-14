@@ -270,7 +270,7 @@ describe('processAgentJob', () => {
 
     await processAgentJob(jobData, redis);
 
-    expect(mockCreateLLMClient).toHaveBeenCalledWith('sk-env-fallback');
+    expect(mockCreateLLMClient).toHaveBeenCalledWith('sk-env-fallback', { isOAuth: false });
 
     if (origKey) {
       process.env.ANTHROPIC_API_KEY = origKey;

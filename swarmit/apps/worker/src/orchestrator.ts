@@ -66,10 +66,12 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     });
 
     let apiKey: string | undefined;
+    let isOAuth = false;
     if (anthropicToken?.accessToken) {
       apiKey = isEncrypted(anthropicToken.accessToken)
         ? decrypt(anthropicToken.accessToken)
         : anthropicToken.accessToken;
+      isOAuth = true;
     } else {
       const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -94,7 +96,7 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     await publishLog(redis, taskId, runId, 'system', 'Sandbox initialized');
 
     // ── 4. EXECUTE_AGENT ──────────────────────────────────────────
-    const llmClient = createLLMClient(apiKey);
+    const llmClient = createLLMClient(apiKey, { isOAuth });
 
     const { totalTokens, totalCost } = await executeAgent(
       {
