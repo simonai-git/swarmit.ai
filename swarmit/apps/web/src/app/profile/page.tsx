@@ -312,108 +312,111 @@ export default function ProfilePage() {
                 Claude API Key
               </h2>
               <p className="text-sm text-zinc-400 mt-1">
-                Required for running agents. Supports both standard API keys and OAuth Access Tokens (OAT).
+                Required for running agents. Connect via OAuth or paste an API key.
               </p>
             </div>
 
             <div className="p-6 space-y-5">
               {/* Current key status */}
-              <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                  Current Key
-                </label>
-                {profile?.claudeApiKey ? (
-                  <div className="flex items-center gap-3">
-                    <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono">
-                      {profile.claudeApiKey}
-                    </code>
-                    <button
-                      onClick={handleDisconnectKey}
-                      disabled={disconnecting}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      {disconnecting ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
+              {(profile?.claudeApiKey || integrationTokens.some(t => t.provider === 'anthropic')) && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                    Current Key
+                  </label>
+                  {integrationTokens.some(t => t.provider === 'anthropic') ? (
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Connected via OAuth
+                      </span>
+                      <button
+                        onClick={() => handleDisconnectIntegration('anthropic')}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors"
+                      >
                         <Unlink className="w-3.5 h-3.5" />
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : profile?.claudeApiKey ? (
+                    <div className="flex items-center gap-3">
+                      <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono">
+                        {profile.claudeApiKey}
+                      </code>
+                      <button
+                        onClick={handleDisconnectKey}
+                        disabled={disconnecting}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {disconnecting ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Unlink className="w-3.5 h-3.5" />
+                        )}
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {/* Connect with Claude (OAuth) */}
+              {!integrationTokens.some(t => t.provider === 'anthropic') && (
+                <div>
+                  <button
+                    onClick={() => setShowClaudeOAuth(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    <Bot className="w-4 h-4" />
+                    Connect with Claude
+                  </button>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Recommended — uses your Claude Pro/Max subscription.
+                  </p>
+                </div>
+              )}
+
+              {/* Divider */}
+              {!integrationTokens.some(t => t.provider === 'anthropic') && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 border-t border-zinc-700" />
+                  <span className="text-xs text-zinc-500">or</span>
+                  <div className="flex-1 border-t border-zinc-700" />
+                </div>
+              )}
+
+              {/* Paste API key */}
+              {!integrationTokens.some(t => t.provider === 'anthropic') && (
+                <div>
+                  <label className="block text-sm font-medium text-white mb-1.5">
+                    Paste API Key
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder="sk-ant-api..."
+                      className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
+                    />
+                    <button
+                      onClick={handleSaveApiKey}
+                      disabled={savingKey || !apiKeyInput.trim()}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      {savingKey ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
                       )}
-                      Disconnect
+                      Save
                     </button>
                   </div>
-                ) : (
-                  <p className="text-sm text-zinc-500 italic">Not configured</p>
-                )}
-              </div>
-
-              {/* Set/update key */}
-              <div>
-                <label className="block text-sm font-medium text-white mb-1.5">
-                  {profile?.claudeApiKey ? 'Update Key' : 'Set Key'}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder="sk-ant-api... or sk-ant-oat..."
-                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
-                  />
-                  <button
-                    onClick={handleSaveApiKey}
-                    disabled={savingKey || !apiKeyInput.trim()}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
-                  >
-                    {savingKey ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    Save
-                  </button>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Get an API key from <code className="text-zinc-400">console.anthropic.com</code>.
+                  </p>
                 </div>
-                <p className="text-xs text-zinc-500 mt-2">
-                  Supports both standard API keys (<code className="text-zinc-400">sk-ant-api...</code>) and
-                  OAuth Access Tokens (<code className="text-zinc-400">sk-ant-oat...</code>).
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Claude AI (OAuth) */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
-            <div className="p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Bot className="w-5 h-5 text-zinc-300" />
-                <span className="text-sm font-medium text-white">Claude AI (OAuth)</span>
-                {integrationTokens.some(t => t.provider === 'anthropic') && (
-                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">Connected via OAuth</span>
-                )}
-              </div>
-
-              {integrationTokens.some(t => t.provider === 'anthropic') ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-zinc-400">Anthropic account connected via OAuth</span>
-                  <button
-                    onClick={() => handleDisconnectIntegration('anthropic')}
-                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
-                    title="Disconnect"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowClaudeOAuth(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  <Bot className="w-4 h-4" />
-                  Connect Claude
-                </button>
               )}
-              <p className="text-xs text-zinc-500 mt-2">
-                Connect your Anthropic account via OAuth. Preferred over manual API keys — uses your account&apos;s usage limits.
-              </p>
             </div>
           </div>
 

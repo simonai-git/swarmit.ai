@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, ExternalLink, Loader2, CheckCircle, AlertCircle, ClipboardPaste } from 'lucide-react';
+import { X, ExternalLink, Loader2, CheckCircle, AlertCircle, ClipboardPaste, AlertTriangle } from 'lucide-react';
 import { generatePKCE } from '@/lib/pkce';
 
 const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -19,17 +19,15 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
   const [exchanging, setExchanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authOpened, setAuthOpened] = useState(false);
+  const [tokenPrefix, setTokenPrefix] = useState<string | null>(null);
 
-  const handleStartAuth = async (mode: 'claude' | 'console' = 'claude') => {
+  const handleStartAuth = async () => {
     setError(null);
+    setTokenPrefix(null);
     const pkce = await generatePKCE();
     setCodeVerifier(pkce.codeVerifier);
 
-    const baseUrl = mode === 'console'
-      ? 'https://console.anthropic.com/oauth/authorize'
-      : 'https://claude.ai/oauth/authorize';
-
-    const url = new URL(baseUrl);
+    const url = new URL('https://claude.ai/oauth/authorize');
     url.searchParams.set('code', 'true');
     url.searchParams.set('client_id', ANTHROPIC_CLIENT_ID);
     url.searchParams.set('response_type', 'code');
@@ -56,13 +54,14 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
         body: JSON.stringify({ code: codeInput.trim(), codeVerifier }),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Exchange failed (${res.status})`);
       }
 
+      setTokenPrefix(data.tokenPrefix || null);
       onConnected();
-      handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Token exchange failed');
     } finally {
@@ -76,10 +75,13 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
     setExchanging(false);
     setError(null);
     setAuthOpened(false);
+    setTokenPrefix(null);
     onClose();
   };
 
   if (!open) return null;
+
+  const isOatToken = tokenPrefix?.startsWith('sk-ant-oat');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -95,9 +97,9 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
           <X className="w-5 h-5" />
         </button>
 
-        <h2 className="text-lg font-semibold text-white mb-1">Connect Claude via OAuth</h2>
+        <h2 className="text-lg font-semibold text-white mb-1">Connect with Claude</h2>
         <p className="text-sm text-zinc-400 mb-6">
-          Authorize with your Anthropic account to get an OAuth Access Token.
+          Authorize with your Anthropic account to connect your Claude subscription.
         </p>
 
         {error && (
@@ -107,74 +109,90 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
           </div>
         )}
 
-        <div className="space-y-4">
-          {/* Step 1 */}
-          <div className="flex items-start gap-3">
-            <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 ${
-              authOpened ? 'bg-green-500/20 text-green-400' : 'bg-zinc-700 text-zinc-300'
-            }`}>
-              {authOpened ? <CheckCircle className="w-4 h-4" /> : '1'}
+        {/* Success state */}
+        {tokenPrefix && (
+          <div className={`mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+            isOatToken
+              ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+              : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+          }`}>
+            {isOatToken ? (
+              <CheckCircle className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            )}
+            <span>
+              Connected! Token: <code className="font-mono">{tokenPrefix}...</code>
+              {!isOatToken && (
+                <span className="block text-xs mt-0.5 opacity-80">
+                  Expected sk-ant-oat prefix. Token may not work for inference.
+                </span>
+              )}
             </span>
-            <div className="flex-1">
-              <p className="text-sm text-white font-medium">Authorize with Anthropic</p>
-              <p className="text-xs text-zinc-500 mt-0.5 mb-2">
-                Choose your account type to authorize.
-              </p>
-              <div className="flex gap-2">
+          </div>
+        )}
+
+        {!tokenPrefix && (
+          <div className="space-y-4">
+            {/* Step 1 */}
+            <div className="flex items-start gap-3">
+              <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 ${
+                authOpened ? 'bg-green-500/20 text-green-400' : 'bg-zinc-700 text-zinc-300'
+              }`}>
+                {authOpened ? <CheckCircle className="w-4 h-4" /> : '1'}
+              </span>
+              <div className="flex-1">
+                <p className="text-sm text-white font-medium">Authorize with Anthropic</p>
+                <p className="text-xs text-zinc-500 mt-0.5 mb-2">
+                  Opens Claude to authorize access to your account.
+                </p>
                 <button
-                  onClick={() => handleStartAuth('claude')}
+                  onClick={handleStartAuth}
                   className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  Claude Pro/Max
-                </button>
-                <button
-                  onClick={() => handleStartAuth('console')}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  API Console
+                  Connect with Claude
                 </button>
               </div>
             </div>
-          </div>
 
-          {/* Step 2 */}
-          <div className="flex items-start gap-3">
-            <span className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 bg-zinc-700 text-zinc-300">
-              2
-            </span>
-            <div className="flex-1">
-              <p className="text-sm text-white font-medium">Paste the authorization code</p>
-              <p className="text-xs text-zinc-500 mt-0.5 mb-2">
-                After authorizing, Anthropic will show you a code. Copy and paste it below.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={codeInput}
-                  onChange={(e) => setCodeInput(e.target.value)}
-                  placeholder="Paste authorization code..."
-                  disabled={!authOpened}
-                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-                  onKeyDown={(e) => e.key === 'Enter' && handleExchange()}
-                />
-                <button
-                  onClick={handleExchange}
-                  disabled={exchanging || !codeInput.trim() || !codeVerifier}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  {exchanging ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <ClipboardPaste className="w-4 h-4" />
-                  )}
-                  {exchanging ? 'Connecting...' : 'Connect'}
-                </button>
+            {/* Step 2 */}
+            <div className="flex items-start gap-3">
+              <span className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 bg-zinc-700 text-zinc-300">
+                2
+              </span>
+              <div className="flex-1">
+                <p className="text-sm text-white font-medium">Paste the authorization code</p>
+                <p className="text-xs text-zinc-500 mt-0.5 mb-2">
+                  After authorizing, Anthropic will show you a code. Copy and paste it below.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={codeInput}
+                    onChange={(e) => setCodeInput(e.target.value)}
+                    placeholder="Paste authorization code..."
+                    disabled={!authOpened}
+                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    onKeyDown={(e) => e.key === 'Enter' && handleExchange()}
+                  />
+                  <button
+                    onClick={handleExchange}
+                    disabled={exchanging || !codeInput.trim() || !codeVerifier}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    {exchanging ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ClipboardPaste className="w-4 h-4" />
+                    )}
+                    {exchanging ? 'Connecting...' : 'Connect'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
