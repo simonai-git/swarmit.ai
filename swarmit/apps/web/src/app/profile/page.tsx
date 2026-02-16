@@ -130,11 +130,19 @@ export default function ProfilePage() {
   };
 
   const handleDisconnectIntegration = async (provider: string) => {
+    if (!confirm(`Disconnect ${provider}? You will need to reconnect to run agents.`)) {
+      return;
+    }
     try {
       await api.integrations.deleteToken(provider);
       setIntegrationTokens(prev => prev.filter(t => t.provider !== provider));
       showFeedback('success', `${provider.charAt(0).toUpperCase() + provider.slice(1)} disconnected.`);
-    } catch {
+      // Re-fetch to confirm deletion
+      api.integrations.listTokens()
+        .then(data => setIntegrationTokens(data.tokens))
+        .catch(() => {});
+    } catch (err) {
+      console.error(`Failed to disconnect ${provider}:`, err);
       showFeedback('error', `Failed to disconnect ${provider}.`);
     }
   };

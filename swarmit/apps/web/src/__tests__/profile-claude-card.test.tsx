@@ -199,11 +199,15 @@ describe('Profile page — Claude API Key card', () => {
     });
   });
 
-  it('disconnects OAuth token', async () => {
+  it('disconnects OAuth token after confirm', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mockApiProfile.get.mockResolvedValue(createProfile());
-    mockApiIntegrations.listTokens.mockResolvedValue({
-      tokens: [{ id: 't-1', provider: 'anthropic', createdAt: '', updatedAt: '' }],
-    });
+    mockApiIntegrations.listTokens
+      .mockResolvedValueOnce({
+        tokens: [{ id: 't-1', provider: 'anthropic', createdAt: '', updatedAt: '' }],
+      })
+      // Re-fetch after disconnect returns empty
+      .mockResolvedValueOnce({ tokens: [] });
     mockApiIntegrations.deleteToken.mockResolvedValue({ success: true });
 
     render(<ProfilePage />);
