@@ -280,13 +280,13 @@ describe('processAgentJob', () => {
     }
   });
 
-  it('uses OAuth token when integration token exists', async () => {
+  it('uses OAT token from integration without isOAuth flag (auto-detected by LLM client)', async () => {
     const jobData: AgentJobData = { runId: 'run-8', taskId: 'task-1', userId: 'user-1' };
     mockPrisma.task.findUnique.mockResolvedValue(makeFullTask());
     mockPrisma.integrationToken.findUnique.mockResolvedValue({
-      accessToken: 'oauth-access-token',
+      accessToken: 'sk-ant-oat01-test-token',
       refreshToken: null,
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     });
 
     const mockSandboxInstance = {
@@ -299,7 +299,30 @@ describe('processAgentJob', () => {
 
     await processAgentJob(jobData, redis);
 
-    expect(mockCreateLLMClient).toHaveBeenCalledWith('oauth-access-token', { isOAuth: true });
+    // OAT tokens are auto-detected by isOATToken() in LLM client, isOAuth=false
+    expect(mockCreateLLMClient).toHaveBeenCalledWith('sk-ant-oat01-test-token', { isOAuth: false });
+  });
+
+  it('uses isOAuth=true for non-OAT integration tokens', async () => {
+    const jobData: AgentJobData = { runId: 'run-8b', taskId: 'task-1', userId: 'user-1' };
+    mockPrisma.task.findUnique.mockResolvedValue(makeFullTask());
+    mockPrisma.integrationToken.findUnique.mockResolvedValue({
+      accessToken: 'non-oat-oauth-token',
+      refreshToken: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const mockSandboxInstance = {
+      init: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    mockCreateSandbox.mockReturnValue(mockSandboxInstance);
+    mockCreateLLMClient.mockReturnValue({ chat: vi.fn() });
+    mockExecuteAgent.mockResolvedValue({ totalTokens: 100, totalCost: 0.005 });
+
+    await processAgentJob(jobData, redis);
+
+    expect(mockCreateLLMClient).toHaveBeenCalledWith('non-oat-oauth-token', { isOAuth: true });
   });
 
   it('refreshes expired OAuth token before using it', async () => {
