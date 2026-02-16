@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const tokenPrefix = tokenData.access_token.slice(0, 12);
+    console.log('Anthropic OAuth token prefix:', tokenPrefix);
+
     // Re-encode NextAuth JWT as Bearer token for our Fastify API
     const bearerToken = await encode({
       token: jwt,
@@ -103,7 +106,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to store token' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, tokenPrefix });
   } catch (err) {
     console.error('Claude OAuth exchange error:', err);
     return NextResponse.json({ error: 'Token exchange failed' }, { status: 500 });
