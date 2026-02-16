@@ -2,7 +2,7 @@ import { prisma } from '@swarmit/db';
 import { createLLMClient } from '@swarmit/integrations';
 import { createSandbox } from '@swarmit/sandbox';
 import { createLogger } from '@swarmit/logger';
-import { decrypt, isEncrypted } from '@swarmit/shared';
+import { decrypt, encrypt, isEncrypted } from '@swarmit/shared';
 import type { Redis } from 'ioredis';
 import type { AgentJobData, LifecycleJobData } from './queues.js';
 import { executeAgent } from './executor.js';
@@ -62,15 +62,29 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     // Get user's API key — prefer OAuth token over manual key
     const anthropicToken = await prisma.integrationToken.findUnique({
       where: { userId_provider: { userId, provider: 'anthropic' } },
-      select: { accessToken: true },
+      select: { accessToken: true, refreshToken: true, expiresAt: true },
     });
 
     let apiKey: string | undefined;
     let isOAuth = false;
     if (anthropicToken?.accessToken) {
-      apiKey = isEncrypted(anthropicToken.accessToken)
-        ? decrypt(anthropicToken.accessToken)
-        : anthropicToken.accessToken;
+      // Check if token is expired or expiring within 5 minutes
+      const needsRefresh = anthropicToken.expiresAt &&
+        new Date(anthropicToken.expiresAt).getTime() < Date.now() + 5 * 60 * 1000;
+
+      if (needsRefresh && anthropicToken.refreshToken) {
+        const refreshed = await refreshAnthropicToken(anthropicToken.refreshToken, userId);
+        if (refreshed) {
+          apiKey = refreshed;
+          await publishLog(redis, taskId, runId, 'system', 'OAuth token refreshed');
+        }
+      }
+
+      if (!apiKey) {
+        apiKey = isEncrypted(anthropicToken.accessToken)
+          ? decrypt(anthropicToken.accessToken)
+          : anthropicToken.accessToken;
+      }
       isOAuth = true;
     } else {
       const user = await prisma.user.findUnique({
@@ -299,6 +313,77 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
 
     default:
       logger.warn({ type }, 'Unknown lifecycle job type');
+  }
+}
+
+const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+
+/**
+ * Refresh an expired Anthropic OAuth token using the refresh_token grant.
+ * Returns the new decrypted access token, or null if refresh fails.
+ */
+async function refreshAnthropicToken(encryptedRefreshToken: string, userId: string): Promise<string | null> {
+  try {
+    const refreshToken = isEncrypted(encryptedRefreshToken)
+      ? decrypt(encryptedRefreshToken)
+      : encryptedRefreshToken;
+
+    const response = await fetch(ANTHROPIC_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: ANTHROPIC_CLIENT_ID,
+      }),
+    });
+
+    if (!response.ok) {
+      logger.error({ status: response.status, userId }, 'Anthropic token refresh failed');
+      return null;
+    }
+
+    const data = await response.json() as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+
+    if (!data.access_token) {
+      logger.error({ userId }, 'No access_token in refresh response');
+      return null;
+    }
+
+    // Store refreshed tokens
+    const encryptedAccess = process.env.ENCRYPTION_KEY
+      ? encrypt(data.access_token)
+      : data.access_token;
+
+    const updateData: Record<string, unknown> = {
+      accessToken: encryptedAccess,
+    };
+
+    if (data.refresh_token) {
+      updateData.refreshToken = process.env.ENCRYPTION_KEY
+        ? encrypt(data.refresh_token)
+        : data.refresh_token;
+    }
+
+    if (data.expires_in) {
+      updateData.expiresAt = new Date(Date.now() + data.expires_in * 1000);
+    }
+
+    await prisma.integrationToken.update({
+      where: { userId_provider: { userId, provider: 'anthropic' } },
+      data: updateData,
+    });
+
+    logger.info({ userId }, 'Anthropic OAuth token refreshed successfully');
+    return data.access_token;
+  } catch (err) {
+    logger.error({ err, userId }, 'Error refreshing Anthropic token');
+    return null;
   }
 }
 

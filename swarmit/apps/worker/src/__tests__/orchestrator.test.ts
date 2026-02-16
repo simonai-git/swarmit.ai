@@ -22,6 +22,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
   integrationToken: {
     findUnique: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue({}),
   },
   project: {
     update: vi.fn().mockResolvedValue({}),
@@ -277,6 +278,80 @@ describe('processAgentJob', () => {
     } else {
       delete process.env.ANTHROPIC_API_KEY;
     }
+  });
+
+  it('uses OAuth token when integration token exists', async () => {
+    const jobData: AgentJobData = { runId: 'run-8', taskId: 'task-1', userId: 'user-1' };
+    mockPrisma.task.findUnique.mockResolvedValue(makeFullTask());
+    mockPrisma.integrationToken.findUnique.mockResolvedValue({
+      accessToken: 'oauth-access-token',
+      refreshToken: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
+    });
+
+    const mockSandboxInstance = {
+      init: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    mockCreateSandbox.mockReturnValue(mockSandboxInstance);
+    mockCreateLLMClient.mockReturnValue({ chat: vi.fn() });
+    mockExecuteAgent.mockResolvedValue({ totalTokens: 100, totalCost: 0.005 });
+
+    await processAgentJob(jobData, redis);
+
+    expect(mockCreateLLMClient).toHaveBeenCalledWith('oauth-access-token', { isOAuth: true });
+  });
+
+  it('refreshes expired OAuth token before using it', async () => {
+    const jobData: AgentJobData = { runId: 'run-9', taskId: 'task-1', userId: 'user-1' };
+    mockPrisma.task.findUnique.mockResolvedValue(makeFullTask());
+    mockPrisma.integrationToken.findUnique.mockResolvedValue({
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token-123',
+      expiresAt: new Date(Date.now() - 60 * 1000), // expired 1 minute ago
+    });
+
+    // Mock the global fetch for token refresh
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600,
+      }),
+    }) as unknown as typeof fetch;
+
+    const mockSandboxInstance = {
+      init: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    mockCreateSandbox.mockReturnValue(mockSandboxInstance);
+    mockCreateLLMClient.mockReturnValue({ chat: vi.fn() });
+    mockExecuteAgent.mockResolvedValue({ totalTokens: 100, totalCost: 0.005 });
+
+    await processAgentJob(jobData, redis);
+
+    // Should have called token refresh endpoint
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://console.anthropic.com/v1/oauth/token',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('refresh_token'),
+      })
+    );
+
+    // Should use the refreshed token
+    expect(mockCreateLLMClient).toHaveBeenCalledWith('new-access-token', { isOAuth: true });
+
+    // Should have stored the refreshed token
+    expect(mockPrisma.integrationToken.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_provider: { userId: 'user-1', provider: 'anthropic' } },
+      })
+    );
+
+    globalThis.fetch = originalFetch;
   });
 });
 
