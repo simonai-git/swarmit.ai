@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 
-// --- Mocks ---
-const mockGetToken = vi.fn();
-const mockEncode = vi.fn();
+// --- Mocks (hoisted) ---
+const { mockGetToken, mockEncode } = vi.hoisted(() => ({
+  mockGetToken: vi.fn(),
+  mockEncode: vi.fn(),
+}));
 
 vi.mock('next-auth/jwt', () => ({
   getToken: (...args: unknown[]) => mockGetToken(...args),
@@ -31,7 +34,6 @@ vi.mock('next/server', () => {
     NextRequest: MockNextRequest,
     NextResponse: {
       json: (body: unknown, init?: { status?: number }) => ({
-        body,
         status: init?.status || 200,
         async json() { return body; },
       }),
@@ -43,17 +45,17 @@ import { POST } from '../app/api/integrations/claude/exchange/route';
 
 // Helper to create a mock NextRequest
 function createRequest(body: Record<string, unknown>) {
-  const { NextRequest } = require('next/server');
   return new NextRequest('http://localhost:3000/api/integrations/claude/exchange', {
     method: 'POST',
     body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' },
-  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
 }
 
 describe('POST /api/integrations/claude/exchange', () => {
   const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -66,14 +68,14 @@ describe('POST /api/integrations/claude/exchange', () => {
     const req = createRequest({ code: 'abc', codeVerifier: 'xyz' });
     const res = await POST(req);
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'Unauthorized' });
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
   });
 
   it('returns 400 when code or codeVerifier is missing', async () => {
     const req = createRequest({ code: 'abc' });
     const res = await POST(req);
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Missing code or codeVerifier' });
+    expect(await res.json()).toEqual({ error: 'Missing code or codeVerifier' });
   });
 
   it('returns tokenPrefix on successful exchange with sk-ant-oat token', async () => {
@@ -102,7 +104,7 @@ describe('POST /api/integrations/claude/exchange', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({
+    expect(await res.json()).toEqual({
       success: true,
       tokenPrefix: 'sk-ant-oat-a',
     });
@@ -151,7 +153,8 @@ describe('POST /api/integrations/claude/exchange', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(200);
-    expect(res.body.tokenPrefix).toBe('some-other-t');
+    const data = await res.json();
+    expect(data.tokenPrefix).toBe('some-other-t');
   });
 
   it('splits code#state correctly and passes to Anthropic', async () => {
@@ -193,7 +196,8 @@ describe('POST /api/integrations/claude/exchange', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(502);
-    expect(res.body.error).toBe('Failed to exchange code with Anthropic');
+    const data = await res.json();
+    expect(data.error).toBe('Failed to exchange code with Anthropic');
   });
 
   it('returns 502 when Anthropic returns error in token data', async () => {
@@ -213,7 +217,8 @@ describe('POST /api/integrations/claude/exchange', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(502);
-    expect(res.body.error).toBe('The authorization code has expired');
+    const data = await res.json();
+    expect(data.error).toBe('The authorization code has expired');
   });
 
   it('returns 500 when storing token fails', async () => {
@@ -239,7 +244,8 @@ describe('POST /api/integrations/claude/exchange', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toBe('Failed to store token');
+    const data = await res.json();
+    expect(data.error).toBe('Failed to store token');
   });
 
   it('includes refresh_token and expiresAt when provided', async () => {
