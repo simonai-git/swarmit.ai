@@ -68,24 +68,32 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
     let apiKey: string | undefined;
     let isOAuth = false;
     if (anthropicToken?.accessToken) {
-      // Check if token is expired or expiring within 5 minutes
-      const needsRefresh = anthropicToken.expiresAt &&
-        new Date(anthropicToken.expiresAt).getTime() < Date.now() + 5 * 60 * 1000;
+      let decryptedToken = isEncrypted(anthropicToken.accessToken)
+        ? decrypt(anthropicToken.accessToken)
+        : anthropicToken.accessToken;
 
-      if (needsRefresh && anthropicToken.refreshToken) {
-        const refreshed = await refreshAnthropicToken(anthropicToken.refreshToken, userId);
-        if (refreshed) {
-          apiKey = refreshed;
-          await publishLog(redis, taskId, runId, 'system', 'OAuth token refreshed');
+      // If this is a real API key (created via OAuth create_api_key), use it directly
+      const isStandardApiKey = decryptedToken.startsWith('sk-ant-api');
+
+      if (isStandardApiKey) {
+        apiKey = decryptedToken;
+        isOAuth = false; // Use standard x-api-key auth
+      } else {
+        // OAuth token — check if expired and refresh if needed
+        const needsRefresh = anthropicToken.expiresAt &&
+          new Date(anthropicToken.expiresAt).getTime() < Date.now() + 5 * 60 * 1000;
+
+        if (needsRefresh && anthropicToken.refreshToken) {
+          const refreshed = await refreshAnthropicToken(anthropicToken.refreshToken, userId);
+          if (refreshed) {
+            decryptedToken = refreshed;
+            await publishLog(redis, taskId, runId, 'system', 'OAuth token refreshed');
+          }
         }
-      }
 
-      if (!apiKey) {
-        apiKey = isEncrypted(anthropicToken.accessToken)
-          ? decrypt(anthropicToken.accessToken)
-          : anthropicToken.accessToken;
+        apiKey = decryptedToken;
+        isOAuth = true;
       }
-      isOAuth = true;
     } else {
       const user = await prisma.user.findUnique({
         where: { id: userId },

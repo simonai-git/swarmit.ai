@@ -69,6 +69,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Try to create a permanent API key using the OAuth token.
+    // This works for users with org:create_api_key scope and avoids
+    // short-lived OAuth token issues (expiry, scope on refresh).
+    let finalAccessToken = tokenData.access_token;
+    let finalRefreshToken = tokenData.refresh_token;
+    let finalExpiresIn = tokenData.expires_in;
+    let isApiKey = false;
+
+    try {
+      const createKeyResponse = await fetch(
+        'https://api.anthropic.com/api/oauth/claude_cli/create_api_key',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${tokenData.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'swarmit_oauth_key' }),
+        },
+      );
+
+      if (createKeyResponse.ok) {
+        const keyData = await createKeyResponse.json() as { raw_key?: string };
+        if (keyData.raw_key) {
+          finalAccessToken = keyData.raw_key;
+          finalRefreshToken = undefined; // API keys don't expire
+          finalExpiresIn = undefined;
+          isApiKey = true;
+          console.log('Created permanent API key via OAuth');
+        }
+      } else {
+        console.log('create_api_key not available, using OAuth token directly');
+      }
+    } catch {
+      console.log('create_api_key failed, using OAuth token directly');
+    }
+
     // Re-encode NextAuth JWT as Bearer token for our Fastify API
     const bearerToken = await encode({
       token: jwt,
@@ -79,13 +116,13 @@ export async function POST(req: NextRequest) {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
     const storePayload: Record<string, string> = {
       provider: 'anthropic',
-      accessToken: tokenData.access_token,
+      accessToken: finalAccessToken,
     };
-    if (tokenData.refresh_token) {
-      storePayload.refreshToken = tokenData.refresh_token;
+    if (finalRefreshToken) {
+      storePayload.refreshToken = finalRefreshToken;
     }
-    if (tokenData.expires_in) {
-      storePayload.expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+    if (finalExpiresIn) {
+      storePayload.expiresAt = new Date(Date.now() + finalExpiresIn * 1000).toISOString();
     }
 
     const storeResponse = await fetch(`${apiUrl}/integrations/tokens`, {
@@ -103,7 +140,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to store token' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, isApiKey });
   } catch (err) {
     console.error('Claude OAuth exchange error:', err);
     return NextResponse.json({ error: 'Token exchange failed' }, { status: 500 });
