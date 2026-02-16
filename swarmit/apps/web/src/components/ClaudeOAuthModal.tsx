@@ -5,7 +5,6 @@ import { X, ExternalLink, Loader2, CheckCircle, AlertCircle, ClipboardPaste } fr
 import { generatePKCE } from '@/lib/pkce';
 
 const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const ANTHROPIC_AUTH_URL = 'https://console.anthropic.com/oauth/authorize';
 const ANTHROPIC_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 
 interface ClaudeOAuthModalProps {
@@ -21,12 +20,16 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
   const [error, setError] = useState<string | null>(null);
   const [authOpened, setAuthOpened] = useState(false);
 
-  const handleStartAuth = async () => {
+  const handleStartAuth = async (mode: 'claude' | 'console' = 'claude') => {
     setError(null);
     const pkce = await generatePKCE();
     setCodeVerifier(pkce.codeVerifier);
 
-    const url = new URL(ANTHROPIC_AUTH_URL);
+    const baseUrl = mode === 'console'
+      ? 'https://console.anthropic.com/oauth/authorize'
+      : 'https://claude.ai/oauth/authorize';
+
+    const url = new URL(baseUrl);
     url.searchParams.set('code', 'true');
     url.searchParams.set('client_id', ANTHROPIC_CLIENT_ID);
     url.searchParams.set('response_type', 'code');
@@ -115,15 +118,24 @@ export default function ClaudeOAuthModal({ open, onClose, onConnected }: ClaudeO
             <div className="flex-1">
               <p className="text-sm text-white font-medium">Authorize with Anthropic</p>
               <p className="text-xs text-zinc-500 mt-0.5 mb-2">
-                Opens Anthropic&apos;s consent page in a new tab.
+                Choose your account type to authorize.
               </p>
-              <button
-                onClick={handleStartAuth}
-                className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open Anthropic Authorization
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleStartAuth('claude')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Claude Pro/Max
+                </button>
+                <button
+                  onClick={() => handleStartAuth('console')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  API Console
+                </button>
+              </div>
             </div>
           </div>
 
