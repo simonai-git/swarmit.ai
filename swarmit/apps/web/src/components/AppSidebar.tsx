@@ -18,7 +18,6 @@ import {
   LogOut,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
-import { NotificationBell } from './NotificationBell';
 
 const navItems = [
   { href: '/', label: 'Kanban', icon: KanbanSquare },
@@ -53,12 +52,9 @@ export function AppSidebar() {
       {/* Logo */}
       <div className="h-14 flex items-center justify-between px-4 border-b border-zinc-800">
         {!collapsed ? (
-          <>
-            <Link href="/" className="text-lg font-bold text-white tracking-tight">
-              swarmit<span className="text-blue-500">.ai</span>
-            </Link>
-            <NotificationBell />
-          </>
+          <Link href="/" className="text-lg font-bold text-white tracking-tight">
+            swarmit<span className="text-blue-500">.ai</span>
+          </Link>
         ) : (
           <Link href="/" className="text-lg font-bold text-blue-500 mx-auto">
             S
