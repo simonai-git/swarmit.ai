@@ -975,7 +975,7 @@ export default function KanbanPage() {
   return (
     <div className="h-full bg-zinc-950 flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800 shrink-0">
         <div>
           <h1 className="text-xl font-bold text-white">Kanban Board</h1>
           <p className="text-xs text-zinc-500 mt-0.5">
