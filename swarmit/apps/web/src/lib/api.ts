@@ -55,6 +55,8 @@ export interface Task {
   assignee?: { id: string; name: string; specialization: { name: string } | null } | null;
   project?: { id: string; title: string } | null;
   dependsOn?: Array<{ dependsOn: { id: string; title: string; status: string } }>;
+  runs?: TaskRun[];
+  comments?: TaskComment[];
   _count?: { comments: number; runs: number };
 }
 

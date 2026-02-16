@@ -361,12 +361,17 @@ function TaskDetailPanel({
   const [loadingLogs, setLoadingLogs] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [fullTask, setFullTask] = useState<Task>(task);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   // Fetch full task detail
   useEffect(() => {
     let cancelled = false;
     api.tasks.get(task.id).then((t) => {
-      if (!cancelled) setFullTask(t);
+      if (!cancelled) {
+        setFullTask(t);
+        // Populate comments from backend
+        if (t.comments) setComments(t.comments);
+      }
     }).catch(console.error);
     return () => { cancelled = true; };
   }, [task.id]);
@@ -376,33 +381,37 @@ function TaskDetailPanel({
     setTitleValue(fullTask.title);
   }, [fullTask.title]);
 
-  // Fetch comments (they come via the task detail endpoint as part of the response)
-  // We'll refetch comments through the task detail
-  useEffect(() => {
-    // Comments might not be part of the task response; we do our best
-    setComments([]);
-  }, [task.id]);
+  // Determine which run to show logs for:
+  // 1. User-selected run, 2. currentRunId (active run), 3. most recent completed run
+  const availableRuns = fullTask.runs ?? [];
+  const effectiveRunId = selectedRunId
+    ?? fullTask.currentRunId
+    ?? availableRuns[0]?.id
+    ?? null;
 
-  // Fetch logs for most recent run
+  // Fetch logs for the effective run
   useEffect(() => {
     if (activeTab !== 'logs') return;
-    if (!fullTask.currentRunId) return;
+    if (!effectiveRunId) return;
     setLoadingLogs(true);
+    setLogs([]);
     api.tasks
-      .getRunLogs(fullTask.id, fullTask.currentRunId)
+      .getRunLogs(fullTask.id, effectiveRunId)
       .then((data) => {
         setLogs(data);
       })
       .catch(console.error)
       .finally(() => setLoadingLogs(false));
-  }, [activeTab, fullTask.id, fullTask.currentRunId]);
+  }, [activeTab, fullTask.id, effectiveRunId]);
 
   // Real-time log streaming
   const handleLogEvent = useCallback((event: TaskLogEvent) => {
     setLiveLogs((prev) => [...prev, event]);
   }, []);
 
-  useTaskLogs(activeTab === 'logs' ? task.id : null, handleLogEvent);
+  // Only subscribe to live logs when viewing the current active run
+  const isLiveRun = fullTask.currentRunId && effectiveRunId === fullTask.currentRunId;
+  useTaskLogs(activeTab === 'logs' && isLiveRun ? task.id : null, handleLogEvent);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -739,11 +748,42 @@ function TaskDetailPanel({
           ) : (
             /* Logs tab */
             <div className="flex flex-col h-full">
+              {/* Run selector */}
+              {availableRuns.length > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 shrink-0">
+                  <span className="text-xs text-zinc-500">Run:</span>
+                  <div className="relative flex-1">
+                    <select
+                      value={effectiveRunId ?? ''}
+                      onChange={(e) => {
+                        setSelectedRunId(e.target.value || null);
+                        setLiveLogs([]);
+                      }}
+                      className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 text-xs appearance-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {availableRuns.map((run) => (
+                        <option key={run.id} value={run.id}>
+                          {run.agentType} — {run.status.toLowerCase()} — {new Date(run.createdAt).toLocaleString()}
+                          {run.id === fullTask.currentRunId ? ' (live)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500 pointer-events-none" />
+                  </div>
+                  {isLiveRun && (
+                    <span className="flex items-center gap-1 text-[10px] text-green-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                      Live
+                    </span>
+                  )}
+                </div>
+              )}
+
               {loadingLogs ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
                 </div>
-              ) : !fullTask.currentRunId ? (
+              ) : !effectiveRunId ? (
                 <div className="flex items-center justify-center py-12">
                   <p className="text-sm text-zinc-600 italic">
                     No runs yet for this task
