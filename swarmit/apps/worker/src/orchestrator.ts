@@ -72,14 +72,12 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
         ? decrypt(anthropicToken.accessToken)
         : anthropicToken.accessToken;
 
-      // If this is a real API key (created via OAuth create_api_key), use it directly
-      const isStandardApiKey = decryptedToken.startsWith('sk-ant-api');
+      // OAT tokens (sk-ant-oat...) are auto-detected by isOATToken() in the LLM client,
+      // so we don't need isOAuth=true for them. They work with Bearer auth.
+      const isOAT = decryptedToken.startsWith('sk-ant-oat');
 
-      if (isStandardApiKey) {
-        apiKey = decryptedToken;
-        isOAuth = false; // Use standard x-api-key auth
-      } else {
-        // OAuth token — check if expired and refresh if needed
+      if (!isOAT) {
+        // Non-OAT OAuth token — check if expired and refresh if needed
         const needsRefresh = anthropicToken.expiresAt &&
           new Date(anthropicToken.expiresAt).getTime() < Date.now() + 5 * 60 * 1000;
 
@@ -90,10 +88,10 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
             await publishLog(redis, taskId, runId, 'system', 'OAuth token refreshed');
           }
         }
-
-        apiKey = decryptedToken;
         isOAuth = true;
       }
+
+      apiKey = decryptedToken;
     } else {
       const user = await prisma.user.findUnique({
         where: { id: userId },
