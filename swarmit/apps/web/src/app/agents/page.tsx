@@ -831,6 +831,7 @@ function SpecializationsTab() {
   const [newDockerImage, setNewDockerImage] = useState('');
   const [creating, setCreating] = useState(false);
   const [deleteSpecId, setDeleteSpecId] = useState<string | null>(null);
+  const [selectedSpecId, setSelectedSpecId] = useState<string | null>(null);
 
   const fetchSpecializations = useCallback(async () => {
     try {
@@ -883,6 +884,7 @@ function SpecializationsTab() {
     try {
       await api.specializations.delete(deleteSpecId);
       setSpecializations((prev) => prev.filter((s) => s.id !== deleteSpecId));
+      if (selectedSpecId === deleteSpecId) setSelectedSpecId(null);
       toast.success('Specialization deleted');
     } catch (err) {
       console.error('Failed to delete specialization:', err);
@@ -1035,7 +1037,15 @@ function SpecializationsTab() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {specializations.map((spec) => (
-                <tr key={spec.id} className="hover:bg-zinc-800/50 transition-colors">
+                <tr
+                  key={spec.id}
+                  onClick={() => setSelectedSpecId(selectedSpecId === spec.id ? null : spec.id)}
+                  className={`cursor-pointer transition-colors ${
+                    selectedSpecId === spec.id
+                      ? 'bg-blue-500/10 border-l-2 border-l-blue-500'
+                      : 'hover:bg-zinc-800/50'
+                  }`}
+                >
                   <td className="px-3 md:px-6 py-4 text-sm text-white font-medium">
                     {spec.name}
                   </td>
@@ -1062,7 +1072,7 @@ function SpecializationsTab() {
                   </td>
                   <td className="px-3 md:px-6 py-4 text-right">
                     <button
-                      onClick={() => setDeleteSpecId(spec.id)}
+                      onClick={(e) => { e.stopPropagation(); setDeleteSpecId(spec.id); }}
                       className="text-zinc-500 hover:text-red-400 transition-colors"
                       title="Delete specialization"
                     >
@@ -1076,6 +1086,16 @@ function SpecializationsTab() {
         </div>
       )}
 
+      {/* Specialization detail panel */}
+      {selectedSpecId && (
+        <SpecializationDetail
+          spec={specializations.find((s) => s.id === selectedSpecId)!}
+          onSaved={() => fetchSpecializations()}
+          onDelete={(id) => setDeleteSpecId(id)}
+          onClose={() => setSelectedSpecId(null)}
+        />
+      )}
+
       <ConfirmDialog
         open={!!deleteSpecId}
         onClose={() => setDeleteSpecId(null)}
@@ -1085,6 +1105,160 @@ function SpecializationsTab() {
         confirmLabel="Delete"
         variant="danger"
       />
+    </div>
+  );
+}
+
+// ─── Specialization Detail Panel ────────────────────────────
+
+function SpecializationDetail({
+  spec,
+  onSaved,
+  onDelete,
+  onClose,
+}: {
+  spec: Specialization;
+  onSaved: () => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(spec.name);
+  const [keywords, setKeywords] = useState(spec.keywords.join(', '));
+  const [description, setDescription] = useState(spec.description ?? '');
+  const [systemPrompt, setSystemPrompt] = useState(spec.systemPrompt ?? '');
+  const [dockerImage, setDockerImage] = useState(spec.dockerImage ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Reset fields when a different spec is selected
+  useEffect(() => {
+    setName(spec.name);
+    setKeywords(spec.keywords.join(', '));
+    setDescription(spec.description ?? '');
+    setSystemPrompt(spec.systemPrompt ?? '');
+    setDockerImage(spec.dockerImage ?? '');
+  }, [spec]);
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      const keywordsList = keywords
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+      await api.specializations.update(spec.id, {
+        name: name.trim(),
+        keywords: keywordsList,
+        description: description.trim() || null,
+        systemPrompt: systemPrompt.trim() || null,
+        dockerImage: dockerImage || null,
+      });
+      onSaved();
+      toast.success('Specialization saved');
+    } catch (err) {
+      console.error('Failed to update specialization:', err);
+      toast.error('Failed to save specialization');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-lg font-semibold text-white">Specialization Details</h2>
+        <button
+          onClick={onClose}
+          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Name */}
+        <div>
+          <label className="block text-sm text-zinc-400 mb-1">Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        {/* Keywords */}
+        <div>
+          <label className="block text-sm text-zinc-400 mb-1">Keywords (comma-separated)</label>
+          <input
+            type="text"
+            value={keywords}
+            onChange={(e) => setKeywords(e.target.value)}
+            placeholder="react, css, ui"
+            className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      {/* Description */}
+      <div className="mt-6">
+        <label className="block text-sm text-zinc-400 mb-1">Description</label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What does this specialization cover?"
+          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      {/* System Prompt */}
+      <div className="mt-6">
+        <label className="block text-sm text-zinc-400 mb-1">System Prompt</label>
+        <textarea
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          rows={5}
+          placeholder="Role-specific instructions for agents with this specialization..."
+          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+        />
+      </div>
+
+      {/* Docker Image */}
+      <div className="mt-6">
+        <label className="block text-sm text-zinc-400 mb-1">Docker Image</label>
+        <select
+          value={dockerImage}
+          onChange={(e) => setDockerImage(e.target.value)}
+          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">None</option>
+          {DOCKER_IMAGE_OPTIONS.map((img) => (
+            <option key={img} value={img}>
+              {img}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Action buttons */}
+      <div className="mt-8 flex items-center gap-3 pt-4 border-t border-zinc-800">
+        <button
+          onClick={handleSave}
+          disabled={saving || !name.trim()}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors text-sm"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+        <button
+          onClick={() => onDelete(spec.id)}
+          className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-red-600/20 text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/50 rounded-lg transition-colors text-sm"
+        >
+          <Trash2 className="w-4 h-4" />
+          Delete
+        </button>
+      </div>
     </div>
   );
 }
