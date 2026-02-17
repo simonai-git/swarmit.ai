@@ -20,6 +20,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, type Agent, type Skill, type Workflow, type Specialization } from '@/lib/api';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -829,6 +830,7 @@ function SpecializationsTab() {
   const [newSystemPrompt, setNewSystemPrompt] = useState('');
   const [newDockerImage, setNewDockerImage] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deleteSpecId, setDeleteSpecId] = useState<string | null>(null);
 
   const fetchSpecializations = useCallback(async () => {
     try {
@@ -876,15 +878,17 @@ function SpecializationsTab() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this specialization?')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteSpecId) return;
     try {
-      await api.specializations.delete(id);
-      setSpecializations((prev) => prev.filter((s) => s.id !== id));
+      await api.specializations.delete(deleteSpecId);
+      setSpecializations((prev) => prev.filter((s) => s.id !== deleteSpecId));
       toast.success('Specialization deleted');
     } catch (err) {
       console.error('Failed to delete specialization:', err);
       toast.error('Failed to delete specialization');
+    } finally {
+      setDeleteSpecId(null);
     }
   };
 
@@ -1058,7 +1062,7 @@ function SpecializationsTab() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button
-                      onClick={() => handleDelete(spec.id)}
+                      onClick={() => setDeleteSpecId(spec.id)}
                       className="text-zinc-500 hover:text-red-400 transition-colors"
                       title="Delete specialization"
                     >
@@ -1071,6 +1075,16 @@ function SpecializationsTab() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteSpecId}
+        onClose={() => setDeleteSpecId(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Specialization"
+        message="Delete this specialization? This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </div>
   );
 }
@@ -1086,6 +1100,7 @@ function SkillsTab() {
   const [newDescription, setNewDescription] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deleteSkillId, setDeleteSkillId] = useState<string | null>(null);
 
   const fetchSkills = useCallback(async () => {
     try {
@@ -1125,15 +1140,17 @@ function SkillsTab() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this skill? It will be removed from all agents.')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteSkillId) return;
     try {
-      await api.skills.delete(id);
-      setSkills((prev) => prev.filter((s) => s.id !== id));
+      await api.skills.delete(deleteSkillId);
+      setSkills((prev) => prev.filter((s) => s.id !== deleteSkillId));
       toast.success('Skill deleted');
     } catch (err) {
       console.error('Failed to delete skill:', err);
       toast.error('Failed to delete skill');
+    } finally {
+      setDeleteSkillId(null);
     }
   };
 
@@ -1297,7 +1314,7 @@ function SkillsTab() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button
-                      onClick={() => handleDelete(skill.id)}
+                      onClick={() => setDeleteSkillId(skill.id)}
                       className="text-zinc-500 hover:text-red-400 transition-colors"
                       title="Delete skill"
                     >
@@ -1317,6 +1334,16 @@ function SkillsTab() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteSkillId}
+        onClose={() => setDeleteSkillId(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Skill"
+        message="Delete this skill? It will be removed from all agents."
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </div>
   );
 }

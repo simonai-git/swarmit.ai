@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError, type UserProfile, type IntegrationToken } from '@/lib/api';
 import ClaudeOAuthModal from '@/components/ClaudeOAuthModal';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 type Tab = 'general' | 'integrations';
 
@@ -41,6 +42,7 @@ export default function ProfilePage() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [integrationTokens, setIntegrationTokens] = useState<IntegrationToken[]>([]);
   const [showClaudeOAuth, setShowClaudeOAuth] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -112,9 +114,6 @@ export default function ProfilePage() {
   };
 
   const handleDisconnectKey = async () => {
-    if (!confirm('Remove your Claude API key? Agents will not be able to run until a new key is provided.')) {
-      return;
-    }
     setDisconnecting(true);
     setFeedback(null);
     try {
@@ -130,9 +129,6 @@ export default function ProfilePage() {
   };
 
   const handleDisconnectIntegration = async (provider: string) => {
-    if (!confirm(`Disconnect ${provider}? You will need to reconnect to run agents.`)) {
-      return;
-    }
     try {
       await api.integrations.deleteToken(provider);
       setIntegrationTokens(prev => prev.filter(t => t.provider !== provider));
@@ -145,6 +141,16 @@ export default function ProfilePage() {
       console.error(`Failed to disconnect ${provider}:`, err);
       showFeedback('error', `Failed to disconnect ${provider}.`);
     }
+  };
+
+  const handleConfirmDisconnect = async () => {
+    if (!confirmDisconnect) return;
+    if (confirmDisconnect === 'key') {
+      await handleDisconnectKey();
+    } else {
+      await handleDisconnectIntegration(confirmDisconnect);
+    }
+    setConfirmDisconnect(null);
   };
 
   if (loading) {
@@ -338,7 +344,7 @@ export default function ProfilePage() {
                         Connected via OAuth
                       </span>
                       <button
-                        onClick={() => handleDisconnectIntegration('anthropic')}
+                        onClick={() => setConfirmDisconnect('anthropic')}
                         className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors"
                       >
                         <Unlink className="w-3.5 h-3.5" />
@@ -351,7 +357,7 @@ export default function ProfilePage() {
                         {profile.claudeApiKey}
                       </code>
                       <button
-                        onClick={handleDisconnectKey}
+                        onClick={() => setConfirmDisconnect('key')}
                         disabled={disconnecting}
                         className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
                       >
@@ -453,7 +459,7 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-zinc-400">GitHub account connected</span>
                   <button
-                    onClick={() => handleDisconnectIntegration('github')}
+                    onClick={() => setConfirmDisconnect('github')}
                     className="p-1 text-red-400 hover:text-red-300 transition-colors"
                     title="Disconnect"
                   >
@@ -490,7 +496,7 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-zinc-400">Railway account connected</span>
                   <button
-                    onClick={() => handleDisconnectIntegration('railway')}
+                    onClick={() => setConfirmDisconnect('railway')}
                     className="p-1 text-red-400 hover:text-red-300 transition-colors"
                     title="Disconnect"
                   >
@@ -513,6 +519,20 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDisconnect}
+        onClose={() => setConfirmDisconnect(null)}
+        onConfirm={handleConfirmDisconnect}
+        title={confirmDisconnect === 'key' ? 'Remove API Key' : `Disconnect ${confirmDisconnect ?? ''}`}
+        message={
+          confirmDisconnect === 'key'
+            ? 'Remove your Claude API key? Agents will not be able to run until a new key is provided.'
+            : `Disconnect ${confirmDisconnect}? You will need to reconnect to run agents.`
+        }
+        confirmLabel={confirmDisconnect === 'key' ? 'Remove' : 'Disconnect'}
+        variant="danger"
+      />
     </div>
   );
 }
