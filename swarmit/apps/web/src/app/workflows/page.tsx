@@ -67,7 +67,7 @@ export default function WorkflowsPage() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="h-32 bg-zinc-800 rounded" />
@@ -77,11 +77,11 @@ export default function WorkflowsPage() {
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-6 md:mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white">Workflows</h1>
-          <p className="text-zinc-400 mt-1">Visual step-by-step instructions for your agents</p>
+          <p className="text-zinc-400 mt-1 hidden sm:block">Visual step-by-step instructions for your agents</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -149,7 +149,7 @@ export default function WorkflowsPage() {
             <Link
               key={workflow.id}
               href={`/workflows/${workflow.id}`}
-              className="block bg-zinc-900 border border-zinc-700 rounded-lg p-6 hover:border-zinc-500 transition-colors group"
+              className="block bg-zinc-900 border border-zinc-700 rounded-lg p-4 md:p-6 hover:border-zinc-500 transition-colors group"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">

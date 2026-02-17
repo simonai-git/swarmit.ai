@@ -120,7 +120,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="p-8 bg-zinc-950 min-h-screen">
+      <div className="p-4 md:p-8 bg-zinc-950 min-h-screen">
         <div className="animate-pulse space-y-6 max-w-6xl mx-auto">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -136,7 +136,7 @@ export default function DashboardPage() {
 
   if (error && !data) {
     return (
-      <div className="p-8 bg-zinc-950 min-h-screen">
+      <div className="p-4 md:p-8 bg-zinc-950 min-h-screen">
         <div className="max-w-6xl mx-auto text-center py-20">
           <p className="text-red-400 text-lg">{error}</p>
           <button
@@ -171,10 +171,10 @@ export default function DashboardPage() {
   const totalRuns = data.runs.total ?? 0;
 
   return (
-    <div className="p-8 bg-zinc-950 min-h-screen">
+    <div className="p-4 md:p-8 bg-zinc-950 min-h-screen">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 md:mb-8">
           <div>
             <h1 className="text-2xl font-bold text-white">Dashboard</h1>
             <p className="text-zinc-400 mt-1">Overview of your agent orchestration platform</p>
@@ -242,22 +242,22 @@ export default function DashboardPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-zinc-800">
-                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3">
                       Task
                     </th>
-                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3">
                       Agent Type
                     </th>
-                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3">
                       Status
                     </th>
-                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3 hidden sm:table-cell">
                       Tokens
                     </th>
-                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3 hidden sm:table-cell">
                       Cost
                     </th>
-                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">
+                    <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3 hidden sm:table-cell">
                       Date
                     </th>
                   </tr>
@@ -265,32 +265,32 @@ export default function DashboardPage() {
                 <tbody className="divide-y divide-zinc-800/50">
                   {data.recentRuns.map(run => (
                     <tr key={run.id} className="hover:bg-zinc-800/30 transition-colors">
-                      <td className="px-5 py-3">
+                      <td className="px-3 md:px-5 py-3">
                         <span className="text-sm text-zinc-300 truncate block max-w-[200px]">
                           {run.task?.title || run.taskId}
                         </span>
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="px-3 md:px-5 py-3">
                         <span className="flex items-center gap-1.5 text-sm text-zinc-400">
                           <Bot className="w-3.5 h-3.5" />
                           {run.agentType}
                         </span>
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="px-3 md:px-5 py-3">
                         <RunStatusBadge status={run.status} />
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-3 md:px-5 py-3 text-right hidden sm:table-cell">
                         <span className="flex items-center gap-1 justify-end text-sm text-zinc-400">
                           <Coins className="w-3.5 h-3.5" />
                           {run.tokens != null ? formatTokens(run.tokens) : '-'}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-3 md:px-5 py-3 text-right hidden sm:table-cell">
                         <span className="text-sm text-zinc-400">
                           {run.cost != null ? formatCost(run.cost) : '-'}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-3 md:px-5 py-3 text-right hidden sm:table-cell">
                         <span className="flex items-center gap-1 justify-end text-sm text-zinc-500">
                           <Clock className="w-3.5 h-3.5" />
                           {formatDate(run.createdAt)}

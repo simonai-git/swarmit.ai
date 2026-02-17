@@ -274,7 +274,7 @@ export default function ProjectsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 bg-zinc-950 min-h-screen">
+      <div className="p-4 md:p-8 bg-zinc-950 min-h-screen">
         <div className="animate-pulse space-y-4 max-w-6xl mx-auto">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -288,13 +288,13 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="p-8 bg-zinc-950 min-h-screen">
+    <div className="p-4 md:p-8 bg-zinc-950 min-h-screen">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 md:mb-8">
           <div>
             <h1 className="text-2xl font-bold text-white">Projects</h1>
-            <p className="text-zinc-400 mt-1">Manage your agent orchestration projects</p>
+            <p className="text-zinc-400 mt-1 hidden sm:block">Manage your agent orchestration projects</p>
           </div>
           <button
             onClick={() => setShowCreate(true)}
