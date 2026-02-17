@@ -213,6 +213,9 @@ export default function RunsPage() {
                         ) : (
                           <ChevronRight className="w-4 h-4 text-zinc-500 shrink-0" />
                         )}
+                        <span className="font-mono text-xs text-zinc-500 shrink-0">
+                          {run.id.slice(0, 8)}
+                        </span>
                         <span className="text-sm text-white truncate">
                           {run.task?.title || run.taskId}
                         </span>
@@ -311,7 +314,8 @@ export default function RunsPage() {
           {/* Desktop table view */}
           <div className="hidden md:block">
             {/* Table Header */}
-            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 bg-zinc-900 border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            <div className="grid grid-cols-[80px_minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 bg-zinc-900 border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              <div>Run ID</div>
               <div>Task</div>
               <div>Agent Type</div>
               <div>Status</div>
@@ -333,12 +337,19 @@ export default function RunsPage() {
                   {/* Run Row */}
                   <div
                     onClick={() => handleToggleExpand(run)}
-                    className={`grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 cursor-pointer transition-colors ${
+                    className={`grid grid-cols-[80px_minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 cursor-pointer transition-colors ${
                       isExpanded
                         ? 'bg-zinc-800/50'
                         : 'hover:bg-zinc-800/30'
                     } border-b border-zinc-800/50`}
                   >
+                    {/* Run ID */}
+                    <div className="flex items-center">
+                      <span className="font-mono text-xs text-zinc-500">
+                        {run.id.slice(0, 8)}
+                      </span>
+                    </div>
+
                     {/* Task */}
                     <div className="flex items-center gap-2 min-w-0">
                       {isExpanded ? (

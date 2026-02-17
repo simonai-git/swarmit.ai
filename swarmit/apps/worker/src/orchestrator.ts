@@ -3,6 +3,7 @@ import { createLLMClient } from '@swarmit/integrations';
 import { createSandbox } from '@swarmit/sandbox';
 import { createLogger } from '@swarmit/logger';
 import { decrypt, encrypt, isEncrypted } from '@swarmit/shared';
+import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { AgentJobData, LifecycleJobData } from './queues.js';
 import { executeAgent } from './executor.js';
@@ -205,7 +206,7 @@ export async function processAgentJob(data: AgentJobData, redis: Redis) {
 /**
  * Process lifecycle events (post-execution hooks).
  */
-export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) {
+export async function processLifecycleJob(data: LifecycleJobData, redis: Redis, agentQueue: Queue<AgentJobData>) {
   const { type, taskId, userId } = data;
 
   switch (type) {
@@ -313,7 +314,13 @@ export async function processLifecycleJob(data: LifecycleJobData, redis: Redis) 
         data: { currentRunId: run.id },
       });
 
-      logger.info({ taskId, agentId: agent.id, runId: run.id }, 'Auto-spawn agent run created');
+      await agentQueue.add('agent-execution', {
+        runId: run.id,
+        taskId,
+        userId,
+      });
+
+      logger.info({ taskId, agentId: agent.id, runId: run.id }, 'Auto-spawn agent run created and enqueued');
       break;
     }
 

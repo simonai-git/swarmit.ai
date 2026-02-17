@@ -62,6 +62,7 @@ vi.mock('../executor.js', () => ({
 }));
 
 import { processAgentJob, processLifecycleJob } from '../orchestrator.js';
+import type { Queue } from 'bullmq';
 import type { AgentJobData, LifecycleJobData } from '../queues.js';
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -70,6 +71,12 @@ function createMockRedis() {
   return {
     publish: vi.fn().mockResolvedValue(1),
   } as unknown as Parameters<typeof processAgentJob>[1];
+}
+
+function createMockAgentQueue() {
+  return {
+    add: vi.fn().mockResolvedValue({ id: 'job-1' }),
+  } as unknown as Queue<AgentJobData>;
 }
 
 function makeFullTask() {
@@ -380,10 +387,12 @@ describe('processAgentJob', () => {
 
 describe('processLifecycleJob', () => {
   let redis: ReturnType<typeof createMockRedis>;
+  let agentQueue: ReturnType<typeof createMockAgentQueue>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     redis = createMockRedis();
+    agentQueue = createMockAgentQueue();
   });
 
   describe('unblock-dependents', () => {
@@ -410,7 +419,7 @@ describe('processLifecycleJob', () => {
           { taskId: 'dep-task-2', dependsOnId: 'other-task', dependsOn: { status: 'IN_PROGRESS' } },
         ]);
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       // dep-task-1 should be unblocked (isBlocked = false)
       expect(mockPrisma.task.update).toHaveBeenCalledWith({
@@ -440,7 +449,7 @@ describe('processLifecycleJob', () => {
 
       mockPrisma.taskDependency.findMany.mockResolvedValueOnce([]);
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.task.update).not.toHaveBeenCalled();
     });
@@ -457,7 +466,7 @@ describe('processLifecycleJob', () => {
       mockPrisma.task.findUnique.mockResolvedValue({ projectId: 'proj-1' });
       mockPrisma.task.count.mockResolvedValue(0); // zero incomplete tasks
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.project.update).toHaveBeenCalledWith({
         where: { id: 'proj-1' },
@@ -480,7 +489,7 @@ describe('processLifecycleJob', () => {
       mockPrisma.task.findUnique.mockResolvedValue({ projectId: 'proj-1' });
       mockPrisma.task.count.mockResolvedValue(3); // 3 incomplete tasks
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.project.update).not.toHaveBeenCalled();
     });
@@ -494,7 +503,7 @@ describe('processLifecycleJob', () => {
 
       mockPrisma.task.findUnique.mockResolvedValue({ projectId: null });
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.task.count).not.toHaveBeenCalled();
       expect(mockPrisma.project.update).not.toHaveBeenCalled();
@@ -509,7 +518,7 @@ describe('processLifecycleJob', () => {
 
       mockPrisma.task.findUnique.mockResolvedValue(null);
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.task.count).not.toHaveBeenCalled();
     });
@@ -530,7 +539,7 @@ describe('processLifecycleJob', () => {
       });
       mockPrisma.taskRun.create.mockResolvedValue({ id: 'auto-run-1' });
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.agent.findFirst).toHaveBeenCalledWith({
         where: {
@@ -557,6 +566,13 @@ describe('processLifecycleJob', () => {
         where: { id: 'task-1' },
         data: { currentRunId: 'auto-run-1' },
       });
+
+      // Should enqueue the run to the agent-execution queue
+      expect(agentQueue.add).toHaveBeenCalledWith('agent-execution', {
+        runId: 'auto-run-1',
+        taskId: 'task-1',
+        userId: 'user-1',
+      });
     });
 
     it('does nothing when no agentId provided', async () => {
@@ -566,7 +582,7 @@ describe('processLifecycleJob', () => {
         userId: 'user-1',
       };
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.agent.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.task.update).not.toHaveBeenCalled();
@@ -583,7 +599,7 @@ describe('processLifecycleJob', () => {
 
       mockPrisma.agent.findFirst.mockResolvedValue(null);
 
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
 
       expect(mockPrisma.task.update).not.toHaveBeenCalled();
       expect(mockPrisma.taskRun.create).not.toHaveBeenCalled();
@@ -599,7 +615,7 @@ describe('processLifecycleJob', () => {
       };
 
       // Should not throw
-      await processLifecycleJob(jobData, redis);
+      await processLifecycleJob(jobData, redis, agentQueue);
     });
   });
 });
