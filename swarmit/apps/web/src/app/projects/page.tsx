@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { api, type Project, type Task } from '@/lib/api';
 import { useProjectUpdates } from '@/hooks/useSocket';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const STATUS_COLORS: Record<string, string> = {
   PLANNING: 'bg-blue-500/20 text-blue-400',
@@ -185,6 +186,7 @@ export default function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [acting, setActing] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Create form state
   const [newTitle, setNewTitle] = useState('');
@@ -257,14 +259,16 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleDelete = async (projectId: string) => {
-    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteId) return;
     try {
-      await api.projects.delete(projectId);
-      setProjects(prev => prev.filter(p => p.id !== projectId));
-      if (expandedId === projectId) setExpandedId(null);
+      await api.projects.delete(deleteId);
+      setProjects(prev => prev.filter(p => p.id !== deleteId));
+      if (expandedId === deleteId) setExpandedId(null);
     } catch (err) {
       console.error('Failed to delete project:', err);
+    } finally {
+      setDeleteId(null);
     }
   };
 
@@ -432,7 +436,7 @@ export default function ProjectsPage() {
                       <ProjectDetail
                         project={project}
                         onAction={(action) => handleAction(project.id, action)}
-                        onDelete={() => handleDelete(project.id)}
+                        onDelete={() => setDeleteId(project.id)}
                         acting={acting}
                       />
                     </div>
@@ -442,6 +446,16 @@ export default function ProjectsPage() {
             })}
           </div>
         )}
+
+        <ConfirmDialog
+          open={!!deleteId}
+          onClose={() => setDeleteId(null)}
+          onConfirm={handleDeleteConfirm}
+          title="Delete Project"
+          message="Are you sure you want to delete this project? This action cannot be undone."
+          confirmLabel="Delete"
+          variant="danger"
+        />
       </div>
     </div>
   );

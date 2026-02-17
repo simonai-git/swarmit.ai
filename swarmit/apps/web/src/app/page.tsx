@@ -37,6 +37,7 @@ import {
   useTaskLogs,
   type TaskLogEvent,
 } from '@/hooks/useSocket';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -363,6 +364,7 @@ function TaskDetailPanel({
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [fullTask, setFullTask] = useState<Task>(task);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Fetch full task detail
   useEffect(() => {
@@ -466,14 +468,15 @@ function TaskDetailPanel({
   };
 
   // Delete task
-  const handleDelete = async () => {
-    if (!confirm(`Delete "${fullTask.title}"? This cannot be undone.`)) return;
+  const handleDeleteConfirm = async () => {
     try {
       await api.tasks.delete(fullTask.id);
       onClose();
       onUpdated();
     } catch (err) {
       console.error('Failed to delete task:', err);
+    } finally {
+      setConfirmDelete(false);
     }
   };
 
@@ -547,7 +550,7 @@ function TaskDetailPanel({
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
-              onClick={handleDelete}
+              onClick={() => setConfirmDelete(true)}
               className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
               title="Delete task"
             >
@@ -839,6 +842,16 @@ function TaskDetailPanel({
             </div>
           )}
         </div>
+
+        <ConfirmDialog
+          open={confirmDelete}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={handleDeleteConfirm}
+          title="Delete Task"
+          message={`Delete "${fullTask.title}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+        />
       </div>
     </div>
   );

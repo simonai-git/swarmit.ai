@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus, GitBranch, Calendar, Layers, Trash2 } from 'lucide-react';
 import { api, type Workflow } from '@/lib/api';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 export default function WorkflowsPage() {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function WorkflowsPage() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null);
 
   const fetchWorkflows = async () => {
     try {
@@ -51,17 +53,15 @@ export default function WorkflowsPage() {
     }
   };
 
-  const handleDelete = async (workflow: Workflow) => {
-    const agentCount = workflow._count?.agents ?? 0;
-    const message = agentCount > 0
-      ? `This workflow is assigned to ${agentCount} agent${agentCount > 1 ? 's' : ''}. Deleting it will unassign them. Are you sure?`
-      : `Delete "${workflow.name}"? This cannot be undone.`;
-    if (!confirm(message)) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.workflows.delete(workflow.id);
-      setWorkflows(prev => prev.filter(w => w.id !== workflow.id));
+      await api.workflows.delete(deleteTarget.id);
+      setWorkflows(prev => prev.filter(w => w.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete workflow:', err);
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -185,7 +185,7 @@ export default function WorkflowsPage() {
                   </div>
                 </div>
                 <button
-                  onClick={e => { e.preventDefault(); handleDelete(workflow); }}
+                  onClick={e => { e.preventDefault(); setDeleteTarget(workflow); }}
                   className="text-zinc-500 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
                   title="Delete workflow"
                 >
@@ -196,6 +196,20 @@ export default function WorkflowsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Workflow"
+        message={
+          deleteTarget && (deleteTarget._count?.agents ?? 0) > 0
+            ? `This workflow is assigned to ${deleteTarget._count?.agents} agent${(deleteTarget._count?.agents ?? 0) > 1 ? 's' : ''}. Deleting it will unassign them. Are you sure?`
+            : `Delete "${deleteTarget?.name}"? This cannot be undone.`
+        }
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </div>
   );
 }
