@@ -155,7 +155,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="h-64 bg-zinc-800 rounded" />
@@ -166,7 +166,7 @@ export default function ProfilePage() {
 
   if (authError) {
     return (
-      <div className="p-8 max-w-3xl mx-auto">
+      <div className="p-4 md:p-8 max-w-3xl mx-auto">
         <div className="flex items-center gap-3 mb-8">
           <User className="w-7 h-7 text-zinc-400" />
           <h1 className="text-2xl font-bold text-white">Profile</h1>
@@ -190,8 +190,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <div className="flex items-center gap-3 mb-8">
+    <div className="p-4 md:p-8 max-w-3xl mx-auto">
+      <div className="flex items-center gap-3 mb-6 md:mb-8">
         <User className="w-7 h-7 text-zinc-400" />
         <h1 className="text-2xl font-bold text-white">Profile</h1>
       </div>
@@ -338,7 +338,7 @@ export default function ProfilePage() {
                     Current Key
                   </label>
                   {integrationTokens.some(t => t.provider === 'anthropic') ? (
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
                       <span className="flex items-center gap-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm">
                         <CheckCircle className="w-3.5 h-3.5" />
                         Connected via OAuth
@@ -352,14 +352,14 @@ export default function ProfilePage() {
                       </button>
                     </div>
                   ) : profile?.claudeApiKey ? (
-                    <div className="flex items-center gap-3">
-                      <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+                      <code className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-green-400 text-sm font-mono break-all">
                         {profile.claudeApiKey}
                       </code>
                       <button
                         onClick={() => setConfirmDisconnect('key')}
                         disabled={disconnecting}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm rounded-lg transition-colors disabled:opacity-50 shrink-0"
                       >
                         {disconnecting ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />

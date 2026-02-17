@@ -55,11 +55,11 @@ export default function AgentsPage() {
   ];
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Agents</h1>
-          <p className="text-zinc-400 mt-1">Manage your AI agents, specializations, and skills</p>
+          <p className="text-zinc-400 mt-1 hidden sm:block">Manage your AI agents, specializations, and skills</p>
         </div>
       </div>
 
@@ -76,7 +76,7 @@ export default function AgentsPage() {
             }`}
           >
             {tab.icon}
-            {tab.label}
+            <span className="hidden sm:inline">{tab.label}</span>
           </button>
         ))}
       </div>
@@ -1012,23 +1012,23 @@ function SpecializationsTab() {
           </p>
         </div>
       ) : (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-zinc-800">
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Name
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Keywords
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden sm:table-cell">
                   Description
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Agents
                 </th>
-                <th className="text-right px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-right px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -1036,10 +1036,10 @@ function SpecializationsTab() {
             <tbody className="divide-y divide-zinc-800">
               {specializations.map((spec) => (
                 <tr key={spec.id} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-white font-medium">
+                  <td className="px-3 md:px-6 py-4 text-sm text-white font-medium">
                     {spec.name}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 md:px-6 py-4">
                     <div className="flex flex-wrap gap-1.5">
                       {spec.keywords.map((kw) => (
                         <span
@@ -1051,16 +1051,16 @@ function SpecializationsTab() {
                       ))}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400 max-w-xs truncate">
+                  <td className="px-3 md:px-6 py-4 text-sm text-zinc-400 max-w-xs truncate hidden sm:table-cell">
                     {spec.description || <span className="text-zinc-600">--</span>}
                   </td>
-                  <td className="px-6 py-4 text-sm">
+                  <td className="px-3 md:px-6 py-4 text-sm">
                     <span className="flex items-center gap-1 text-zinc-400">
                       <Users className="w-3 h-3" />
                       {spec._count?.agents ?? 0}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-3 md:px-6 py-4 text-right">
                     <button
                       onClick={() => setDeleteSpecId(spec.id)}
                       className="text-zinc-500 hover:text-red-400 transition-colors"
@@ -1261,23 +1261,23 @@ function SkillsTab() {
           <p className="text-zinc-500 mt-1">Add skills that agents can use</p>
         </div>
       ) : (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-zinc-800">
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Name
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden sm:table-cell">
                   Description
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden sm:table-cell">
                   Source URL
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-left px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Agents
                 </th>
-                <th className="text-right px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <th className="text-right px-3 md:px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -1285,13 +1285,13 @@ function SkillsTab() {
             <tbody className="divide-y divide-zinc-800">
               {filteredSkills.map((skill) => (
                 <tr key={skill.id} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-white font-medium">
+                  <td className="px-3 md:px-6 py-4 text-sm text-white font-medium">
                     {skill.name}
                   </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400 max-w-xs truncate">
+                  <td className="px-3 md:px-6 py-4 text-sm text-zinc-400 max-w-xs truncate hidden sm:table-cell">
                     {skill.description || <span className="text-zinc-600">--</span>}
                   </td>
-                  <td className="px-6 py-4 text-sm">
+                  <td className="px-3 md:px-6 py-4 text-sm hidden sm:table-cell">
                     {skill.sourceUrl ? (
                       <a
                         href={skill.sourceUrl}
@@ -1306,13 +1306,13 @@ function SkillsTab() {
                       <span className="text-zinc-600">--</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-sm">
+                  <td className="px-3 md:px-6 py-4 text-sm">
                     <span className="flex items-center gap-1 text-zinc-400">
                       <Users className="w-3 h-3" />
                       {skill._count?.agents ?? 0}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-3 md:px-6 py-4 text-right">
                     <button
                       onClick={() => setDeleteSkillId(skill.id)}
                       className="text-zinc-500 hover:text-red-400 transition-colors"
@@ -1325,7 +1325,7 @@ function SkillsTab() {
               ))}
               {filteredSkills.length === 0 && skills.length > 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 text-sm">
+                  <td colSpan={5} className="px-3 md:px-6 py-8 text-center text-zinc-500 text-sm">
                     No skills match your filter
                   </td>
                 </tr>

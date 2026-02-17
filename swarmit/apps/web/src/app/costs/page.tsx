@@ -80,12 +80,12 @@ export default function CostsPage() {
         : 'bg-green-500';
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 md:mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white">Cost Tracking</h1>
-          <p className="text-zinc-400 mt-1">
+          <p className="text-zinc-400 mt-1 hidden sm:block">
             Monitor spend, tokens, and budget across agents
           </p>
         </div>
@@ -111,7 +111,7 @@ export default function CostsPage() {
       {/* Loading State */}
       {loading && !data && (
         <div className="animate-pulse space-y-6">
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="h-28 bg-zinc-800 rounded-lg" />
             ))}
@@ -206,7 +206,7 @@ export default function CostsPage() {
           </div>
 
           {/* Cost by Agent Type */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 md:p-6">
             <div className="flex items-center gap-2 mb-6">
               <TrendingUp className="w-5 h-5 text-zinc-400" />
               <h2 className="text-lg font-semibold text-white">
@@ -227,11 +227,11 @@ export default function CostsPage() {
 
                   return (
                     <div key={agent.agentType} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between text-sm gap-1">
                         <span className="text-zinc-300 capitalize font-medium">
                           {agent.agentType}
                         </span>
-                        <div className="flex items-center gap-4 text-zinc-400 tabular-nums">
+                        <div className="flex items-center gap-3 sm:gap-4 text-zinc-400 tabular-nums text-xs sm:text-sm">
                           <span>{agent._count} runs</span>
                           <span>
                             {formatTokens(agent._sum.tokens ?? 0)} tokens
@@ -255,8 +255,8 @@ export default function CostsPage() {
           </div>
 
           {/* Daily Breakdown Table */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-800">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden overflow-x-auto">
+            <div className="px-4 md:px-6 py-4 border-b border-zinc-800">
               <h2 className="text-lg font-semibold text-white">
                 Daily Breakdown
               </h2>
@@ -272,10 +272,10 @@ export default function CostsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                    <th className="text-left px-6 py-3">Date</th>
-                    <th className="text-right px-6 py-3">Runs</th>
-                    <th className="text-right px-6 py-3">Tokens</th>
-                    <th className="text-right px-6 py-3">Cost</th>
+                    <th className="text-left px-3 md:px-6 py-3">Date</th>
+                    <th className="text-right px-3 md:px-6 py-3">Runs</th>
+                    <th className="text-right px-3 md:px-6 py-3">Tokens</th>
+                    <th className="text-right px-3 md:px-6 py-3">Cost</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -284,16 +284,16 @@ export default function CostsPage() {
                       key={day.day}
                       className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors"
                     >
-                      <td className="px-6 py-3 text-sm text-zinc-300">
+                      <td className="px-3 md:px-6 py-3 text-sm text-zinc-300">
                         {formatDate(day.day)}
                       </td>
-                      <td className="px-6 py-3 text-sm text-zinc-400 text-right tabular-nums">
+                      <td className="px-3 md:px-6 py-3 text-sm text-zinc-400 text-right tabular-nums">
                         {day.runs}
                       </td>
-                      <td className="px-6 py-3 text-sm text-zinc-400 text-right tabular-nums">
+                      <td className="px-3 md:px-6 py-3 text-sm text-zinc-400 text-right tabular-nums">
                         {formatTokens(day.tokens)}
                       </td>
-                      <td className="px-6 py-3 text-sm text-white text-right tabular-nums font-medium">
+                      <td className="px-3 md:px-6 py-3 text-sm text-white text-right tabular-nums font-medium">
                         {formatUsd(day.cost)}
                       </td>
                     </tr>

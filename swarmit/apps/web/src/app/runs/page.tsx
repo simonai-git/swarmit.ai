@@ -146,7 +146,7 @@ export default function RunsPage() {
 
   if (loading && runs.length === 0) {
     return (
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-800 rounded w-48" />
           <div className="h-12 bg-zinc-800 rounded" />
@@ -159,12 +159,12 @@ export default function RunsPage() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6 md:mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white">Agent Runs</h1>
-          <p className="text-zinc-400 mt-1">
+          <p className="text-zinc-400 mt-1 hidden sm:block">
             {total} total run{total !== 1 ? 's' : ''}
           </p>
         </div>
@@ -191,182 +191,302 @@ export default function RunsPage() {
         </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-          {/* Table Header */}
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 bg-zinc-900 border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-            <div>Task</div>
-            <div>Agent Type</div>
-            <div>Status</div>
-            <div className="text-right">Tokens</div>
-            <div className="text-right">Cost</div>
-            <div>Started</div>
-            <div className="text-right">Duration</div>
-            <div />
-          </div>
+          {/* Mobile card view */}
+          <div className="md:hidden divide-y divide-zinc-800/50">
+            {runs.map((run) => {
+              const isExpanded = expandedRunId === run.id;
+              const canCancel =
+                run.status === 'QUEUED' || run.status === 'RUNNING';
 
-          {/* Rows */}
-          {runs.map((run) => {
-            const isExpanded = expandedRunId === run.id;
-            const canCancel =
-              run.status === 'QUEUED' || run.status === 'RUNNING';
-
-            return (
-              <div key={run.id}>
-                {/* Run Row */}
-                <div
-                  onClick={() => handleToggleExpand(run)}
-                  className={`grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 cursor-pointer transition-colors ${
-                    isExpanded
-                      ? 'bg-zinc-800/50'
-                      : 'hover:bg-zinc-800/30'
-                  } border-b border-zinc-800/50`}
-                >
-                  {/* Task */}
-                  <div className="flex items-center gap-2 min-w-0">
-                    {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-zinc-500 shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-zinc-500 shrink-0" />
-                    )}
-                    <span className="text-sm text-white truncate">
-                      {run.task?.title || run.taskId}
-                    </span>
-                  </div>
-
-                  {/* Agent Type */}
-                  <div className="flex items-center">
-                    <span className="text-sm text-zinc-300 capitalize">
-                      {run.agentType}
-                    </span>
-                  </div>
-
-                  {/* Status */}
-                  <div className="flex items-center">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white ${
-                        STATUS_COLORS[run.status] || 'bg-zinc-600'
-                      }`}
-                    >
-                      {run.status === 'RUNNING' && (
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                      )}
-                      {run.status}
-                    </span>
-                  </div>
-
-                  {/* Tokens */}
-                  <div className="flex items-center justify-end">
-                    <span className="text-sm text-zinc-400 tabular-nums">
-                      {formatTokens(run.tokens)}
-                    </span>
-                  </div>
-
-                  {/* Cost */}
-                  <div className="flex items-center justify-end">
-                    <span className="text-sm text-zinc-400 tabular-nums">
-                      {formatCost(run.cost)}
-                    </span>
-                  </div>
-
-                  {/* Started */}
-                  <div className="flex items-center">
-                    <span className="text-sm text-zinc-500">
-                      {run.createdAt ? formatTime(run.createdAt) : '--'}
-                    </span>
-                  </div>
-
-                  {/* Duration */}
-                  <div className="flex items-center justify-end">
-                    <span className="text-sm text-zinc-500 tabular-nums">
-                      {formatDuration(run)}
-                    </span>
-                  </div>
-
-                  {/* Cancel */}
-                  <div className="flex items-center justify-center">
-                    {canCancel && (
-                      <button
-                        onClick={(e) => handleCancel(e, run.id)}
-                        disabled={cancelling[run.id]}
-                        className="p-1 text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
-                        title="Cancel run"
-                      >
-                        {cancelling[run.id] ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+              return (
+                <div key={run.id}>
+                  <div
+                    onClick={() => handleToggleExpand(run)}
+                    className={`px-4 py-3 cursor-pointer transition-colors ${
+                      isExpanded ? 'bg-zinc-800/50' : 'hover:bg-zinc-800/30'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-zinc-500 shrink-0" />
                         ) : (
-                          <XCircle className="w-4 h-4" />
+                          <ChevronRight className="w-4 h-4 text-zinc-500 shrink-0" />
                         )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Expanded Logs Panel */}
-                {isExpanded && (
-                  <div className="border-b border-zinc-800/50">
-                    <div className="mx-4 my-3 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-                      {/* Logs Header */}
-                      <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
-                        <Terminal className="w-4 h-4 text-zinc-500" />
-                        <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                          Run Logs
+                        <span className="text-sm text-white truncate">
+                          {run.task?.title || run.taskId}
                         </span>
-                        {run.status === 'RUNNING' && (
-                          <span className="flex items-center gap-1 text-xs text-blue-400">
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                            Live
-                          </span>
-                        )}
                       </div>
-
-                      {/* Logs Content */}
-                      <div className="p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">
-                        {logsLoading[run.id] ? (
-                          <div className="flex items-center gap-2 text-zinc-500">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Loading logs...
-                          </div>
-                        ) : !logs[run.id] || logs[run.id].length === 0 ? (
-                          <span className="text-zinc-600">
-                            No logs available for this run.
-                          </span>
-                        ) : (
-                          logs[run.id].map((log) => (
-                            <div key={log.id} className="flex gap-3 py-0.5">
-                              <span className="text-zinc-600 shrink-0 select-none w-20 text-right">
-                                {new Date(log.createdAt).toLocaleTimeString()}
-                              </span>
-                              <span
-                                className={`shrink-0 w-16 text-right ${
-                                  LOG_STREAM_COLORS[log.stream] ||
-                                  'text-zinc-400'
-                                }`}
-                              >
-                                [{log.stream}]
-                              </span>
-                              <span
-                                className={
-                                  LOG_STREAM_COLORS[log.stream] ||
-                                  'text-zinc-400'
-                                }
-                              >
-                                {log.content}
-                              </span>
-                            </div>
-                          ))
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white shrink-0 ${
+                          STATUS_COLORS[run.status] || 'bg-zinc-600'
+                        }`}
+                      >
+                        {run.status === 'RUNNING' && (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        )}
+                        {run.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-zinc-400 ml-6">
+                      <span className="capitalize">{run.agentType}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="tabular-nums">{formatTokens(run.tokens)}</span>
+                        <span className="tabular-nums">{formatCost(run.cost)}</span>
+                        <span className="text-zinc-500">{formatDuration(run)}</span>
+                        {canCancel && (
+                          <button
+                            onClick={(e) => handleCancel(e, run.id)}
+                            disabled={cancelling[run.id]}
+                            className="p-0.5 text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                            title="Cancel run"
+                          >
+                            {cancelling[run.id] ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <XCircle className="w-3.5 h-3.5" />
+                            )}
+                          </button>
                         )}
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+
+                  {isExpanded && (
+                    <div className="border-t border-zinc-800/50">
+                      <div className="mx-3 my-3 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+                          <Terminal className="w-4 h-4 text-zinc-500" />
+                          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                            Run Logs
+                          </span>
+                          {run.status === 'RUNNING' && (
+                            <span className="flex items-center gap-1 text-xs text-blue-400">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Live
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-3 max-h-64 overflow-y-auto overflow-x-auto font-mono text-xs leading-relaxed">
+                          {logsLoading[run.id] ? (
+                            <div className="flex items-center gap-2 text-zinc-500">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading logs...
+                            </div>
+                          ) : !logs[run.id] || logs[run.id].length === 0 ? (
+                            <span className="text-zinc-600">
+                              No logs available for this run.
+                            </span>
+                          ) : (
+                            logs[run.id].map((log) => (
+                              <div key={log.id} className="flex gap-2 py-0.5">
+                                <span
+                                  className={`shrink-0 w-12 text-right ${
+                                    LOG_STREAM_COLORS[log.stream] ||
+                                    'text-zinc-400'
+                                  }`}
+                                >
+                                  [{log.stream}]
+                                </span>
+                                <span
+                                  className={
+                                    LOG_STREAM_COLORS[log.stream] ||
+                                    'text-zinc-400'
+                                  }
+                                >
+                                  {log.content}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table view */}
+          <div className="hidden md:block">
+            {/* Table Header */}
+            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 bg-zinc-900 border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              <div>Task</div>
+              <div>Agent Type</div>
+              <div>Status</div>
+              <div className="text-right">Tokens</div>
+              <div className="text-right">Cost</div>
+              <div>Started</div>
+              <div className="text-right">Duration</div>
+              <div />
+            </div>
+
+            {/* Rows */}
+            {runs.map((run) => {
+              const isExpanded = expandedRunId === run.id;
+              const canCancel =
+                run.status === 'QUEUED' || run.status === 'RUNNING';
+
+              return (
+                <div key={run.id}>
+                  {/* Run Row */}
+                  <div
+                    onClick={() => handleToggleExpand(run)}
+                    className={`grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_100px_90px_90px_100px_90px_40px] gap-4 px-4 py-3 cursor-pointer transition-colors ${
+                      isExpanded
+                        ? 'bg-zinc-800/50'
+                        : 'hover:bg-zinc-800/30'
+                    } border-b border-zinc-800/50`}
+                  >
+                    {/* Task */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-zinc-500 shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-zinc-500 shrink-0" />
+                      )}
+                      <span className="text-sm text-white truncate">
+                        {run.task?.title || run.taskId}
+                      </span>
+                    </div>
+
+                    {/* Agent Type */}
+                    <div className="flex items-center">
+                      <span className="text-sm text-zinc-300 capitalize">
+                        {run.agentType}
+                      </span>
+                    </div>
+
+                    {/* Status */}
+                    <div className="flex items-center">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white ${
+                          STATUS_COLORS[run.status] || 'bg-zinc-600'
+                        }`}
+                      >
+                        {run.status === 'RUNNING' && (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        )}
+                        {run.status}
+                      </span>
+                    </div>
+
+                    {/* Tokens */}
+                    <div className="flex items-center justify-end">
+                      <span className="text-sm text-zinc-400 tabular-nums">
+                        {formatTokens(run.tokens)}
+                      </span>
+                    </div>
+
+                    {/* Cost */}
+                    <div className="flex items-center justify-end">
+                      <span className="text-sm text-zinc-400 tabular-nums">
+                        {formatCost(run.cost)}
+                      </span>
+                    </div>
+
+                    {/* Started */}
+                    <div className="flex items-center">
+                      <span className="text-sm text-zinc-500">
+                        {run.createdAt ? formatTime(run.createdAt) : '--'}
+                      </span>
+                    </div>
+
+                    {/* Duration */}
+                    <div className="flex items-center justify-end">
+                      <span className="text-sm text-zinc-500 tabular-nums">
+                        {formatDuration(run)}
+                      </span>
+                    </div>
+
+                    {/* Cancel */}
+                    <div className="flex items-center justify-center">
+                      {canCancel && (
+                        <button
+                          onClick={(e) => handleCancel(e, run.id)}
+                          disabled={cancelling[run.id]}
+                          className="p-1 text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                          title="Cancel run"
+                        >
+                          {cancelling[run.id] ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <XCircle className="w-4 h-4" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded Logs Panel */}
+                  {isExpanded && (
+                    <div className="border-b border-zinc-800/50">
+                      <div className="mx-4 my-3 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                        {/* Logs Header */}
+                        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
+                          <Terminal className="w-4 h-4 text-zinc-500" />
+                          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                            Run Logs
+                          </span>
+                          {run.status === 'RUNNING' && (
+                            <span className="flex items-center gap-1 text-xs text-blue-400">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Live
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Logs Content */}
+                        <div className="p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">
+                          {logsLoading[run.id] ? (
+                            <div className="flex items-center gap-2 text-zinc-500">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading logs...
+                            </div>
+                          ) : !logs[run.id] || logs[run.id].length === 0 ? (
+                            <span className="text-zinc-600">
+                              No logs available for this run.
+                            </span>
+                          ) : (
+                            logs[run.id].map((log) => (
+                              <div key={log.id} className="flex gap-3 py-0.5">
+                                <span className="text-zinc-600 shrink-0 select-none w-20 text-right">
+                                  {new Date(log.createdAt).toLocaleTimeString()}
+                                </span>
+                                <span
+                                  className={`shrink-0 w-16 text-right ${
+                                    LOG_STREAM_COLORS[log.stream] ||
+                                    'text-zinc-400'
+                                  }`}
+                                >
+                                  [{log.stream}]
+                                </span>
+                                <span
+                                  className={
+                                    LOG_STREAM_COLORS[log.stream] ||
+                                    'text-zinc-400'
+                                  }
+                                >
+                                  {log.content}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6">
           <p className="text-sm text-zinc-500">
             Showing {(page - 1) * limit + 1}--
             {Math.min(page * limit, total)} of {total} runs
