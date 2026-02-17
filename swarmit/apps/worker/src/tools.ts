@@ -6,6 +6,18 @@ import { createLogger } from '@swarmit/logger';
 const logger = createLogger('tools');
 
 /**
+ * Resolve a taskId from tool input: if the LLM provided a non-CUID value
+ * (e.g. the task title instead of the ID), fall back to the context taskId.
+ */
+function resolveTaskId(inputTaskId: string, contextTaskId: string): string {
+  // CUIDs are lowercase alphanumeric, 25+ chars, starting with 'c'
+  if (/^c[a-z0-9]{24,}$/.test(inputTaskId)) {
+    return inputTaskId;
+  }
+  return contextTaskId;
+}
+
+/**
  * Sandbox tools available to all agent types.
  */
 export function getSandboxTools(): LLMTool[] {
@@ -566,7 +578,7 @@ export async function executeTool(
     }
 
     case 'update_task_status': {
-      const taskId = toolInput.taskId as string;
+      const taskId = resolveTaskId(toolInput.taskId as string, context.taskId);
       const status = toolInput.status as string;
       try {
         await context.prisma.task.update({
@@ -690,7 +702,7 @@ export async function executeTool(
 
     // Collaboration tools
     case 'handoff_to_agent': {
-      const taskId = toolInput.taskId as string;
+      const taskId = resolveTaskId(toolInput.taskId as string, context.taskId);
       const nextStatus = toolInput.nextStatus as string;
       const handoffContext = toolInput.context as string;
       try {
@@ -712,7 +724,7 @@ export async function executeTool(
     }
 
     case 'request_review': {
-      const taskId = toolInput.taskId as string;
+      const taskId = resolveTaskId(toolInput.taskId as string, context.taskId);
       const summary = toolInput.summary as string;
       try {
         await context.prisma.task.update({
@@ -733,7 +745,7 @@ export async function executeTool(
     }
 
     case 'send_message_to_agent': {
-      const taskId = toolInput.taskId as string;
+      const taskId = resolveTaskId(toolInput.taskId as string, context.taskId);
       const message = toolInput.message as string;
       try {
         await context.prisma.taskComment.create({
