@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, GitBranch, Calendar, Layers } from 'lucide-react';
+import { Plus, GitBranch, Calendar, Layers, Trash2 } from 'lucide-react';
 import { api, type Workflow } from '@/lib/api';
 
 export default function WorkflowsPage() {
@@ -51,11 +51,15 @@ export default function WorkflowsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this workflow? Any agents using it will be unassigned.')) return;
+  const handleDelete = async (workflow: Workflow) => {
+    const agentCount = workflow._count?.agents ?? 0;
+    const message = agentCount > 0
+      ? `This workflow is assigned to ${agentCount} agent${agentCount > 1 ? 's' : ''}. Deleting it will unassign them. Are you sure?`
+      : `Delete "${workflow.name}"? This cannot be undone.`;
+    if (!confirm(message)) return;
     try {
-      await api.workflows.delete(id);
-      setWorkflows(prev => prev.filter(w => w.id !== id));
+      await api.workflows.delete(workflow.id);
+      setWorkflows(prev => prev.filter(w => w.id !== workflow.id));
     } catch (err) {
       console.error('Failed to delete workflow:', err);
     }
@@ -181,11 +185,11 @@ export default function WorkflowsPage() {
                   </div>
                 </div>
                 <button
-                  onClick={e => { e.preventDefault(); handleDelete(workflow.id); }}
+                  onClick={e => { e.preventDefault(); handleDelete(workflow); }}
                   className="text-zinc-500 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
                   title="Delete workflow"
                 >
-                  &times;
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </Link>
