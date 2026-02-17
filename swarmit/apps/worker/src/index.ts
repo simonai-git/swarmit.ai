@@ -10,6 +10,9 @@ const logger = createLogger('worker');
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 
+// Queue instance for enqueuing agent jobs from lifecycle events
+const agentQueue = new Queue<AgentJobData>('agent-execution', { connection });
+
 // Agent execution worker
 const agentWorker = new Worker<AgentJobData>(
   'agent-execution',
@@ -40,7 +43,7 @@ const lifecycleWorker = new Worker<LifecycleJobData>(
   'lifecycle',
   async (job) => {
     logger.info({ jobId: job.id, type: job.data.type }, 'Processing lifecycle event');
-    await processLifecycleJob(job.data, connection);
+    await processLifecycleJob(job.data, connection, agentQueue);
   },
   { connection }
 );
