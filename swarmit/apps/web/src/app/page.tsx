@@ -192,7 +192,7 @@ function KanbanColumn({
 }) {
   return (
     <div
-      className={`flex flex-col bg-zinc-950 border border-zinc-800 border-t-2 ${COLUMN_ACCENT[column.id]} rounded-lg min-w-[280px] w-[280px] shrink-0`}
+      className={`flex flex-col bg-zinc-950 border border-zinc-800 border-t-2 ${COLUMN_ACCENT[column.id]} rounded-lg min-w-[75vw] sm:min-w-[260px] xl:min-w-0 xl:flex-1 shrink-0 xl:shrink snap-center`}
     >
       {/* Column header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-800">
@@ -207,7 +207,7 @@ function KanbanColumn({
       </div>
 
       {/* Cards */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[200px]">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[150px] sm:min-h-[200px]">
         {tasks.map((task) => (
           <SortableTaskCard
             key={task.id}
@@ -991,14 +991,14 @@ export default function KanbanPage() {
 
   if (loading) {
     return (
-      <div className="h-full bg-zinc-950 p-6">
+      <div className="h-full bg-zinc-950 p-4 sm:p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-800 rounded w-48" />
-          <div className="flex gap-4 overflow-hidden">
+          <div className="flex gap-3 sm:gap-4 overflow-hidden">
             {Array.from({ length: 5 }).map((_, i) => (
               <div
                 key={i}
-                className="w-[280px] h-[400px] bg-zinc-900 border border-zinc-800 rounded-lg shrink-0"
+                className="min-w-[75vw] sm:min-w-[260px] xl:min-w-0 xl:flex-1 shrink-0 xl:shrink h-[400px] bg-zinc-900 border border-zinc-800 rounded-lg"
               />
             ))}
           </div>
@@ -1010,24 +1010,24 @@ export default function KanbanPage() {
   return (
     <div className="h-full bg-zinc-950 flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800 shrink-0">
-        <div>
-          <h1 className="text-xl font-bold text-white">Kanban Board</h1>
+      <div className="flex items-center gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-800 shrink-0">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-white">Kanban Board</h1>
           <p className="text-xs text-zinc-500 mt-0.5">
             {tasks.length} task{tasks.length !== 1 ? 's' : ''}
           </p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
         >
           <Plus className="w-4 h-4" />
-          New Task
+          <span className="hidden sm:inline">New Task</span>
         </button>
       </div>
 
       {/* Board */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 sm:p-4 snap-x snap-mandatory xl:snap-none">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -1035,7 +1035,7 @@ export default function KanbanPage() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 h-full">
+          <div className="flex gap-3 sm:gap-4 h-full">
             {COLUMNS.map((column) => (
               <SortableContext
                 key={column.id}
@@ -1055,7 +1055,7 @@ export default function KanbanPage() {
           {/* Drag overlay */}
           <DragOverlay>
             {activeTask ? (
-              <div className="w-[260px]">
+              <div className="w-[70vw] sm:w-[250px]">
                 <TaskCard
                   task={activeTask}
                   onClick={() => {}}
