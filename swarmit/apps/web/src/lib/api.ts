@@ -160,10 +160,22 @@ export interface Project {
   title: string;
   description: string | null;
   prd: string | null;
-  status: 'PLANNING' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  status: 'DRAFT' | 'PLANNING' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
   userId: string;
   createdAt: string;
   updatedAt: string;
+  projectType: string | null;
+  goal: string | null;
+  targetUsers: string | null;
+  mustHaves: string[];
+  deadline: string | null;
+  budgetRange: string | null;
+  contactEmail: string | null;
+  niceToHaves: string[];
+  referenceLinks: string[];
+  constraints: string | null;
+  comms: string | null;
+  dataSensitivity: string | null;
   tasks?: Task[];
   _count?: { tasks: number };
 }
@@ -176,11 +188,42 @@ export const projects = {
 
   get: (id: string) => request<Project>(`/projects/${id}`),
 
-  create: (data: { title: string; description?: string; prd?: string }) =>
-    request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
+  create: (data: {
+    title: string;
+    description?: string;
+    prd?: string;
+    projectType?: string;
+    goal?: string;
+    targetUsers?: string;
+    mustHaves?: string[];
+    deadline?: string;
+    budgetRange?: string;
+    contactEmail?: string;
+    niceToHaves?: string[];
+    referenceLinks?: string[];
+    constraints?: string;
+    comms?: string;
+    dataSensitivity?: string;
+    isDraft?: boolean;
+  }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
 
-  update: (id: string, data: { title?: string; description?: string; prd?: string }) =>
-    request<{ success: boolean }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  update: (id: string, data: {
+    title?: string;
+    description?: string;
+    prd?: string;
+    projectType?: string | null;
+    goal?: string | null;
+    targetUsers?: string | null;
+    mustHaves?: string[];
+    deadline?: string | null;
+    budgetRange?: string | null;
+    contactEmail?: string | null;
+    niceToHaves?: string[];
+    referenceLinks?: string[];
+    constraints?: string | null;
+    comms?: string | null;
+    dataSensitivity?: string | null;
+  }) => request<{ success: boolean }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   delete: (id: string) => request<{ success: boolean }>(`/projects/${id}`, { method: 'DELETE' }),
 

@@ -33,14 +33,49 @@ export const createProjectSchema = z.object({
   title: z.string().min(1).max(500),
   description: z.string().max(10000).optional(),
   prd: z.string().max(50000).optional(),
+
+  // Step 1 — Basics
+  projectType: z.string().max(100).optional(),
+  goal: z.string().max(2000).optional(),
+  targetUsers: z.string().max(2000).optional(),
+  mustHaves: z.array(z.string().max(500)).max(20).optional(),
+  deadline: z.string().datetime().optional(),
+  budgetRange: z.string().max(100).optional(),
+  contactEmail: z.string().email().max(320).optional(),
+
+  // Step 2 — Details
+  niceToHaves: z.array(z.string().max(500)).max(20).optional(),
+  referenceLinks: z.array(z.string().url().max(2000)).max(10).optional(),
+  constraints: z.string().max(5000).optional(),
+  comms: z.string().max(2000).optional(),
+  dataSensitivity: z.string().max(100).optional(),
+
+  // Draft support
+  isDraft: z.boolean().optional(),
 });
 
 export const updateProjectSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   description: z.string().max(10000).optional(),
   prd: z.string().max(50000).optional(),
-  status: z.enum(['PLANNING', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']).optional(),
+  status: z.enum(['DRAFT', 'PLANNING', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']).optional(),
   projectManager: z.string().nullable().optional(),
+
+  // Step 1 — Basics
+  projectType: z.string().max(100).nullable().optional(),
+  goal: z.string().max(2000).nullable().optional(),
+  targetUsers: z.string().max(2000).nullable().optional(),
+  mustHaves: z.array(z.string().max(500)).max(20).optional(),
+  deadline: z.string().datetime().nullable().optional(),
+  budgetRange: z.string().max(100).nullable().optional(),
+  contactEmail: z.string().email().max(320).nullable().optional(),
+
+  // Step 2 — Details
+  niceToHaves: z.array(z.string().max(500)).max(20).optional(),
+  referenceLinks: z.array(z.string().url().max(2000)).max(10).optional(),
+  constraints: z.string().max(5000).nullable().optional(),
+  comms: z.string().max(2000).nullable().optional(),
+  dataSensitivity: z.string().max(100).nullable().optional(),
 });
 
 // ─── Agents ──────────────────────────────────────────────────────

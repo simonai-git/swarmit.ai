@@ -12,8 +12,16 @@ export class ProjectService {
     });
 
     if (!project) throw new Error('Project not found');
-    if (project.status !== 'PLANNING') {
+    if (project.status !== 'PLANNING' && project.status !== 'DRAFT') {
       throw new Error(`Cannot start project in ${project.status} status`);
+    }
+
+    // DRAFT projects transition to PLANNING first (then to ACTIVE)
+    if (project.status === 'DRAFT') {
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'PLANNING' },
+      });
     }
 
     return this.prisma.project.update({
@@ -60,7 +68,7 @@ export class ProjectService {
     });
 
     if (!project) throw new Error('Project not found');
-    if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+    if (['COMPLETED', 'CANCELLED'].includes(project.status)) {
       throw new Error(`Cannot cancel project in ${project.status} status`);
     }
 

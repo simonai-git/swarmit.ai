@@ -95,6 +95,22 @@ model Project {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
+  // Step 1 — Basics
+  projectType    String?   @map("project_type")
+  goal           String?
+  targetUsers    String?   @map("target_users")
+  mustHaves      String[]  @map("must_haves")
+  deadline       DateTime?
+  budgetRange    String?   @map("budget_range")
+  contactEmail   String?   @map("contact_email")
+
+  // Step 2 — Details
+  niceToHaves    String[]  @map("nice_to_haves")
+  referenceLinks String[]  @map("reference_links")
+  constraints    String?
+  comms          String?
+  dataSensitivity String?  @map("data_sensitivity")
+
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks Task[]
 
@@ -103,6 +119,7 @@ model Project {
 }
 
 enum ProjectStatus {
+  DRAFT
   PLANNING
   ACTIVE
   PAUSED
