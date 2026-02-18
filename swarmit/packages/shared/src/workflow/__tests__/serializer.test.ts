@@ -47,6 +47,50 @@ describe('serializeWorkflowToPrompt', () => {
   it('returns empty string for empty nodes', () => {
     expect(serializeWorkflowToPrompt({ nodes: [], edges: [] })).toBe('');
   });
+
+  it('includes project context when provided', () => {
+    const nodes: WorkflowNode[] = [
+      makeNode('s', 'start'),
+      makeNode('i1', 'instruction', { instructions: 'Do work' }),
+      makeNode('e', 'end'),
+    ];
+    const edges: WorkflowEdge[] = [
+      { id: 'e1', source: 's', target: 'i1' },
+      { id: 'e2', source: 'i1', target: 'e' },
+    ];
+
+    const result = serializeWorkflowToPrompt({ nodes, edges }, [], {
+      title: 'My Project',
+      goal: 'Build an API',
+      mustHaves: ['Auth', 'CRUD'],
+      targetUsers: 'Developers',
+      constraints: 'Use TypeScript',
+    });
+
+    expect(result).toContain('### Project Reference');
+    expect(result).toContain('- Goal: Build an API');
+    expect(result).toContain('- Must-Haves: Auth, CRUD');
+    expect(result).toContain('- Target Users: Developers');
+    expect(result).toContain('- Constraints: Use TypeScript');
+  });
+
+  it('omits project reference section when no relevant fields', () => {
+    const nodes: WorkflowNode[] = [
+      makeNode('s', 'start'),
+      makeNode('i1', 'instruction', { instructions: 'Do work' }),
+      makeNode('e', 'end'),
+    ];
+    const edges: WorkflowEdge[] = [
+      { id: 'e1', source: 's', target: 'i1' },
+      { id: 'e2', source: 'i1', target: 'e' },
+    ];
+
+    const result = serializeWorkflowToPrompt({ nodes, edges }, [], {
+      title: 'Empty Project',
+    });
+
+    expect(result).not.toContain('### Project Reference');
+  });
 });
 
 describe('parseStepMarkers', () => {

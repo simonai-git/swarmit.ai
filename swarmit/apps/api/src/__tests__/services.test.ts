@@ -17,6 +17,7 @@ function createMockPrisma() {
       findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      create: vi.fn(),
     },
     taskDependency: {
       findMany: vi.fn(),
@@ -59,8 +60,9 @@ describe('ProjectService', () => {
 
   describe('start', () => {
     it('should start a project in PLANNING status', async () => {
-      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'PLANNING', userId: 'u1' });
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'PLANNING', userId: 'u1', title: 'Test', mustHaves: [], niceToHaves: [], referenceLinks: [] });
       prisma.project.update.mockResolvedValue({ id: 'p1', status: 'ACTIVE' });
+      prisma.agent.findFirst.mockResolvedValue(null);
 
       const result = await service.start('p1', 'u1');
 
@@ -102,10 +104,11 @@ describe('ProjectService', () => {
     });
 
     it('should start a project in DRAFT status (via PLANNING)', async () => {
-      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'DRAFT', userId: 'u1' });
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'DRAFT', userId: 'u1', title: 'Draft', mustHaves: [], niceToHaves: [], referenceLinks: [] });
       prisma.project.update
         .mockResolvedValueOnce({ id: 'p1', status: 'PLANNING' })
         .mockResolvedValueOnce({ id: 'p1', status: 'ACTIVE' });
+      prisma.agent.findFirst.mockResolvedValue(null);
 
       const result = await service.start('p1', 'u1');
 
@@ -121,6 +124,61 @@ describe('ProjectService', () => {
         data: { status: 'ACTIVE' },
       });
       expect(prisma.project.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('should auto-create PM plan task when PM agent exists', async () => {
+      const project = {
+        id: 'p1', status: 'PLANNING', userId: 'u1', title: 'My App',
+        description: 'A great app', prd: null, goal: 'Build an app',
+        targetUsers: 'Developers', mustHaves: ['Auth', 'API'],
+        niceToHaves: ['Dark mode'], constraints: 'Use React',
+        deadline: null, budgetRange: '$5k', dataSensitivity: null,
+        referenceLinks: [], projectType: 'web-app', contactEmail: null, comms: null,
+      };
+      prisma.project.findFirst.mockResolvedValue(project);
+      prisma.project.update.mockResolvedValue({ id: 'p1', status: 'ACTIVE' });
+      prisma.agent.findFirst.mockResolvedValue({ id: 'agent-pm', name: 'Sam' });
+      prisma.task.create.mockResolvedValue({ id: 'task-pm' });
+
+      await service.start('p1', 'u1');
+
+      expect(prisma.agent.findFirst).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          specialization: { keywords: { hasSome: ['plan', 'manage', 'product', 'project'] } },
+        },
+        include: { specialization: true },
+      });
+      expect(prisma.task.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          title: '[PM] Plan: My App',
+          priority: 3,
+          status: 'TODO',
+          projectId: 'p1',
+          assigneeId: 'agent-pm',
+          userId: 'u1',
+        }),
+      });
+    });
+
+    it('should skip PM task when no PM agent found', async () => {
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'PLANNING', userId: 'u1', title: 'Test', mustHaves: [], niceToHaves: [], referenceLinks: [] });
+      prisma.project.update.mockResolvedValue({ id: 'p1', status: 'ACTIVE' });
+      prisma.agent.findFirst.mockResolvedValue(null);
+
+      await service.start('p1', 'u1');
+
+      expect(prisma.task.create).not.toHaveBeenCalled();
+    });
+
+    it('should not fail start if PM task creation throws', async () => {
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'PLANNING', userId: 'u1', title: 'Test', mustHaves: [], niceToHaves: [], referenceLinks: [] });
+      prisma.project.update.mockResolvedValue({ id: 'p1', status: 'ACTIVE' });
+      prisma.agent.findFirst.mockRejectedValue(new Error('DB error'));
+
+      const result = await service.start('p1', 'u1');
+
+      expect(result.status).toBe('ACTIVE');
     });
   });
 

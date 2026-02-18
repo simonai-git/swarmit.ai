@@ -8,9 +8,18 @@ export interface WorkflowVersionData {
   edges: WorkflowEdge[];
 }
 
+export interface ProjectContext {
+  title: string;
+  goal?: string | null;
+  mustHaves?: string[];
+  constraints?: string | null;
+  targetUsers?: string | null;
+}
+
 export function serializeWorkflowToPrompt(
   version: WorkflowVersionData,
-  completedNodeIds?: string[]
+  completedNodeIds?: string[],
+  projectContext?: ProjectContext
 ): string {
   const { nodes, edges } = version;
 
@@ -33,6 +42,21 @@ export function serializeWorkflowToPrompt(
   lines.push('');
   lines.push('Follow these steps in order. Mark each step when you start and complete it.');
   lines.push('');
+
+  if (projectContext) {
+    const refLines: string[] = [];
+    if (projectContext.goal) refLines.push(`- Goal: ${projectContext.goal}`);
+    if (projectContext.mustHaves && projectContext.mustHaves.length > 0) {
+      refLines.push(`- Must-Haves: ${projectContext.mustHaves.join(', ')}`);
+    }
+    if (projectContext.targetUsers) refLines.push(`- Target Users: ${projectContext.targetUsers}`);
+    if (projectContext.constraints) refLines.push(`- Constraints: ${projectContext.constraints}`);
+    if (refLines.length > 0) {
+      lines.push('### Project Reference');
+      lines.push(...refLines);
+      lines.push('');
+    }
+  }
 
   let stepNum = 1;
   const visited = new Set<string>();

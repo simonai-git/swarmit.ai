@@ -28,7 +28,13 @@ interface TaskContext {
     description: string | null;
     status: string;
     priority: number;
-    project: { id: string; title: string; description: string | null; prd: string | null } | null;
+    project: {
+      id: string; title: string; description: string | null; prd: string | null;
+      projectType: string | null; goal: string | null; targetUsers: string | null;
+      mustHaves: string[]; deadline: Date | null; budgetRange: string | null;
+      contactEmail: string | null; niceToHaves: string[]; referenceLinks: string[];
+      constraints: string | null; comms: string | null; dataSensitivity: string | null;
+    } | null;
     comments: Array<{ author: string; content: string; createdAt: Date }>;
     assignee: {
       id: string;
@@ -239,21 +245,38 @@ function buildSystemPrompt(
 
   // Project context
   if (task.project) {
+    const p = task.project;
     parts.push('');
     parts.push('## Project Context');
-    parts.push(`Project: ${task.project.title}`);
-    if (task.project.description) parts.push(`Description: ${task.project.description}`);
-    if (task.project.prd) {
+    parts.push(`Project: ${p.title}`);
+    if (p.projectType) parts.push(`Type: ${p.projectType}`);
+    if (p.goal) parts.push(`Goal: ${p.goal}`);
+    if (p.description) parts.push(`Description: ${p.description}`);
+    if (p.targetUsers) parts.push(`Target Users: ${p.targetUsers}`);
+    if (p.mustHaves.length > 0) parts.push(`Must-Have Features: ${p.mustHaves.join(', ')}`);
+    if (p.niceToHaves.length > 0) parts.push(`Nice-to-Have Features: ${p.niceToHaves.join(', ')}`);
+    if (p.deadline) parts.push(`Deadline: ${new Date(p.deadline).toLocaleDateString()}`);
+    if (p.budgetRange) parts.push(`Budget: ${p.budgetRange}`);
+    if (p.constraints) parts.push(`Constraints: ${p.constraints}`);
+    if (p.dataSensitivity) parts.push(`Data Sensitivity: ${p.dataSensitivity}`);
+    if (p.referenceLinks.length > 0) parts.push(`References: ${p.referenceLinks.join(', ')}`);
+    if (p.prd) {
       parts.push('');
       parts.push('### Product Requirements Document');
-      parts.push(task.project.prd);
+      parts.push(p.prd);
     }
   }
 
   // Workflow instructions
   if (workflowCtx) {
     parts.push('');
-    parts.push(getWorkflowPrompt(workflowCtx));
+    parts.push(getWorkflowPrompt(workflowCtx, task.project ? {
+      title: task.project.title,
+      goal: task.project.goal,
+      mustHaves: task.project.mustHaves,
+      constraints: task.project.constraints,
+      targetUsers: task.project.targetUsers,
+    } : undefined));
   }
 
   return parts.join('\n');
