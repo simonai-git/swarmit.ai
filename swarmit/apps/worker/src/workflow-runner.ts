@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@swarmit/db';
-import type { WorkflowNode, WorkflowEdge } from '@swarmit/shared';
+import type { WorkflowNode, WorkflowEdge, ProjectContext } from '@swarmit/shared';
 import { serializeWorkflowToPrompt, parseStepMarkers } from '@swarmit/shared';
 import { createLogger } from '@swarmit/logger';
 
@@ -66,10 +66,11 @@ export async function initWorkflow(
 /**
  * Generate the workflow prompt injection for the agent's system prompt.
  */
-export function getWorkflowPrompt(ctx: WorkflowContext): string {
+export function getWorkflowPrompt(ctx: WorkflowContext, projectContext?: ProjectContext): string {
   return serializeWorkflowToPrompt(
     { nodes: ctx.nodes, edges: ctx.edges },
-    ctx.completedNodes
+    ctx.completedNodes,
+    projectContext
   );
 }
 

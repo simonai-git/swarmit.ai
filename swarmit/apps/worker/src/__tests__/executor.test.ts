@@ -106,6 +106,18 @@ function makeBaseTaskCtx() {
         title: 'Test Project',
         description: 'A test project',
         prd: null,
+        projectType: null,
+        goal: null,
+        targetUsers: null,
+        mustHaves: [],
+        deadline: null,
+        budgetRange: null,
+        contactEmail: null,
+        niceToHaves: [],
+        referenceLinks: [],
+        constraints: null,
+        comms: null,
+        dataSensitivity: null,
       },
       comments: [] as Array<{ author: string; content: string; createdAt: Date }>,
       assignee: {
@@ -253,7 +265,7 @@ describe('executeAgent', () => {
     await executeAgent(ctx, taskCtx);
 
     expect(mockInitWorkflow).toHaveBeenCalledTimes(1);
-    expect(mockGetWorkflowPrompt).toHaveBeenCalledWith(workflowCtx);
+    expect(mockGetWorkflowPrompt).toHaveBeenCalledWith(workflowCtx, expect.objectContaining({ title: 'Test Project' }));
     expect(mockProcessWorkflowOutput).toHaveBeenCalledTimes(1);
     expect(mockFinalizeWorkflow).toHaveBeenCalledWith(
       ctx.prisma,
@@ -361,5 +373,94 @@ describe('executeAgent', () => {
 
     expect(mockProcessWorkflowOutput).not.toHaveBeenCalled();
     expect(mockFinalizeWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('includes new project fields in system prompt', async () => {
+    const ctx = makeBaseCtx();
+    const taskCtx = makeBaseTaskCtx();
+    (taskCtx.task as Record<string, unknown>).project = {
+      id: 'proj-1',
+      title: 'My App',
+      description: null,
+      prd: null,
+      projectType: 'web-app',
+      goal: 'Build a dashboard',
+      targetUsers: 'Enterprise teams',
+      mustHaves: ['Auth', 'Dashboard'],
+      deadline: new Date('2026-06-01'),
+      budgetRange: '$5k-$10k',
+      contactEmail: null,
+      niceToHaves: ['Dark mode'],
+      referenceLinks: ['https://example.com'],
+      constraints: 'Must use React',
+      comms: null,
+      dataSensitivity: 'internal',
+    };
+
+    const llm = ctx.llmClient as ReturnType<typeof createMockLLMClient>;
+    llm.chat.mockResolvedValueOnce(makeEndTurnResponse('Done.'));
+
+    await executeAgent(ctx, taskCtx);
+
+    // Verify system prompt passed to LLM contains the new fields
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const systemPrompt = (llm.chat.mock.calls as any)[0][0].systemPrompt as string;
+    expect(systemPrompt).toContain('Type: web-app');
+    expect(systemPrompt).toContain('Goal: Build a dashboard');
+    expect(systemPrompt).toContain('Target Users: Enterprise teams');
+    expect(systemPrompt).toContain('Must-Have Features: Auth, Dashboard');
+    expect(systemPrompt).toContain('Nice-to-Have Features: Dark mode');
+    expect(systemPrompt).toContain('Budget: $5k-$10k');
+    expect(systemPrompt).toContain('Constraints: Must use React');
+    expect(systemPrompt).toContain('Data Sensitivity: internal');
+    expect(systemPrompt).toContain('References: https://example.com');
+  });
+
+  it('passes project context to getWorkflowPrompt when workflow is present', async () => {
+    const ctx = makeBaseCtx();
+    const taskCtx = makeBaseTaskCtx();
+    (taskCtx.task as Record<string, unknown>).project = {
+      id: 'proj-1',
+      title: 'Workflow Project',
+      description: null,
+      prd: null,
+      projectType: null,
+      goal: 'Ship it',
+      targetUsers: 'Devs',
+      mustHaves: ['API'],
+      deadline: null,
+      budgetRange: null,
+      contactEmail: null,
+      niceToHaves: [],
+      referenceLinks: [],
+      constraints: 'No downtime',
+      comms: null,
+      dataSensitivity: null,
+    };
+
+    const workflowCtx = {
+      runId: 'run-1',
+      workflowVersionId: 'wv-1',
+      nodes: [{ id: 'n1', type: 'instruction', position: { x: 0, y: 0 }, data: { label: 'Step 1' } }],
+      edges: [],
+      executionStateId: 'exec-1',
+      completedNodes: [],
+    };
+
+    mockInitWorkflow.mockResolvedValue(workflowCtx);
+    mockGetWorkflowPrompt.mockReturnValue('## Workflow');
+
+    const llm = ctx.llmClient as ReturnType<typeof createMockLLMClient>;
+    llm.chat.mockResolvedValueOnce(makeEndTurnResponse('Done.'));
+
+    await executeAgent(ctx, taskCtx);
+
+    expect(mockGetWorkflowPrompt).toHaveBeenCalledWith(workflowCtx, {
+      title: 'Workflow Project',
+      goal: 'Ship it',
+      mustHaves: ['API'],
+      constraints: 'No downtime',
+      targetUsers: 'Devs',
+    });
   });
 });

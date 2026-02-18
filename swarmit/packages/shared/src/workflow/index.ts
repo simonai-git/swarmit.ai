@@ -13,4 +13,5 @@ export {
   parseStepMarkers,
   STEP_MARKER_PREFIX,
   STEP_COMPLETE_PREFIX,
+  type ProjectContext,
 } from './serializer.js';
