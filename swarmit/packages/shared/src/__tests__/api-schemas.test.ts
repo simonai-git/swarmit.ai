@@ -189,6 +189,89 @@ describe('createProjectSchema', () => {
       createProjectSchema.parse({ title: 'ok', prd: 'x'.repeat(50001) })
     ).toThrow();
   });
+
+  it('accepts isDraft boolean', () => {
+    const result = createProjectSchema.parse({ title: 'Draft', isDraft: true });
+    expect(result.isDraft).toBe(true);
+  });
+
+  it('accepts all new Step 1 fields', () => {
+    const result = createProjectSchema.parse({
+      title: 'Full Project',
+      projectType: 'web-app',
+      goal: 'Build a recipe app',
+      targetUsers: 'Home cooks',
+      mustHaves: ['Search', 'Recommendations'],
+      deadline: '2026-04-01T00:00:00.000Z',
+      budgetRange: '$500-$1000',
+      contactEmail: 'test@example.com',
+    });
+    expect(result.projectType).toBe('web-app');
+    expect(result.goal).toBe('Build a recipe app');
+    expect(result.targetUsers).toBe('Home cooks');
+    expect(result.mustHaves).toEqual(['Search', 'Recommendations']);
+    expect(result.deadline).toBe('2026-04-01T00:00:00.000Z');
+    expect(result.budgetRange).toBe('$500-$1000');
+    expect(result.contactEmail).toBe('test@example.com');
+  });
+
+  it('accepts all new Step 2 fields', () => {
+    const result = createProjectSchema.parse({
+      title: 'Full Project',
+      niceToHaves: ['Social sharing'],
+      referenceLinks: ['https://example.com'],
+      constraints: 'Must work offline',
+      comms: 'Prefer async',
+      dataSensitivity: 'internal',
+    });
+    expect(result.niceToHaves).toEqual(['Social sharing']);
+    expect(result.referenceLinks).toEqual(['https://example.com']);
+    expect(result.constraints).toBe('Must work offline');
+    expect(result.comms).toBe('Prefer async');
+    expect(result.dataSensitivity).toBe('internal');
+  });
+
+  it('rejects invalid contactEmail', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', contactEmail: 'not-email' })
+    ).toThrow();
+  });
+
+  it('rejects invalid deadline (non-datetime)', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', deadline: 'tomorrow' })
+    ).toThrow();
+  });
+
+  it('rejects invalid referenceLinks (non-URL)', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', referenceLinks: ['not-a-url'] })
+    ).toThrow();
+  });
+
+  it('rejects mustHaves exceeding max items', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', mustHaves: Array(21).fill('feature') })
+    ).toThrow();
+  });
+
+  it('rejects referenceLinks exceeding max items', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', referenceLinks: Array(11).fill('https://example.com') })
+    ).toThrow();
+  });
+
+  it('rejects goal exceeding max length', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', goal: 'x'.repeat(2001) })
+    ).toThrow();
+  });
+
+  it('rejects constraints exceeding max length', () => {
+    expect(() =>
+      createProjectSchema.parse({ title: 'ok', constraints: 'x'.repeat(5001) })
+    ).toThrow();
+  });
 });
 
 // ─── updateProjectSchema ────────────────────────────────────────────
@@ -220,11 +303,40 @@ describe('updateProjectSchema', () => {
     expect(() => updateProjectSchema.parse({ status: 'BOGUS' })).toThrow();
   });
 
-  it('accepts all valid status values', () => {
-    for (const status of ['PLANNING', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']) {
+  it('accepts all valid status values including DRAFT', () => {
+    for (const status of ['DRAFT', 'PLANNING', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']) {
       const result = updateProjectSchema.parse({ status });
       expect(result.status).toBe(status);
     }
+  });
+
+  it('accepts new project fields as nullable', () => {
+    const result = updateProjectSchema.parse({
+      projectType: null,
+      goal: null,
+      targetUsers: null,
+      deadline: null,
+      budgetRange: null,
+      contactEmail: null,
+      constraints: null,
+      comms: null,
+      dataSensitivity: null,
+    });
+    expect(result.projectType).toBeNull();
+    expect(result.goal).toBeNull();
+    expect(result.deadline).toBeNull();
+  });
+
+  it('accepts new project fields with values', () => {
+    const result = updateProjectSchema.parse({
+      projectType: 'api-backend',
+      goal: 'Updated goal',
+      mustHaves: ['Feature A'],
+      niceToHaves: ['Feature B'],
+      referenceLinks: ['https://example.com'],
+    });
+    expect(result.projectType).toBe('api-backend');
+    expect(result.mustHaves).toEqual(['Feature A']);
   });
 });
 

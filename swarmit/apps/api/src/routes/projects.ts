@@ -41,16 +41,27 @@ export async function projectRoutes(app: FastifyInstance) {
   });
 
   app.post('/', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const data = createProjectSchema.parse(request.body);
+    const { isDraft, deadline, ...rest } = createProjectSchema.parse(request.body);
+    const status = isDraft ? 'DRAFT' : 'PLANNING';
+
     const project = await app.prisma.project.create({
-      data: { ...data, userId: request.userId },
+      data: {
+        ...rest,
+        deadline: deadline ? new Date(deadline) : undefined,
+        status,
+        userId: request.userId,
+      },
     });
     app.io.emit('project:updated', { projectId: project.id, userId: request.userId });
     return reply.code(201).send(project);
   });
 
   app.patch<{ Params: { id: string } }>('/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const data = updateProjectSchema.parse(request.body);
+    const { deadline, ...rest } = updateProjectSchema.parse(request.body);
+    const data: Record<string, unknown> = { ...rest };
+    if (deadline !== undefined) {
+      data.deadline = deadline ? new Date(deadline) : null;
+    }
     const result = await app.prisma.project.updateMany({
       where: { id: request.params.id, userId: request.userId },
       data,

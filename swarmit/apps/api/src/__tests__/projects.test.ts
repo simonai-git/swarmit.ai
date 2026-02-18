@@ -283,6 +283,132 @@ describe('project routes', () => {
 
       expect(res.statusCode).toBeGreaterThanOrEqual(400);
     });
+
+    it('should create project with DRAFT status when isDraft is true', async () => {
+      prisma.project.create.mockResolvedValueOnce({
+        id: 'proj-draft',
+        title: 'Draft Project',
+        status: 'DRAFT',
+        userId: 'test-user-id',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { title: 'Draft Project', isDraft: true },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(prisma.project.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'DRAFT' }),
+        })
+      );
+    });
+
+    it('should create project with PLANNING status when isDraft is false', async () => {
+      prisma.project.create.mockResolvedValueOnce({
+        id: 'proj-plan',
+        title: 'Planning Project',
+        status: 'PLANNING',
+        userId: 'test-user-id',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { title: 'Planning Project', isDraft: false },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(prisma.project.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'PLANNING' }),
+        })
+      );
+    });
+
+    it('should create project with all new fields', async () => {
+      prisma.project.create.mockResolvedValueOnce({
+        id: 'proj-full',
+        title: 'Full Project',
+        status: 'PLANNING',
+        userId: 'test-user-id',
+      });
+
+      const payload = {
+        title: 'Full Project',
+        projectType: 'web-app',
+        goal: 'Build something great',
+        targetUsers: 'Developers',
+        mustHaves: ['Feature A', 'Feature B'],
+        deadline: '2026-06-01T00:00:00.000Z',
+        budgetRange: '$500-$1000',
+        contactEmail: 'test@example.com',
+        niceToHaves: ['Feature C'],
+        referenceLinks: ['https://example.com'],
+        constraints: 'Must be fast',
+        comms: 'Async updates',
+        dataSensitivity: 'internal',
+      };
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${token}` },
+        payload,
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(prisma.project.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            projectType: 'web-app',
+            goal: 'Build something great',
+            targetUsers: 'Developers',
+            mustHaves: ['Feature A', 'Feature B'],
+            deadline: new Date('2026-06-01T00:00:00.000Z'),
+            budgetRange: '$500-$1000',
+            contactEmail: 'test@example.com',
+            niceToHaves: ['Feature C'],
+            referenceLinks: ['https://example.com'],
+            constraints: 'Must be fast',
+            comms: 'Async updates',
+            dataSensitivity: 'internal',
+            status: 'PLANNING',
+            userId: 'test-user-id',
+          }),
+        })
+      );
+    });
+
+    it('should convert deadline string to Date object', async () => {
+      prisma.project.create.mockResolvedValueOnce({
+        id: 'proj-date',
+        title: 'Date Test',
+        userId: 'test-user-id',
+      });
+
+      await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          title: 'Date Test',
+          deadline: '2026-04-01T00:00:00.000Z',
+        },
+      });
+
+      expect(prisma.project.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deadline: new Date('2026-04-01T00:00:00.000Z'),
+          }),
+        })
+      );
+    });
   });
 
   // ─── PATCH /projects/:id ───────────────────────────────────────
@@ -313,6 +439,74 @@ describe('project routes', () => {
       });
 
       expect(res.statusCode).toBe(404);
+    });
+
+    it('should convert deadline string to Date when updating', async () => {
+      prisma.project.updateMany.mockResolvedValueOnce({ count: 1 });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/projects/proj-1',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { deadline: '2026-06-01T00:00:00.000Z' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(prisma.project.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deadline: new Date('2026-06-01T00:00:00.000Z'),
+          }),
+        })
+      );
+    });
+
+    it('should set deadline to null when null is passed', async () => {
+      prisma.project.updateMany.mockResolvedValueOnce({ count: 1 });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/projects/proj-1',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { deadline: null },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(prisma.project.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deadline: null,
+          }),
+        })
+      );
+    });
+
+    it('should update project with new fields', async () => {
+      prisma.project.updateMany.mockResolvedValueOnce({ count: 1 });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/projects/proj-1',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          projectType: 'api-backend',
+          goal: 'New goal',
+          mustHaves: ['Feature X'],
+          dataSensitivity: 'confidential',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(prisma.project.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            projectType: 'api-backend',
+            goal: 'New goal',
+            mustHaves: ['Feature X'],
+            dataSensitivity: 'confidential',
+          }),
+        })
+      );
     });
   });
 

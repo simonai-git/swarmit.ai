@@ -200,7 +200,6 @@ describe('Profile page — Claude API Key card', () => {
   });
 
   it('disconnects OAuth token after confirm', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mockApiProfile.get.mockResolvedValue(createProfile());
     mockApiIntegrations.listTokens
       .mockResolvedValueOnce({
@@ -221,7 +220,18 @@ describe('Profile page — Claude API Key card', () => {
       expect(screen.getByText('Connected via OAuth')).toBeInTheDocument();
     });
 
+    // Click the disconnect button to open the ConfirmDialog
     fireEvent.click(screen.getByRole('button', { name: /Disconnect/i }));
+
+    // Wait for the ConfirmDialog to appear, then click its confirm button
+    await waitFor(() => {
+      expect(screen.getByText('Disconnect anthropic')).toBeInTheDocument();
+    });
+
+    // The ConfirmDialog has two buttons: Cancel and Disconnect (confirmLabel)
+    const confirmButtons = screen.getAllByRole('button', { name: /Disconnect/i });
+    // Click the confirm button in the dialog (last one)
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
 
     await waitFor(() => {
       expect(mockApiIntegrations.deleteToken).toHaveBeenCalledWith('anthropic');

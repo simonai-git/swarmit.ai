@@ -100,6 +100,28 @@ describe('ProjectService', () => {
 
       await expect(service.start('p1', 'u1')).rejects.toThrow('Cannot start project in PAUSED status');
     });
+
+    it('should start a project in DRAFT status (via PLANNING)', async () => {
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'DRAFT', userId: 'u1' });
+      prisma.project.update
+        .mockResolvedValueOnce({ id: 'p1', status: 'PLANNING' })
+        .mockResolvedValueOnce({ id: 'p1', status: 'ACTIVE' });
+
+      const result = await service.start('p1', 'u1');
+
+      expect(result.status).toBe('ACTIVE');
+      // Should transition DRAFT → PLANNING first
+      expect(prisma.project.update).toHaveBeenCalledWith({
+        where: { id: 'p1' },
+        data: { status: 'PLANNING' },
+      });
+      // Then PLANNING → ACTIVE
+      expect(prisma.project.update).toHaveBeenCalledWith({
+        where: { id: 'p1' },
+        data: { status: 'ACTIVE' },
+      });
+      expect(prisma.project.update).toHaveBeenCalledTimes(2);
+    });
   });
 
   // ─── pause ────────────────────────────────────────────────────
@@ -219,6 +241,15 @@ describe('ProjectService', () => {
       prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'CANCELLED', userId: 'u1' });
 
       await expect(service.cancel('p1', 'u1')).rejects.toThrow('Cannot cancel project in CANCELLED status');
+    });
+
+    it('should cancel a DRAFT project', async () => {
+      prisma.project.findFirst.mockResolvedValue({ id: 'p1', status: 'DRAFT', userId: 'u1' });
+      prisma.project.update.mockResolvedValue({ id: 'p1', status: 'CANCELLED' });
+
+      const result = await service.cancel('p1', 'u1');
+
+      expect(result.status).toBe('CANCELLED');
     });
   });
 

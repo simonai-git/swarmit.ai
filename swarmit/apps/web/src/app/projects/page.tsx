@@ -15,14 +15,17 @@ import {
   Calendar,
   ListTodo,
   FileText,
-  X,
   Loader2,
+  MessageSquare,
 } from 'lucide-react';
 import { api, type Project, type Task } from '@/lib/api';
 import { useProjectUpdates } from '@/hooks/useSocket';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import CreateProjectWizard from '@/components/CreateProjectWizard';
+import CreateProjectChat from '@/components/CreateProjectChat';
 
 const STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-zinc-500/20 text-zinc-300',
   PLANNING: 'bg-blue-500/20 text-blue-400',
   ACTIVE: 'bg-green-500/20 text-green-400',
   PAUSED: 'bg-yellow-500/20 text-yellow-400',
@@ -88,7 +91,7 @@ function ProjectDetail({ project, onAction, onDelete, acting }: ProjectDetailPro
 
   const availableActions: Array<{ key: string; label: string; icon: React.ReactNode; color: string }> = [];
 
-  if (project.status === 'PLANNING') {
+  if (project.status === 'DRAFT' || project.status === 'PLANNING') {
     availableActions.push({ key: 'start', label: 'Start', icon: <Play className="w-4 h-4" />, color: 'bg-green-600 hover:bg-green-700' });
   }
   if (project.status === 'ACTIVE') {
@@ -183,15 +186,10 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [acting, setActing] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  // Create form state
-  const [newTitle, setNewTitle] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [newPrd, setNewPrd] = useState('');
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -215,26 +213,11 @@ export default function ProjectsPage() {
     }, [fetchProjects]),
   );
 
-  const handleCreate = async () => {
-    if (!newTitle.trim()) return;
-    setCreating(true);
-    try {
-      const project = await api.projects.create({
-        title: newTitle.trim(),
-        description: newDescription.trim() || undefined,
-        prd: newPrd.trim() || undefined,
-      });
-      setProjects(prev => [project, ...prev]);
-      setShowCreate(false);
-      setNewTitle('');
-      setNewDescription('');
-      setNewPrd('');
-      setExpandedId(project.id);
-    } catch (err) {
-      console.error('Failed to create project:', err);
-    } finally {
-      setCreating(false);
-    }
+  const handleProjectCreated = (project: Project) => {
+    setProjects(prev => [project, ...prev]);
+    setShowWizard(false);
+    setShowChat(false);
+    setExpandedId(project.id);
   };
 
   const handleAction = async (projectId: string, action: string) => {
@@ -296,80 +279,30 @@ export default function ProjectsPage() {
             <h1 className="text-2xl font-bold text-white">Projects</h1>
             <p className="text-zinc-400 mt-1 hidden sm:block">Manage your agent orchestration projects</p>
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Project
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowChat(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg transition-colors border border-zinc-700"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span className="hidden sm:inline">Create with Chat</span>
+            </button>
+            <button
+              onClick={() => setShowWizard(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Project
+            </button>
+          </div>
         </div>
 
-        {/* Create modal */}
-        {showCreate && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl w-full max-w-lg mx-4">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-                <h2 className="text-lg font-semibold text-white">Create New Project</h2>
-                <button
-                  onClick={() => { setShowCreate(false); setNewTitle(''); setNewDescription(''); setNewPrd(''); }}
-                  className="text-zinc-400 hover:text-white transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Title</label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={e => setNewTitle(e.target.value)}
-                    placeholder="e.g., E-commerce Platform"
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">Description</label>
-                  <textarea
-                    value={newDescription}
-                    onChange={e => setNewDescription(e.target.value)}
-                    placeholder="Brief description of the project..."
-                    rows={3}
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-1">
-                    PRD <span className="text-zinc-500 font-normal">(optional)</span>
-                  </label>
-                  <textarea
-                    value={newPrd}
-                    onChange={e => setNewPrd(e.target.value)}
-                    placeholder="Product requirements document..."
-                    rows={5}
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-                <button
-                  onClick={() => { setShowCreate(false); setNewTitle(''); setNewDescription(''); setNewPrd(''); }}
-                  className="px-4 py-2 text-sm text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={creating || !newTitle.trim()}
-                  className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg transition-colors"
-                >
-                  {creating ? 'Creating...' : 'Create Project'}
-                </button>
-              </div>
-            </div>
-          </div>
+        {/* Creation modals */}
+        {showWizard && (
+          <CreateProjectWizard onCreated={handleProjectCreated} onClose={() => setShowWizard(false)} />
+        )}
+        {showChat && (
+          <CreateProjectChat onCreated={handleProjectCreated} onClose={() => setShowChat(false)} />
         )}
 
         {/* Project cards grid */}

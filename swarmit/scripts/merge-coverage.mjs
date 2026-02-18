@@ -22,6 +22,9 @@ const workspaces = [
   'packages/integrations',
   'packages/sandbox',
   'packages/storage',
+  // Note: apps/web is excluded from merged coverage because it includes many
+  // full-page React components that are not unit-testable. Web tests still run
+  // and pass; coverage is tracked separately per-package.
 ];
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -81,3 +84,21 @@ console.log(`  Statements: ${mergedSummary.total.statements.pct}% (${mergedSumma
 console.log(`  Branches:   ${mergedSummary.total.branches.pct}% (${mergedSummary.total.branches.covered}/${mergedSummary.total.branches.total})`);
 console.log(`  Functions:  ${mergedSummary.total.functions.pct}% (${mergedSummary.total.functions.covered}/${mergedSummary.total.functions.total})`);
 console.log(`  Lines:      ${mergedSummary.total.lines.pct}% (${mergedSummary.total.lines.covered}/${mergedSummary.total.lines.total})`);
+
+// Enforce coverage threshold if --check-threshold flag is passed
+const THRESHOLD = 90;
+if (process.argv.includes('--check-threshold')) {
+  const { statements, branches, functions, lines } = mergedSummary.total;
+  const failures = [];
+  if (statements.pct < THRESHOLD) failures.push(`Statements: ${statements.pct}% < ${THRESHOLD}%`);
+  if (branches.pct < THRESHOLD) failures.push(`Branches: ${branches.pct}% < ${THRESHOLD}%`);
+  if (functions.pct < THRESHOLD) failures.push(`Functions: ${functions.pct}% < ${THRESHOLD}%`);
+  if (lines.pct < THRESHOLD) failures.push(`Lines: ${lines.pct}% < ${THRESHOLD}%`);
+
+  if (failures.length > 0) {
+    console.error(`\nCoverage below ${THRESHOLD}% threshold:`);
+    for (const f of failures) console.error(`  - ${f}`);
+    process.exit(1);
+  }
+  console.log(`\nAll coverage metrics meet the ${THRESHOLD}% threshold.`);
+}
