@@ -163,7 +163,10 @@ describe('run routes', () => {
 
       expect(prisma.taskRun.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          include: { task: { select: { id: true, title: true } } },
+          include: expect.objectContaining({
+            task: { select: { id: true, title: true } },
+            executionState: expect.any(Object),
+          }),
         })
       );
     });

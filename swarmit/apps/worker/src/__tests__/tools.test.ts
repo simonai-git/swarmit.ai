@@ -20,10 +20,12 @@ const {
   mockCreateSupermemoryClient,
   mockListRepos,
   mockPushFiles,
+  mockCreatePullRequest,
   mockCreateGitHubClient,
   mockRailwayQuery,
   mockRailwayGetDeployments,
   mockRailwaySetEnvVars,
+  mockRedeployService,
   mockCreateRailwayClient,
   mockRefreshRailwayOAuthToken,
   mockIsEncrypted,
@@ -38,17 +40,21 @@ const {
   }));
   const mockListRepos = vi.fn().mockResolvedValue([{ full_name: 'user/repo', private: false, html_url: 'https://github.com/user/repo' }]);
   const mockPushFiles = vi.fn().mockResolvedValue({ sha: 'abc123def456' });
+  const mockCreatePullRequest = vi.fn().mockResolvedValue({ number: 42, html_url: 'https://github.com/owner/repo/pull/42' });
   const mockCreateGitHubClient = vi.fn(() => ({
     listRepos: mockListRepos,
     pushFiles: mockPushFiles,
+    createPullRequest: mockCreatePullRequest,
   }));
   const mockRailwayQuery = vi.fn().mockResolvedValue({ project: { services: { edges: [] } } });
   const mockRailwayGetDeployments = vi.fn().mockResolvedValue({ deployments: { edges: [] } });
   const mockRailwaySetEnvVars = vi.fn().mockResolvedValue(undefined);
+  const mockRedeployService = vi.fn().mockResolvedValue(true);
   const mockCreateRailwayClient = vi.fn(() => ({
     query: mockRailwayQuery,
     getDeployments: mockRailwayGetDeployments,
     setEnvVars: mockRailwaySetEnvVars,
+    redeployService: mockRedeployService,
   }));
   const mockRefreshRailwayOAuthToken = vi.fn().mockResolvedValue({
     accessToken: 'refreshed-token',
@@ -65,10 +71,12 @@ const {
     mockCreateSupermemoryClient,
     mockListRepos,
     mockPushFiles,
+    mockCreatePullRequest,
     mockCreateGitHubClient,
     mockRailwayQuery,
     mockRailwayGetDeployments,
     mockRailwaySetEnvVars,
+    mockRedeployService,
     mockCreateRailwayClient,
     mockRefreshRailwayOAuthToken,
     mockIsEncrypted,
@@ -1056,20 +1064,10 @@ describe('executeTool', () => {
   });
 
   describe('github_create_pr', () => {
-    const originalFetch = globalThis.fetch;
-
-    afterEach(() => {
-      globalThis.fetch = originalFetch;
-    });
-
     it('creates a PR successfully', async () => {
       mockPrisma.integrationToken.findUnique.mockResolvedValueOnce({ accessToken: 'gh-token' });
       mockIsEncrypted.mockReturnValueOnce(false);
-
-      globalThis.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ html_url: 'https://github.com/owner/repo/pull/42', number: 42 }),
-      }) as unknown as typeof fetch;
+      mockCreatePullRequest.mockResolvedValueOnce({ number: 42, html_url: 'https://github.com/owner/repo/pull/42' });
 
       const result = await executeTool(
         'github_create_pr',
@@ -1077,13 +1075,8 @@ describe('executeTool', () => {
         sandbox,
         context,
       );
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.github.com/repos/owner/repo/pulls',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ title: 'My PR', body: 'Description', head: 'feature', base: 'develop' }),
-        }),
-      );
+      expect(mockCreateGitHubClient).toHaveBeenCalledWith('gh-token');
+      expect(mockCreatePullRequest).toHaveBeenCalledWith('owner', 'repo', 'My PR', 'Description', 'feature', 'develop');
       expect(result).toContain('Pull request created: #42');
       expect(result).toContain('https://github.com/owner/repo/pull/42');
     });
@@ -1091,11 +1084,7 @@ describe('executeTool', () => {
     it('defaults base to main and body to empty', async () => {
       mockPrisma.integrationToken.findUnique.mockResolvedValueOnce({ accessToken: 'gh-token' });
       mockIsEncrypted.mockReturnValueOnce(false);
-
-      globalThis.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ html_url: 'https://github.com/o/r/pull/1', number: 1 }),
-      }) as unknown as typeof fetch;
+      mockCreatePullRequest.mockResolvedValueOnce({ number: 1, html_url: 'https://github.com/o/r/pull/1' });
 
       await executeTool(
         'github_create_pr',
@@ -1103,12 +1092,7 @@ describe('executeTool', () => {
         sandbox,
         context,
       );
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          body: JSON.stringify({ title: 'PR', body: '', head: 'feat', base: 'main' }),
-        }),
-      );
+      expect(mockCreatePullRequest).toHaveBeenCalledWith('o', 'r', 'PR', '', 'feat', 'main');
     });
 
     it('returns no token message when token not configured', async () => {
@@ -1122,15 +1106,10 @@ describe('executeTool', () => {
       expect(result).toBe('No GitHub token configured.');
     });
 
-    it('returns error when API responds with non-OK status', async () => {
+    it('returns error when client throws', async () => {
       mockPrisma.integrationToken.findUnique.mockResolvedValueOnce({ accessToken: 'gh-token' });
       mockIsEncrypted.mockReturnValueOnce(false);
-
-      globalThis.fetch = vi.fn().mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        text: async () => 'Validation Failed',
-      }) as unknown as typeof fetch;
+      mockCreatePullRequest.mockRejectedValueOnce(new Error('GitHub API error: 422 Validation Failed'));
 
       const result = await executeTool(
         'github_create_pr',
@@ -1138,14 +1117,14 @@ describe('executeTool', () => {
         sandbox,
         context,
       );
-      expect(result).toContain('Error creating PR: 422 Validation Failed');
+      expect(result).toContain('Error creating PR');
+      expect(result).toContain('422 Validation Failed');
     });
 
-    it('returns error on fetch failure', async () => {
+    it('returns error on network failure', async () => {
       mockPrisma.integrationToken.findUnique.mockResolvedValueOnce({ accessToken: 'gh-token' });
       mockIsEncrypted.mockReturnValueOnce(false);
-
-      globalThis.fetch = vi.fn().mockRejectedValueOnce(new Error('Network failure')) as unknown as typeof fetch;
+      mockCreatePullRequest.mockRejectedValueOnce(new Error('Network failure'));
 
       const result = await executeTool(
         'github_create_pr',
@@ -1211,7 +1190,7 @@ describe('executeTool', () => {
         expiresAt: null,
       });
       mockIsEncrypted.mockReturnValueOnce(false);
-      mockRailwayQuery.mockResolvedValueOnce({ serviceInstanceRedeploy: true });
+      mockRedeployService.mockResolvedValueOnce(true);
 
       const result = await executeTool(
         'railway_deploy_service',
@@ -1219,10 +1198,7 @@ describe('executeTool', () => {
         sandbox,
         context,
       );
-      expect(mockRailwayQuery).toHaveBeenCalledWith(
-        expect.stringContaining('serviceInstanceRedeploy'),
-        { serviceId: 'svc-1', environmentId: 'env-1' },
-      );
+      expect(mockRedeployService).toHaveBeenCalledWith('svc-1', 'env-1');
       expect(result).toContain('Redeployment triggered');
     });
 
@@ -1244,7 +1220,7 @@ describe('executeTool', () => {
         expiresAt: null,
       });
       mockIsEncrypted.mockReturnValueOnce(false);
-      mockRailwayQuery.mockRejectedValueOnce(new Error('Deploy failed'));
+      mockRedeployService.mockRejectedValueOnce(new Error('Deploy failed'));
       const result = await executeTool(
         'railway_deploy_service',
         { serviceId: 'svc-1', environmentId: 'env-1' },

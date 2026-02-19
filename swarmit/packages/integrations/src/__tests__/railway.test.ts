@@ -263,6 +263,29 @@ describe('RailwayClient', () => {
     });
   });
 
+  describe('redeployService', () => {
+    it('sends redeploy mutation and returns true', async () => {
+      mockFetch.mockResolvedValueOnce(mockGraphQLResponse(true));
+
+      const result = await client.redeployService('svc-123', 'env-456');
+
+      expect(result).toBe(true);
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.query).toContain('serviceInstanceRedeploy');
+      expect(callBody.variables).toEqual({ serviceId: 'svc-123', environmentId: 'env-456' });
+    });
+
+    it('throws on GraphQL error', async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockGraphQLErrors([{ message: 'Service not found' }])
+      );
+
+      await expect(client.redeployService('bad-svc', 'env-1')).rejects.toThrow(
+        'Railway GraphQL error: Service not found'
+      );
+    });
+  });
+
   describe('error handling', () => {
     it('throws on HTTP error for any method', async () => {
       mockFetch.mockResolvedValueOnce(mockErrorResponse(403));
