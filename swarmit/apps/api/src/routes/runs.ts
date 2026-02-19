@@ -11,6 +11,9 @@ export async function runRoutes(app: FastifyInstance) {
         where: { task: { userId: request.userId } },
         include: {
           task: { select: { id: true, title: true } },
+          executionState: {
+            select: { status: true, currentNodeId: true, completedNodes: true, workflowVersionId: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -29,7 +32,10 @@ export async function runRoutes(app: FastifyInstance) {
         task: { select: { id: true, title: true } },
         logs: { orderBy: { createdAt: 'asc' } },
         executionState: {
-          include: { events: { orderBy: { createdAt: 'asc' } } },
+          include: {
+            events: { orderBy: { createdAt: 'asc' } },
+            workflowVersion: { select: { nodes: true, edges: true } },
+          },
         },
       },
     });

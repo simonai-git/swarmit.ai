@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
   Play,
   ChevronDown,
@@ -9,8 +10,14 @@ import {
   Loader2,
   ChevronLeft,
   Terminal,
+  GitBranch,
 } from 'lucide-react';
 import { api, type TaskRun, type TaskLog } from '@/lib/api';
+
+const WorkflowExecutionViewer = dynamic(
+  () => import('@/components/WorkflowExecutionViewer'),
+  { ssr: false },
+);
 
 const STATUS_COLORS: Record<string, string> = {
   QUEUED: 'bg-zinc-600',
@@ -77,6 +84,18 @@ function formatTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
+function WorkflowBadge({ run }: { run: TaskRun }) {
+  if (!run.executionState) return null;
+  const completed = run.executionState.completedNodes?.length ?? 0;
+  // Estimate total from workflow data or just show completed count
+  return (
+    <span className="inline-flex items-center gap-1 ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/20 text-purple-400">
+      <GitBranch className="w-3 h-3" />
+      {completed} steps
+    </span>
+  );
+}
+
 export default function RunsPage() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [total, setTotal] = useState(0);
@@ -86,6 +105,9 @@ export default function RunsPage() {
   const [logs, setLogs] = useState<Record<string, TaskLog[]>>({});
   const [logsLoading, setLogsLoading] = useState<Record<string, boolean>>({});
   const [cancelling, setCancelling] = useState<Record<string, boolean>>({});
+  const [runDetails, setRunDetails] = useState<Record<string, TaskRun>>({});
+  const [detailsLoading, setDetailsLoading] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<Record<string, 'logs' | 'workflow'>>({});
 
   const limit = 20;
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -115,6 +137,7 @@ export default function RunsPage() {
 
     setExpandedRunId(run.id);
 
+    // Fetch logs
     if (!logs[run.id]) {
       setLogsLoading((prev) => ({ ...prev, [run.id]: true }));
       try {
@@ -125,6 +148,23 @@ export default function RunsPage() {
         setLogs((prev) => ({ ...prev, [run.id]: [] }));
       } finally {
         setLogsLoading((prev) => ({ ...prev, [run.id]: false }));
+      }
+    }
+
+    // Fetch run detail (for workflow execution state)
+    if (!runDetails[run.id]) {
+      setDetailsLoading((prev) => ({ ...prev, [run.id]: true }));
+      try {
+        const detail = await api.runs.get(run.id);
+        setRunDetails((prev) => ({ ...prev, [run.id]: detail }));
+        // Default to workflow tab if workflow data exists
+        if (detail.executionState?.workflowVersion) {
+          setActiveTab((prev) => ({ ...prev, [run.id]: 'workflow' }));
+        }
+      } catch {
+        // Non-critical, just won't show workflow tab
+      } finally {
+        setDetailsLoading((prev) => ({ ...prev, [run.id]: false }));
       }
     }
   };
@@ -220,16 +260,19 @@ export default function RunsPage() {
                           {run.task?.title || run.taskId}
                         </span>
                       </div>
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white shrink-0 ${
-                          STATUS_COLORS[run.status] || 'bg-zinc-600'
-                        }`}
-                      >
-                        {run.status === 'RUNNING' && (
-                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        )}
-                        {run.status}
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white ${
+                            STATUS_COLORS[run.status] || 'bg-zinc-600'
+                          }`}
+                        >
+                          {run.status === 'RUNNING' && (
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          )}
+                          {run.status}
+                        </span>
+                        <WorkflowBadge run={run} />
+                      </div>
                     </div>
                     <div className="flex items-center justify-between text-xs text-zinc-400 ml-6">
                       <span className="capitalize">{run.agentType}</span>
@@ -258,51 +301,84 @@ export default function RunsPage() {
                   {isExpanded && (
                     <div className="border-t border-zinc-800/50">
                       <div className="mx-3 my-3 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
-                          <Terminal className="w-4 h-4 text-zinc-500" />
-                          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                            Run Logs
-                          </span>
-                          {run.status === 'RUNNING' && (
-                            <span className="flex items-center gap-1 text-xs text-blue-400">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Live
-                            </span>
-                          )}
-                        </div>
-                        <div className="p-3 max-h-64 overflow-y-auto overflow-x-auto font-mono text-xs leading-relaxed">
-                          {logsLoading[run.id] ? (
-                            <div className="flex items-center gap-2 text-zinc-500">
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Loading logs...
-                            </div>
-                          ) : !logs[run.id] || logs[run.id].length === 0 ? (
-                            <span className="text-zinc-600">
-                              No logs available for this run.
-                            </span>
-                          ) : (
-                            logs[run.id].map((log) => (
-                              <div key={log.id} className="flex gap-2 py-0.5">
-                                <span
-                                  className={`shrink-0 w-12 text-right ${
-                                    LOG_STREAM_COLORS[log.stream] ||
-                                    'text-zinc-400'
-                                  }`}
-                                >
-                                  [{log.stream}]
-                                </span>
-                                <span
-                                  className={
-                                    LOG_STREAM_COLORS[log.stream] ||
-                                    'text-zinc-400'
-                                  }
-                                >
-                                  {log.content}
-                                </span>
+                        {/* Tabs header (only show if workflow data available) */}
+                        {runDetails[run.id]?.executionState?.workflowVersion && (
+                          <div className="flex border-b border-zinc-800 bg-zinc-900/50">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveTab((prev) => ({ ...prev, [run.id]: 'logs' })); }}
+                              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
+                                (activeTab[run.id] || 'logs') === 'logs' ? 'text-white border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              <Terminal className="w-3.5 h-3.5" /> Logs
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveTab((prev) => ({ ...prev, [run.id]: 'workflow' })); }}
+                              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
+                                activeTab[run.id] === 'workflow' ? 'text-white border-b-2 border-purple-500' : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              <GitBranch className="w-3.5 h-3.5" /> Workflow
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Logs panel */}
+                        {(!runDetails[run.id]?.executionState?.workflowVersion || (activeTab[run.id] || 'logs') === 'logs') && (
+                          <>
+                            {!runDetails[run.id]?.executionState?.workflowVersion && (
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+                                <Terminal className="w-4 h-4 text-zinc-500" />
+                                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Run Logs</span>
+                                {run.status === 'RUNNING' && (
+                                  <span className="flex items-center gap-1 text-xs text-blue-400">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Live
+                                  </span>
+                                )}
                               </div>
-                            ))
-                          )}
-                        </div>
+                            )}
+                            <div className="p-3 max-h-64 overflow-y-auto overflow-x-auto font-mono text-xs leading-relaxed">
+                              {logsLoading[run.id] ? (
+                                <div className="flex items-center gap-2 text-zinc-500">
+                                  <Loader2 className="w-4 h-4 animate-spin" /> Loading logs...
+                                </div>
+                              ) : !logs[run.id] || logs[run.id].length === 0 ? (
+                                <span className="text-zinc-600">No logs available for this run.</span>
+                              ) : (
+                                logs[run.id].map((log) => (
+                                  <div key={log.id} className="flex gap-2 py-0.5">
+                                    <span className={`shrink-0 w-12 text-right ${LOG_STREAM_COLORS[log.stream] || 'text-zinc-400'}`}>
+                                      [{log.stream}]
+                                    </span>
+                                    <span className={LOG_STREAM_COLORS[log.stream] || 'text-zinc-400'}>
+                                      {log.content}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+
+                        {/* Workflow panel */}
+                        {activeTab[run.id] === 'workflow' && runDetails[run.id]?.executionState?.workflowVersion && (
+                          <div className="p-3">
+                            {detailsLoading[run.id] ? (
+                              <div className="flex items-center gap-2 text-zinc-500 py-8 justify-center">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Loading workflow...
+                              </div>
+                            ) : (
+                              <WorkflowExecutionViewer
+                                nodes={runDetails[run.id].executionState!.workflowVersion!.nodes as Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>}
+                                edges={runDetails[run.id].executionState!.workflowVersion!.edges as Array<{ id: string; source: string; target: string; sourceHandle?: string; label?: string }>}
+                                currentNodeId={runDetails[run.id].executionState!.currentNodeId}
+                                completedNodes={runDetails[run.id].executionState!.completedNodes}
+                                status={runDetails[run.id].executionState!.status}
+                                events={runDetails[run.id].executionState!.events}
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -370,7 +446,7 @@ export default function RunsPage() {
                     </div>
 
                     {/* Status */}
-                    <div className="flex items-center">
+                    <div className="flex items-center gap-1">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white ${
                           STATUS_COLORS[run.status] || 'bg-zinc-600'
@@ -381,6 +457,7 @@ export default function RunsPage() {
                         )}
                         {run.status}
                       </span>
+                      <WorkflowBadge run={run} />
                     </div>
 
                     {/* Tokens */}
@@ -430,61 +507,91 @@ export default function RunsPage() {
                     </div>
                   </div>
 
-                  {/* Expanded Logs Panel */}
+                  {/* Expanded Panel */}
                   {isExpanded && (
                     <div className="border-b border-zinc-800/50">
                       <div className="mx-4 my-3 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-                        {/* Logs Header */}
-                        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
-                          <Terminal className="w-4 h-4 text-zinc-500" />
-                          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                            Run Logs
-                          </span>
-                          {run.status === 'RUNNING' && (
-                            <span className="flex items-center gap-1 text-xs text-blue-400">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Live
-                            </span>
-                          )}
-                        </div>
+                        {/* Tabs header (only show if workflow data available) */}
+                        {runDetails[run.id]?.executionState?.workflowVersion && (
+                          <div className="flex border-b border-zinc-800 bg-zinc-900/50">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveTab((prev) => ({ ...prev, [run.id]: 'logs' })); }}
+                              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
+                                (activeTab[run.id] || 'logs') === 'logs' ? 'text-white border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              <Terminal className="w-3.5 h-3.5" /> Logs
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveTab((prev) => ({ ...prev, [run.id]: 'workflow' })); }}
+                              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
+                                activeTab[run.id] === 'workflow' ? 'text-white border-b-2 border-purple-500' : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              <GitBranch className="w-3.5 h-3.5" /> Workflow
+                            </button>
+                          </div>
+                        )}
 
-                        {/* Logs Content */}
-                        <div className="p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">
-                          {logsLoading[run.id] ? (
-                            <div className="flex items-center gap-2 text-zinc-500">
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Loading logs...
-                            </div>
-                          ) : !logs[run.id] || logs[run.id].length === 0 ? (
-                            <span className="text-zinc-600">
-                              No logs available for this run.
-                            </span>
-                          ) : (
-                            logs[run.id].map((log) => (
-                              <div key={log.id} className="flex gap-3 py-0.5">
-                                <span className="text-zinc-600 shrink-0 select-none w-20 text-right">
-                                  {new Date(log.createdAt).toLocaleTimeString()}
-                                </span>
-                                <span
-                                  className={`shrink-0 w-16 text-right ${
-                                    LOG_STREAM_COLORS[log.stream] ||
-                                    'text-zinc-400'
-                                  }`}
-                                >
-                                  [{log.stream}]
-                                </span>
-                                <span
-                                  className={
-                                    LOG_STREAM_COLORS[log.stream] ||
-                                    'text-zinc-400'
-                                  }
-                                >
-                                  {log.content}
-                                </span>
+                        {/* Logs panel */}
+                        {(!runDetails[run.id]?.executionState?.workflowVersion || (activeTab[run.id] || 'logs') === 'logs') && (
+                          <>
+                            {!runDetails[run.id]?.executionState?.workflowVersion && (
+                              <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
+                                <Terminal className="w-4 h-4 text-zinc-500" />
+                                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Run Logs</span>
+                                {run.status === 'RUNNING' && (
+                                  <span className="flex items-center gap-1 text-xs text-blue-400">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Live
+                                  </span>
+                                )}
                               </div>
-                            ))
-                          )}
-                        </div>
+                            )}
+                            <div className="p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">
+                              {logsLoading[run.id] ? (
+                                <div className="flex items-center gap-2 text-zinc-500">
+                                  <Loader2 className="w-4 h-4 animate-spin" /> Loading logs...
+                                </div>
+                              ) : !logs[run.id] || logs[run.id].length === 0 ? (
+                                <span className="text-zinc-600">No logs available for this run.</span>
+                              ) : (
+                                logs[run.id].map((log) => (
+                                  <div key={log.id} className="flex gap-3 py-0.5">
+                                    <span className="text-zinc-600 shrink-0 select-none w-20 text-right">
+                                      {new Date(log.createdAt).toLocaleTimeString()}
+                                    </span>
+                                    <span className={`shrink-0 w-16 text-right ${LOG_STREAM_COLORS[log.stream] || 'text-zinc-400'}`}>
+                                      [{log.stream}]
+                                    </span>
+                                    <span className={LOG_STREAM_COLORS[log.stream] || 'text-zinc-400'}>
+                                      {log.content}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+
+                        {/* Workflow panel */}
+                        {activeTab[run.id] === 'workflow' && runDetails[run.id]?.executionState?.workflowVersion && (
+                          <div className="p-4">
+                            {detailsLoading[run.id] ? (
+                              <div className="flex items-center gap-2 text-zinc-500 py-8 justify-center">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Loading workflow...
+                              </div>
+                            ) : (
+                              <WorkflowExecutionViewer
+                                nodes={runDetails[run.id].executionState!.workflowVersion!.nodes as Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>}
+                                edges={runDetails[run.id].executionState!.workflowVersion!.edges as Array<{ id: string; source: string; target: string; sourceHandle?: string; label?: string }>}
+                                currentNodeId={runDetails[run.id].executionState!.currentNodeId}
+                                completedNodes={runDetails[run.id].executionState!.completedNodes}
+                                status={runDetails[run.id].executionState!.status}
+                                events={runDetails[run.id].executionState!.events}
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

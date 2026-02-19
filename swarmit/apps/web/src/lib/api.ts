@@ -78,9 +78,16 @@ export interface TaskRun {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  task?: { id: string; title: string };
+  task?: { id: string; title: string; assignee?: { name: string } | null };
   logs?: TaskLog[];
-  executionState?: unknown;
+  executionState?: {
+    status: string;
+    currentNodeId: string | null;
+    completedNodes: string[];
+    workflowVersionId: string;
+    events?: Array<{ id: string; nodeId: string; type: string; nodeLabel: string | null; createdAt: string }>;
+    workflowVersion?: { nodes: unknown; edges: unknown };
+  } | null;
 }
 
 export interface TaskLog {
@@ -340,6 +347,9 @@ export interface DashboardData {
   runs: { total: number; totalTokens: number; totalCost: number };
   projects: Array<{ status: string; _count: number }>;
   recentRuns: TaskRun[];
+  projectProgress?: Array<{ id: string; title: string; total: number; done: number }>;
+  agentActivity?: Array<{ agentType: string; _count: number; _sum: { tokens: number | null; cost: number | null } }>;
+  costByProject?: Array<{ id: string; title: string; totalCost: number }>;
 }
 
 export const dashboard = {

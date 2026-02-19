@@ -680,20 +680,10 @@ export async function executeTool(
       try {
         const token = await getGitHubToken(context.prisma, context.userId);
         if (!token) return 'No GitHub token configured.';
-        const response = await fetch(`https://api.github.com/repos/${repo}/pulls`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github+json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ title, body, head, base }),
-        });
-        if (!response.ok) {
-          const text = await response.text();
-          return `Error creating PR: ${response.status} ${text}`;
-        }
-        const pr = await response.json() as { html_url: string; number: number };
+        const { createGitHubClient } = await import('@swarmit/integrations');
+        const client = createGitHubClient(token);
+        const [owner, repoName] = repo.split('/');
+        const pr = await client.createPullRequest(owner, repoName, title, body, head, base);
         return `Pull request created: #${pr.number} — ${pr.html_url}`;
       } catch (err) {
         return `Error creating PR: ${String(err)}`;
@@ -799,12 +789,8 @@ export async function executeTool(
         if (!token) return 'No Railway token configured.';
         const { createRailwayClient } = await import('@swarmit/integrations');
         const client = createRailwayClient(token);
-        const data = await client.query(`
-          mutation ($serviceId: String!, $environmentId: String!) {
-            serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
-          }
-        `, { serviceId, environmentId });
-        return `Redeployment triggered. ${JSON.stringify(data)}`;
+        await client.redeployService(serviceId, environmentId);
+        return 'Redeployment triggered successfully.';
       } catch (err) {
         return `Error triggering deployment: ${String(err)}`;
       }

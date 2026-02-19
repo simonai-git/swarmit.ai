@@ -20,6 +20,7 @@ export interface GitHubClient {
   getRef(owner: string, repo: string, ref: string): Promise<{ sha: string } | null>;
   createRef(owner: string, repo: string, ref: string, sha: string): Promise<void>;
   pushFiles(repoFullName: string, files: Array<{ path: string; content: string }>, commitMessage: string, branch?: string): Promise<{ sha: string }>;
+  createPullRequest(owner: string, repo: string, title: string, body: string, head: string, base?: string): Promise<{ number: number; html_url: string }>;
 }
 
 export interface TreeItem {
@@ -181,6 +182,14 @@ export function createGitHubClient(token: string): GitHubClient {
 
       logger.info({ repoFullName, sha: commit.sha.slice(0, 8), branch }, 'Push complete');
       return { sha: commit.sha };
+    },
+
+    async createPullRequest(owner, repo, title, body, head, base = 'main') {
+      const data = await githubFetch(`/repos/${owner}/${repo}/pulls`, {
+        method: 'POST',
+        body: JSON.stringify({ title, body, head, base }),
+      }) as { number: number; html_url: string };
+      return { number: data.number, html_url: data.html_url };
     },
   };
 }

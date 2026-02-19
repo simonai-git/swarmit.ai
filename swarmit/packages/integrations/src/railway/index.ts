@@ -11,6 +11,7 @@ export interface RailwayClient {
   createProject(name: string): Promise<{ projectId: string; environmentId: string }>;
   createServiceFromRepo(projectId: string, environmentId: string, repoFullName: string): Promise<string>;
   generateDomain(serviceId: string, environmentId: string): Promise<string>;
+  redeployService(serviceId: string, environmentId: string): Promise<boolean>;
 }
 
 export interface RailwayDeployResult {
@@ -146,6 +147,15 @@ export function createRailwayClient(token: string): RailwayClient {
       const domain = data.serviceDomainCreate.domain;
       logger.info({ serviceId, domain }, 'Railway domain generated');
       return domain;
+    },
+
+    async redeployService(serviceId, environmentId) {
+      await railwayFetch(`
+        mutation ($serviceId: String!, $environmentId: String!) {
+          serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+        }
+      `, { serviceId, environmentId });
+      return true;
     },
   };
 }

@@ -11,6 +11,8 @@ import {
   Clock,
   Coins,
   Loader2,
+  BarChart3,
+  Users,
 } from 'lucide-react';
 import { api, type DashboardData } from '@/lib/api';
 
@@ -225,6 +227,119 @@ export default function DashboardPage() {
           />
         </div>
 
+        {/* Project Progress & Agent Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+          {/* Project Progress */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-800">
+              <FolderOpen className="w-4 h-4 text-purple-400" />
+              <h2 className="text-base font-semibold text-white">Project Progress</h2>
+            </div>
+            {!data.projectProgress || data.projectProgress.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-zinc-500 text-sm">No active projects</p>
+              </div>
+            ) : (
+              <div className="p-4 space-y-3">
+                {data.projectProgress.map((proj) => {
+                  const pct = proj.total > 0 ? Math.round((proj.done / proj.total) * 100) : 0;
+                  return (
+                    <div key={proj.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-zinc-300 truncate">{proj.title}</span>
+                        <span className="text-xs text-zinc-500 shrink-0 ml-2">{proj.done}/{proj.total} tasks</span>
+                      </div>
+                      <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-green-600 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Agent Activity */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-800">
+              <Users className="w-4 h-4 text-blue-400" />
+              <h2 className="text-base font-semibold text-white">Agent Activity</h2>
+            </div>
+            {!data.agentActivity || data.agentActivity.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-zinc-500 text-sm">No agent activity yet</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-zinc-800">
+                      <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-2">Agent Type</th>
+                      <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-2">Runs</th>
+                      <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-2 hidden sm:table-cell">Tokens</th>
+                      <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-2">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/50">
+                    {data.agentActivity.map((agent) => (
+                      <tr key={agent.agentType} className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="px-4 py-2">
+                          <span className="flex items-center gap-1.5 text-sm text-zinc-300 capitalize">
+                            <Bot className="w-3.5 h-3.5 text-zinc-500" />
+                            {agent.agentType}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm text-zinc-400">{agent._count}</td>
+                        <td className="px-4 py-2 text-right text-sm text-zinc-400 hidden sm:table-cell">
+                          {agent._sum.tokens != null ? formatTokens(agent._sum.tokens) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm text-zinc-400">
+                          {agent._sum.cost != null ? formatCost(agent._sum.cost) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Cost by Project */}
+        {data.costByProject && data.costByProject.length > 0 && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl mb-8">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-800">
+              <BarChart3 className="w-4 h-4 text-yellow-400" />
+              <h2 className="text-base font-semibold text-white">Cost by Project</h2>
+            </div>
+            <div className="p-4 space-y-3">
+              {(() => {
+                const maxCost = Math.max(...data.costByProject!.map((p) => p.totalCost), 1);
+                return data.costByProject!.map((proj) => {
+                  const pct = Math.round((proj.totalCost / maxCost) * 100);
+                  return (
+                    <div key={proj.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-zinc-300 truncate">{proj.title}</span>
+                        <span className="text-xs text-zinc-400 shrink-0 ml-2 tabular-nums">{formatCost(proj.totalCost)}</span>
+                      </div>
+                      <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-yellow-600 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Recent Runs table */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
           <div className="px-5 py-4 border-b border-zinc-800">
@@ -246,7 +361,7 @@ export default function DashboardPage() {
                       Task
                     </th>
                     <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3">
-                      Agent Type
+                      Agent
                     </th>
                     <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-3 md:px-5 py-3">
                       Status
@@ -273,7 +388,7 @@ export default function DashboardPage() {
                       <td className="px-3 md:px-5 py-3">
                         <span className="flex items-center gap-1.5 text-sm text-zinc-400">
                           <Bot className="w-3.5 h-3.5" />
-                          {run.agentType}
+                          {run.task?.assignee?.name || run.agentType}
                         </span>
                       </td>
                       <td className="px-3 md:px-5 py-3">

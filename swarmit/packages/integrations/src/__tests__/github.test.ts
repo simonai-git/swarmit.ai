@@ -443,6 +443,43 @@ describe('GitHubClient', () => {
     });
   });
 
+  describe('createPullRequest', () => {
+    it('sends correct body and returns number + html_url', async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockJsonResponse({ number: 42, html_url: 'https://github.com/owner/repo/pull/42', extra: 'ignored' })
+      );
+
+      const result = await client.createPullRequest('owner', 'repo', 'My PR', 'PR body', 'feature-branch', 'main');
+
+      expect(result).toEqual({ number: 42, html_url: 'https://github.com/owner/repo/pull/42' });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.github.com/repos/owner/repo/pulls',
+        expect.objectContaining({ method: 'POST' })
+      );
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody).toEqual({ title: 'My PR', body: 'PR body', head: 'feature-branch', base: 'main' });
+    });
+
+    it('defaults base to main', async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockJsonResponse({ number: 1, html_url: 'https://github.com/o/r/pull/1' })
+      );
+
+      await client.createPullRequest('o', 'r', 'title', 'body', 'head');
+
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.base).toBe('main');
+    });
+
+    it('throws on error', async () => {
+      mockFetch.mockResolvedValueOnce(mockErrorResponse(422, 'Validation failed'));
+
+      await expect(
+        client.createPullRequest('o', 'r', 'title', 'body', 'head')
+      ).rejects.toThrow('GitHub API error: 422');
+    });
+  });
+
   describe('error handling', () => {
     it('includes status and body in error message', async () => {
       mockFetch.mockResolvedValueOnce(
