@@ -6,6 +6,8 @@ const { mockApiProfile, mockApiIntegrations } = vi.hoisted(() => ({
   mockApiProfile: {
     get: vi.fn(),
     update: vi.fn(),
+    getAutomation: vi.fn(),
+    updateAutomation: vi.fn(),
   },
   mockApiIntegrations: {
     listTokens: vi.fn(),
@@ -27,6 +29,11 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+// Mock next/navigation
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(''),
+}));
+
 // Mock ClaudeOAuthModal to a controllable stub
 vi.mock('@/components/ClaudeOAuthModal', () => ({
   default: ({ open, onClose, onConnected }: { open: boolean; onClose: () => void; onConnected: () => void }) => {
@@ -40,7 +47,7 @@ vi.mock('@/components/ClaudeOAuthModal', () => ({
   },
 }));
 
-import ProfilePage from '../app/profile/page';
+import SettingsPage from '../app/settings/page';
 
 function createProfile(overrides = {}) {
   return {
@@ -60,31 +67,39 @@ describe('Profile page — Claude API Key card', () => {
     vi.clearAllMocks();
     // Default: no tokens
     mockApiIntegrations.listTokens.mockResolvedValue({ tokens: [] });
+    // Default: automation settings
+    mockApiProfile.getAutomation.mockResolvedValue({
+      autoAssign: false,
+      autoSpawn: false,
+      defaultModel: 'claude-sonnet-4-20250514',
+      maxConcurrentAgents: 3,
+      dailyBudgetCents: 1000,
+    });
   });
 
   it('shows unified card with OAuth button + divider + API key input when no key or OAuth connected', async () => {
     mockApiProfile.get.mockResolvedValue(createProfile());
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     // Switch to integrations tab
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
-      expect(screen.getByText('Claude API Key')).toBeInTheDocument();
+      expect(screen.getByText('Claude AI')).toBeInTheDocument();
     });
 
     // Single card with OAuth button
     expect(screen.getByRole('button', { name: /Connect with Claude/i })).toBeInTheDocument();
 
-    // "or" divider
-    expect(screen.getByText('or')).toBeInTheDocument();
+    // "or paste API key" divider
+    expect(screen.getByText('or paste API key')).toBeInTheDocument();
 
     // Paste API key input
-    expect(screen.getByPlaceholderText('sk-ant-api...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('sk-ant-... or OAT token')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Save/i })).toBeInTheDocument();
 
     // NO separate "Claude AI (OAuth)" card heading
@@ -97,12 +112,12 @@ describe('Profile page — Claude API Key card', () => {
       tokens: [{ id: 't-1', provider: 'anthropic', createdAt: '', updatedAt: '' }],
     });
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
       expect(screen.getByText('Connected via OAuth')).toBeInTheDocument();
@@ -110,26 +125,27 @@ describe('Profile page — Claude API Key card', () => {
 
     // Should hide OAuth button and paste input when already connected
     expect(screen.queryByRole('button', { name: /Connect with Claude/i })).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('sk-ant-api...')).not.toBeInTheDocument();
-    expect(screen.queryByText('or')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('sk-ant-... or OAT token')).not.toBeInTheDocument();
+    expect(screen.queryByText('or paste API key')).not.toBeInTheDocument();
   });
 
   it('shows masked API key when manual key is set (no OAuth)', async () => {
     mockApiProfile.get.mockResolvedValue(createProfile({ claudeApiKey: 'sk-ant-api...abcd' }));
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
+    // Settings page masks the key: first 8 chars + 20 asterisks
     await waitFor(() => {
-      expect(screen.getByText('sk-ant-api...abcd')).toBeInTheDocument();
+      expect(screen.getByText('sk-ant-a' + '*'.repeat(20))).toBeInTheDocument();
     });
 
-    // Disconnect button for manual key
-    expect(screen.getByRole('button', { name: /Disconnect/i })).toBeInTheDocument();
+    // Remove button for manual key
+    expect(screen.getByRole('button', { name: /Remove/i })).toBeInTheDocument();
 
     // OAuth button should still be visible (can upgrade to OAuth)
     expect(screen.getByRole('button', { name: /Connect with Claude/i })).toBeInTheDocument();
@@ -141,12 +157,12 @@ describe('Profile page — Claude API Key card', () => {
       tokens: [{ id: 't-1', provider: 'anthropic', createdAt: '', updatedAt: '' }],
     });
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
       expect(screen.getByText('Connected via OAuth')).toBeInTheDocument();
@@ -159,12 +175,12 @@ describe('Profile page — Claude API Key card', () => {
   it('opens OAuth modal when Connect with Claude is clicked', async () => {
     mockApiProfile.get.mockResolvedValue(createProfile());
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Connect with Claude/i })).toBeInTheDocument();
@@ -179,18 +195,18 @@ describe('Profile page — Claude API Key card', () => {
     mockApiProfile.get.mockResolvedValue(createProfile());
     mockApiProfile.update.mockResolvedValue({ success: true });
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('sk-ant-api...')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('sk-ant-... or OAT token')).toBeInTheDocument();
     });
 
-    const input = screen.getByPlaceholderText('sk-ant-api...');
+    const input = screen.getByPlaceholderText('sk-ant-... or OAT token');
     fireEvent.change(input, { target: { value: 'sk-ant-api03-mykey123' } });
     fireEvent.click(screen.getByRole('button', { name: /Save/i }));
 
@@ -209,12 +225,12 @@ describe('Profile page — Claude API Key card', () => {
       .mockResolvedValueOnce({ tokens: [] });
     mockApiIntegrations.deleteToken.mockResolvedValue({ success: true });
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
       expect(screen.getByText('Connected via OAuth')).toBeInTheDocument();
@@ -241,12 +257,12 @@ describe('Profile page — Claude API Key card', () => {
   it('card description mentions OAuth and paste options', async () => {
     mockApiProfile.get.mockResolvedValue(createProfile());
 
-    render(<ProfilePage />);
+    render(<SettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Integrations')).toBeInTheDocument();
+      expect(screen.getByText('integrations')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Integrations'));
+    fireEvent.click(screen.getByText('integrations'));
 
     await waitFor(() => {
       expect(screen.getByText(/Connect via OAuth or paste an API key/)).toBeInTheDocument();

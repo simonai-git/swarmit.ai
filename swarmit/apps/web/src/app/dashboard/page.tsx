@@ -13,8 +13,9 @@ import {
   Loader2,
   BarChart3,
   Users,
+  AlertTriangle,
 } from 'lucide-react';
-import { api, type DashboardData } from '@/lib/api';
+import { api, type DashboardData, type CostSummary } from '@/lib/api';
 
 const RUN_STATUS_COLORS: Record<string, string> = {
   QUEUED: 'bg-zinc-500/20 text-zinc-400',
@@ -88,6 +89,7 @@ function StatCard({ title, value, subtitle, icon, iconColor }: StatCardProps) {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [budget, setBudget] = useState<CostSummary['budget'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +97,12 @@ export default function DashboardPage() {
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const result = await api.dashboard.get();
+      const [result, costResult] = await Promise.all([
+        api.dashboard.get(),
+        api.costs.get().catch(() => null),
+      ]);
       setData(result);
+      if (costResult) setBudget(costResult.budget);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch dashboard:', err);
@@ -194,6 +200,30 @@ export default function DashboardPage() {
             Refresh
           </button>
         </div>
+
+        {/* Budget warning banner */}
+        {budget && budget.dailyLimitCents > 0 && (() => {
+          const pct = Math.round((budget.todaySpendCents / budget.dailyLimitCents) * 100);
+          if (pct < 80) return null;
+          const isCritical = pct >= 100;
+          return (
+            <div className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-6 ${
+              isCritical
+                ? 'bg-red-500/10 border border-red-500/30 text-red-400'
+                : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+            }`}>
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <div className="flex-1">
+                <span className="text-sm font-medium">
+                  {isCritical ? 'Daily budget exceeded' : 'Budget warning'}
+                </span>
+                <span className="text-sm ml-2">
+                  {formatCost(budget.todaySpendCents)} / {formatCost(budget.dailyLimitCents)} ({pct}%)
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Stat cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

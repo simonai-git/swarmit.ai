@@ -76,16 +76,50 @@ async function cleanupOldLogs(): Promise<void> {
 }
 
 /**
- * Check if any user has exceeded their daily budget and disable autoSpawn.
+ * Helper to create a budget notification with deduplication.
+ */
+async function createBudgetNotification(
+  userId: string,
+  todayStart: Date,
+  title: string,
+  message: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  // Deduplicate: skip if a notification with same level already exists today
+  const existing = await prisma.notification.findFirst({
+    where: {
+      userId,
+      type: 'BUDGET_EXCEEDED',
+      createdAt: { gte: todayStart },
+      metadata: { path: ['level'], equals: metadata.level as string },
+    },
+  });
+
+  if (existing) return;
+
+  await prisma.notification.create({
+    data: {
+      userId,
+      type: 'BUDGET_EXCEEDED' as any,
+      title,
+      message,
+      metadata: metadata as any,
+    },
+  });
+
+  logger.info({ userId, level: metadata.level }, 'Budget notification created');
+}
+
+/**
+ * Check if any user has exceeded their daily budget and send notifications.
  */
 async function checkBudgetExceeded(): Promise<void> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  // Get all users with automation settings
+  // Get ALL users with automation settings (not just autoSpawn=true)
   const settings = await prisma.automationSetting.findMany({
-    where: { autoSpawn: true },
-    select: { userId: true, dailyBudgetCents: true },
+    select: { userId: true, dailyBudgetCents: true, autoSpawn: true },
   });
 
   for (const setting of settings) {
@@ -99,16 +133,39 @@ async function checkBudgetExceeded(): Promise<void> {
     });
 
     const todaySpendCents = Math.round((_sum.cost || 0) * 100);
+    const budgetPercent = setting.dailyBudgetCents > 0
+      ? Math.round((todaySpendCents / setting.dailyBudgetCents) * 100)
+      : 0;
 
     if (todaySpendCents >= setting.dailyBudgetCents) {
-      await prisma.automationSetting.update({
-        where: { userId: setting.userId },
-        data: { autoSpawn: false },
-      });
+      // 100%: disable autoSpawn + critical notification
+      if (setting.autoSpawn) {
+        await prisma.automationSetting.update({
+          where: { userId: setting.userId },
+          data: { autoSpawn: false },
+        });
+      }
+
+      await createBudgetNotification(
+        setting.userId,
+        todayStart,
+        'Daily budget exceeded',
+        `Your daily spend ($${(todaySpendCents / 100).toFixed(2)}) has exceeded your budget ($${(setting.dailyBudgetCents / 100).toFixed(2)}). Auto-spawn has been disabled.`,
+        { level: 'critical', budgetPercent },
+      );
 
       logger.info(
         { userId: setting.userId, todaySpendCents, dailyBudgetCents: setting.dailyBudgetCents },
         'Budget exceeded — autoSpawn disabled'
+      );
+    } else if (budgetPercent >= 80) {
+      // 80%: warning notification
+      await createBudgetNotification(
+        setting.userId,
+        todayStart,
+        'Budget warning: 80% spent',
+        `You have used $${(todaySpendCents / 100).toFixed(2)} of your $${(setting.dailyBudgetCents / 100).toFixed(2)} daily budget (${budgetPercent}%).`,
+        { level: 'warning', budgetPercent },
       );
     }
   }

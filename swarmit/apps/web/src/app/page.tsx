@@ -28,10 +28,10 @@ import {
   FileText,
   Loader2,
   GripVertical,
-  Send,
   Trash2,
 } from 'lucide-react';
 import { api, type Task, type TaskComment, type TaskLog } from '@/lib/api';
+import TaskComments from '@/components/TaskComments';
 import {
   useTaskUpdates,
   useTaskLogs,
@@ -341,6 +341,156 @@ function CreateTaskForm({
   );
 }
 
+// ─── Dependencies Section ───────────────────────────────────
+
+function DependenciesSection({ task, onUpdated }: { task: Task; onUpdated: () => void }) {
+  const [showAddDep, setShowAddDep] = useState(false);
+  const [projectTasks, setProjectTasks] = useState<Task[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+
+  const existingDepIds = new Set([
+    ...(task.dependsOn?.map(d => d.dependsOn.id) ?? []),
+    task.id,
+  ]);
+
+  const fetchProjectTasks = async () => {
+    if (projectTasks.length > 0) {
+      setShowAddDep(true);
+      return;
+    }
+    setLoadingTasks(true);
+    try {
+      const params: { limit: number; projectId?: string } = { limit: 100 };
+      if (task.projectId) params.projectId = task.projectId;
+      const data = await api.tasks.list(params);
+      setProjectTasks(data.tasks.filter(t => !existingDepIds.has(t.id)));
+      setShowAddDep(true);
+    } catch (err) {
+      console.error('Failed to fetch tasks:', err);
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const handleRemoveDep = async (depId: string) => {
+    try {
+      await api.tasks.removeDependency(task.id, depId);
+      onUpdated();
+    } catch (err) {
+      console.error('Failed to remove dependency:', err);
+    }
+  };
+
+  const handleAddDep = async (selectedId: string) => {
+    try {
+      await api.tasks.addDependency(task.id, selectedId);
+      setShowAddDep(false);
+      setProjectTasks([]);
+      onUpdated();
+    } catch (err) {
+      console.error('Failed to add dependency:', err);
+    }
+  };
+
+  const hasDeps = task.dependsOn && task.dependsOn.length > 0;
+  const hasReverseDeps = task.dependedOnBy && task.dependedOnBy.length > 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Depends On */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+            Depends On
+          </h3>
+          <button
+            onClick={fetchProjectTasks}
+            disabled={loadingTasks}
+            className="text-xs text-blue-400 hover:text-blue-300"
+          >
+            {loadingTasks ? 'Loading...' : '+ Add'}
+          </button>
+        </div>
+        {!hasDeps && !showAddDep && (
+          <p className="text-sm text-zinc-600 italic">No dependencies</p>
+        )}
+        {hasDeps && (
+          <div className="space-y-1.5">
+            {task.dependsOn!.map((dep) => (
+              <div
+                key={dep.dependsOn.id}
+                className="group flex items-center gap-2 text-sm px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    dep.dependsOn.status === 'DONE' ? 'bg-green-500' : 'bg-zinc-500'
+                  }`}
+                />
+                <span className="text-zinc-300 truncate">{dep.dependsOn.title}</span>
+                <span className="text-xs text-zinc-600 ml-auto shrink-0">{dep.dependsOn.status}</span>
+                <button
+                  onClick={() => handleRemoveDep(dep.id)}
+                  className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all shrink-0"
+                  title="Remove dependency"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {showAddDep && (
+          <div className="mt-2">
+            <select
+              onChange={(e) => {
+                if (e.target.value) handleAddDep(e.target.value);
+              }}
+              className="w-full px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              defaultValue=""
+            >
+              <option value="" disabled>Select a task...</option>
+              {projectTasks.map(t => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowAddDep(false)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 mt-1"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Required By (reverse deps) */}
+      {hasReverseDeps && (
+        <div>
+          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+            Required By
+          </h3>
+          <div className="space-y-1.5">
+            {task.dependedOnBy!.map((dep) => (
+              <div
+                key={dep.task.id}
+                className="flex items-center gap-2 text-sm px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    dep.task.status === 'DONE' ? 'bg-green-500' : 'bg-zinc-500'
+                  }`}
+                />
+                <span className="text-zinc-300 truncate">{dep.task.title}</span>
+                <span className="text-xs text-zinc-600 ml-auto shrink-0">{dep.task.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Task Detail Panel ──────────────────────────────────────
 
 function TaskDetailPanel({
@@ -356,8 +506,6 @@ function TaskDetailPanel({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(task.title);
   const [comments, setComments] = useState<TaskComment[]>([]);
-  const [newComment, setNewComment] = useState('');
-  const [addingComment, setAddingComment] = useState(false);
   const [logs, setLogs] = useState<TaskLog[]>([]);
   const [liveLogs, setLiveLogs] = useState<TaskLogEvent[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -434,25 +582,6 @@ function TaskDetailPanel({
       }
     } else {
       setTitleValue(fullTask.title);
-    }
-  };
-
-  // Add comment
-  const handleAddComment = async () => {
-    if (!newComment.trim()) return;
-    setAddingComment(true);
-    try {
-      const comment = await api.tasks.addComment(fullTask.id, {
-        author: 'User',
-        content: newComment.trim(),
-      });
-      setComments((prev) => [...prev, comment]);
-      setNewComment('');
-      onUpdated();
-    } catch (err) {
-      console.error('Failed to add comment:', err);
-    } finally {
-      setAddingComment(false);
     }
   };
 
@@ -674,35 +803,16 @@ function TaskDetailPanel({
               </div>
 
               {/* Dependencies */}
-              {fullTask.dependsOn && fullTask.dependsOn.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                    Dependencies
-                  </h3>
-                  <div className="space-y-1.5">
-                    {fullTask.dependsOn.map((dep) => (
-                      <div
-                        key={dep.dependsOn.id}
-                        className="flex items-center gap-2 text-sm px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg"
-                      >
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 ${
-                            dep.dependsOn.status === 'DONE'
-                              ? 'bg-green-500'
-                              : 'bg-zinc-500'
-                          }`}
-                        />
-                        <span className="text-zinc-300 truncate">
-                          {dep.dependsOn.title}
-                        </span>
-                        <span className="text-xs text-zinc-600 ml-auto shrink-0">
-                          {dep.dependsOn.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <DependenciesSection
+                task={fullTask}
+                onUpdated={() => {
+                  api.tasks.get(task.id).then((t) => {
+                    setFullTask(t);
+                    if (t.comments) setComments(t.comments);
+                  }).catch(console.error);
+                  onUpdated();
+                }}
+              />
 
               {/* Blocked badge */}
               {fullTask.isBlocked && (
@@ -713,62 +823,11 @@ function TaskDetailPanel({
               )}
 
               {/* Comments */}
-              <div>
-                <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                  Comments
-                </h3>
-
-                {comments.length === 0 && (
-                  <p className="text-sm text-zinc-600 italic mb-3">
-                    No comments yet
-                  </p>
-                )}
-
-                <div className="space-y-3 mb-3">
-                  {comments.map((comment) => (
-                    <div
-                      key={comment.id}
-                      className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg"
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-medium text-zinc-300">
-                          {comment.author}
-                        </span>
-                        <span className="text-[10px] text-zinc-600">
-                          {new Date(comment.createdAt).toLocaleString()}
-                        </span>
-                      </div>
-                      <p className="text-sm text-zinc-400 whitespace-pre-wrap">
-                        {comment.content}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Add comment form */}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Add a comment..."
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddComment();
-                      }
-                    }}
-                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={handleAddComment}
-                    disabled={addingComment || !newComment.trim()}
-                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors shrink-0"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+              <TaskComments
+                taskId={fullTask.id}
+                comments={comments}
+                onCommentAdded={onUpdated}
+              />
             </div>
           ) : (
             /* Logs tab */

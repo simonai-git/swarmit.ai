@@ -196,9 +196,11 @@ function createMockPrisma() {
     },
     notification: {
       create: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
       updateMany: vi.fn(),
+      deleteMany: vi.fn(),
     },
     integrationToken: {
       findMany: vi.fn(),

@@ -125,6 +125,26 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Delete a single notification.
+   */
+  async deleteNotification(id: string, userId: string) {
+    if (!this.prisma) return;
+    await this.prisma.notification.deleteMany({
+      where: { id, userId },
+    });
+  }
+
+  /**
+   * Delete all notifications for a user.
+   */
+  async deleteAllNotifications(userId: string) {
+    if (!this.prisma) return;
+    await this.prisma.notification.deleteMany({
+      where: { userId },
+    });
+  }
+
   // Legacy ntfy-only methods for backward compatibility
 
   async sendTaskNotification(payload: {
