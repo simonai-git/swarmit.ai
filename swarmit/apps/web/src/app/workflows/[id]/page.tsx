@@ -20,10 +20,11 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowLeft, Save, Upload, CheckCircle, AlertTriangle, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Save, Upload, CheckCircle, AlertTriangle, Trash2, Plus, History, RotateCcw, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { api, type Workflow } from '@/lib/api';
+import { api, type Workflow, type WorkflowVersion } from '@/lib/api';
+import { computeVersionDiff, formatDiffSummary } from '@/lib/workflow-diff';
 
 // ─── Custom Node Components ───────────────────────────────
 
@@ -112,6 +113,15 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [nodeCounter, setNodeCounter] = useState(1);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [viewingVersion, setViewingVersion] = useState<WorkflowVersion | null>(null);
+  const [restoringVersion, setRestoringVersion] = useState(false);
+
+  // Store the "live" nodes/edges so we can return from read-only view
+  const [liveNodes, setLiveNodes] = useState<Node[]>([]);
+  const [liveEdges, setLiveEdges] = useState<Edge[]>([]);
+
+  const isReadOnly = viewingVersion !== null;
 
   // Load workflow
   useEffect(() => {
@@ -141,6 +151,8 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
             return e;
           });
           setEdges(loadedEdges);
+          setLiveNodes(versionNodes || []);
+          setLiveEdges(loadedEdges);
           // Find highest existing node counter
           const maxNum = (versionNodes || []).reduce((max: number, n: Node) => {
             const match = n.id.match(/-(\d+)$/);
@@ -289,6 +301,11 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
     setSaving(true);
     try {
       await api.workflows.saveVersion(id, nodes, edges);
+      // Refetch to update versions list
+      const updated = await api.workflows.get(id);
+      setWorkflow(updated);
+      setLiveNodes(nodes);
+      setLiveEdges(edges);
       setHasUnsavedChanges(false);
       toast.success('Workflow saved');
     } catch (err) {
@@ -296,6 +313,54 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
       toast.error('Failed to save workflow');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleViewVersion = (version: WorkflowVersion) => {
+    const latestVersion = workflow?.versions?.[0];
+    if (latestVersion && version.id === latestVersion.id) {
+      // Viewing latest = back to live editing
+      handleBackToLatest();
+      return;
+    }
+    // Save current live state before switching to read-only
+    if (!viewingVersion) {
+      setLiveNodes(nodes);
+      setLiveEdges(edges);
+    }
+    setViewingVersion(version);
+    setNodes((version.nodes as Node[]) || []);
+    setEdges((version.edges as Edge[]) || []);
+    setSelectedNode(null);
+  };
+
+  const handleBackToLatest = () => {
+    setViewingVersion(null);
+    setNodes(liveNodes);
+    setEdges(liveEdges);
+  };
+
+  const handleRestoreVersion = async (version: WorkflowVersion) => {
+    if (!workflow) return;
+    setRestoringVersion(true);
+    try {
+      const versionNodes = (version.nodes as Node[]) || [];
+      const versionEdges = (version.edges as Edge[]) || [];
+      await api.workflows.saveVersion(id, versionNodes, versionEdges);
+      const updated = await api.workflows.get(id);
+      setWorkflow(updated);
+      setNodes(versionNodes);
+      setEdges(versionEdges);
+      setLiveNodes(versionNodes);
+      setLiveEdges(versionEdges);
+      setViewingVersion(null);
+      setHasUnsavedChanges(false);
+      toast.success(`Restored version ${version.version}`);
+    } catch (err) {
+      console.error('Failed to restore version:', err);
+      toast.error('Failed to restore version');
+    } finally {
+      setRestoringVersion(false);
     }
   };
 
@@ -382,40 +447,50 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           <div className="flex items-center gap-1 mr-4 border-r border-zinc-700 pr-4">
             <button
               onClick={() => addNode('instruction')}
-              className="px-3 py-1.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition-colors flex items-center gap-1"
+              disabled={isReadOnly}
+              className="px-3 py-1.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 disabled:opacity-50 rounded transition-colors flex items-center gap-1"
             >
               <Plus className="w-3 h-3" /> Step
             </button>
             <button
               onClick={() => addNode('condition')}
-              className="px-3 py-1.5 text-xs bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 rounded transition-colors flex items-center gap-1"
+              disabled={isReadOnly}
+              className="px-3 py-1.5 text-xs bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 disabled:opacity-50 rounded transition-colors flex items-center gap-1"
             >
               <Plus className="w-3 h-3" /> Condition
             </button>
             <button
               onClick={() => addNode('checkpoint')}
-              className="px-3 py-1.5 text-xs bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 rounded transition-colors flex items-center gap-1"
+              disabled={isReadOnly}
+              className="px-3 py-1.5 text-xs bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 disabled:opacity-50 rounded transition-colors flex items-center gap-1"
             >
               <Plus className="w-3 h-3" /> Checkpoint
             </button>
           </div>
 
           <button
+            onClick={() => setShowVersionHistory(!showVersionHistory)}
+            className={`px-3 py-1.5 text-sm ${showVersionHistory ? 'bg-zinc-600' : 'bg-zinc-700 hover:bg-zinc-600'} text-white rounded transition-colors flex items-center gap-1`}
+          >
+            <History className="w-4 h-4" /> History
+          </button>
+          <button
             onClick={handleValidate}
-            className="px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 text-white rounded transition-colors flex items-center gap-1"
+            disabled={isReadOnly}
+            className="px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded transition-colors flex items-center gap-1"
           >
             <CheckCircle className="w-4 h-4" /> Validate
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !hasUnsavedChanges}
+            disabled={saving || !hasUnsavedChanges || isReadOnly}
             className="px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white rounded transition-colors flex items-center gap-1"
           >
             <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}
           </button>
           <button
             onClick={handlePublish}
-            disabled={publishing}
+            disabled={publishing || isReadOnly}
             className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors flex items-center gap-1"
           >
             <Upload className="w-4 h-4" /> {publishing ? 'Publishing...' : 'Publish'}
@@ -441,18 +516,45 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
+      {/* Read-only viewing banner */}
+      {viewingVersion && (
+        <div className="flex items-center justify-between px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/30">
+          <span className="text-sm text-yellow-400">
+            Viewing v{viewingVersion.version} (read-only)
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleRestoreVersion(viewingVersion)}
+              disabled={restoringVersion}
+              className="px-3 py-1 text-xs bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 rounded transition-colors flex items-center gap-1"
+            >
+              <RotateCcw className="w-3 h-3" /> {restoringVersion ? 'Restoring...' : 'Restore this version'}
+            </button>
+            <button
+              onClick={handleBackToLatest}
+              className="px-3 py-1 text-xs bg-zinc-700 text-white hover:bg-zinc-600 rounded transition-colors"
+            >
+              Back to latest
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 flex">
         {/* Canvas */}
         <div className="flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={onNodeClick}
+            onNodesChange={isReadOnly ? undefined : onNodesChange}
+            onEdgesChange={isReadOnly ? undefined : onEdgesChange}
+            onConnect={isReadOnly ? undefined : onConnect}
+            onNodeClick={isReadOnly ? undefined : onNodeClick}
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
+            nodesDraggable={!isReadOnly}
+            nodesConnectable={!isReadOnly}
+            elementsSelectable={!isReadOnly}
             fitView
             className="bg-zinc-950"
             defaultEdgeOptions={{
@@ -477,8 +579,72 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           </ReactFlow>
         </div>
 
+        {/* Version history panel */}
+        {showVersionHistory && (
+          <div className="w-72 bg-zinc-900 border-l border-zinc-700 overflow-y-auto">
+            <div className="p-3 border-b border-zinc-700">
+              <h2 className="text-sm font-semibold text-white">Version History</h2>
+            </div>
+            <div className="divide-y divide-zinc-800">
+              {(workflow?.versions || []).map((version, idx) => {
+                const isLatest = idx === 0;
+                const isViewing = viewingVersion?.id === version.id;
+                const prevVersion = (workflow?.versions || [])[idx + 1];
+                const diffSummary = prevVersion
+                  ? formatDiffSummary(computeVersionDiff(
+                      (prevVersion.nodes as Array<{ id: string }>) || [],
+                      (prevVersion.edges as Array<{ id: string; source: string; target: string }>) || [],
+                      (version.nodes as Array<{ id: string }>) || [],
+                      (version.edges as Array<{ id: string; source: string; target: string }>) || [],
+                    ))
+                  : 'Initial version';
+
+                return (
+                  <button
+                    key={version.id}
+                    onClick={() => handleViewVersion(version)}
+                    className={`w-full text-left p-3 hover:bg-zinc-800/50 transition-colors ${
+                      isViewing ? 'bg-zinc-800' : ''
+                    } ${isLatest && !viewingVersion ? 'bg-zinc-800/30' : ''}`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-white">
+                        v{version.version}
+                        {isLatest && <span className="text-xs text-blue-400 ml-1">(latest)</span>}
+                      </span>
+                      {!isLatest && isViewing && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRestoreVersion(version);
+                          }}
+                          disabled={restoringVersion}
+                          className="text-xs text-yellow-400 hover:text-yellow-300"
+                          title="Restore this version"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-zinc-500">
+                      <Clock className="w-3 h-3" />
+                      {new Date(version.createdAt).toLocaleDateString(undefined, {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                      })}
+                    </div>
+                    <div className="text-xs text-zinc-400 mt-1">{diffSummary}</div>
+                  </button>
+                );
+              })}
+              {(!workflow?.versions || workflow.versions.length === 0) && (
+                <p className="p-3 text-xs text-zinc-500">No versions saved yet</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Properties panel */}
-        {selectedNode && (
+        {selectedNode && !isReadOnly && (
           <div className="w-80 bg-zinc-900 border-l border-zinc-700 p-4 overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-white">Properties</h2>

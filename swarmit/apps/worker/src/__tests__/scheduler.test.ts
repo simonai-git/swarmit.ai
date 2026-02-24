@@ -16,6 +16,10 @@ const mockPrisma = vi.hoisted(() => ({
     findMany: vi.fn(),
     update: vi.fn(),
   },
+  notification: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+  },
 }));
 
 vi.mock('@swarmit/db', () => ({ prisma: mockPrisma }));
@@ -80,12 +84,14 @@ describe('processSchedulerJob', () => {
   });
 
   describe('check-budget-exceeded', () => {
-    it('disables autoSpawn when budget exceeded', async () => {
+    it('disables autoSpawn and creates critical notification when budget exceeded', async () => {
       mockPrisma.automationSetting.findMany.mockResolvedValue([
-        { userId: 'user-1', dailyBudgetCents: 500 },
+        { userId: 'user-1', dailyBudgetCents: 500, autoSpawn: true },
       ]);
       mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 6.0 } }); // 600 cents > 500
       mockPrisma.automationSetting.update.mockResolvedValue({});
+      mockPrisma.notification.findFirst.mockResolvedValue(null);
+      mockPrisma.notification.create.mockResolvedValue({});
 
       await processSchedulerJob({ type: 'check-budget-exceeded' });
 
@@ -93,17 +99,76 @@ describe('processSchedulerJob', () => {
         where: { userId: 'user-1' },
         data: { autoSpawn: false },
       });
+      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          type: 'BUDGET_EXCEEDED',
+          metadata: expect.objectContaining({ level: 'critical' }),
+        }),
+      });
     });
 
-    it('does not disable when under budget', async () => {
+    it('creates warning notification at 80%', async () => {
       mockPrisma.automationSetting.findMany.mockResolvedValue([
-        { userId: 'user-1', dailyBudgetCents: 1000 },
+        { userId: 'user-1', dailyBudgetCents: 1000, autoSpawn: true },
       ]);
-      mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 2.0 } }); // 200 cents < 1000
+      mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 8.5 } }); // 850 cents = 85% of 1000
+      mockPrisma.notification.findFirst.mockResolvedValue(null);
+      mockPrisma.notification.create.mockResolvedValue({});
 
       await processSchedulerJob({ type: 'check-budget-exceeded' });
 
       expect(mockPrisma.automationSetting.update).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          type: 'BUDGET_EXCEEDED',
+          metadata: expect.objectContaining({ level: 'warning' }),
+        }),
+      });
+    });
+
+    it('deduplicates notifications (no duplicate per day)', async () => {
+      mockPrisma.automationSetting.findMany.mockResolvedValue([
+        { userId: 'user-1', dailyBudgetCents: 1000, autoSpawn: true },
+      ]);
+      mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 8.5 } }); // 85% warning
+      mockPrisma.notification.findFirst.mockResolvedValue({ id: 'existing-notif' }); // Already exists
+
+      await processSchedulerJob({ type: 'check-budget-exceeded' });
+
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+    });
+
+    it('sends warning even when autoSpawn is already false', async () => {
+      mockPrisma.automationSetting.findMany.mockResolvedValue([
+        { userId: 'user-1', dailyBudgetCents: 1000, autoSpawn: false },
+      ]);
+      mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 8.5 } }); // 85%
+      mockPrisma.notification.findFirst.mockResolvedValue(null);
+      mockPrisma.notification.create.mockResolvedValue({});
+
+      await processSchedulerJob({ type: 'check-budget-exceeded' });
+
+      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          type: 'BUDGET_EXCEEDED',
+          metadata: expect.objectContaining({ level: 'warning' }),
+        }),
+      });
+    });
+
+    it('does not disable when under budget', async () => {
+      mockPrisma.automationSetting.findMany.mockResolvedValue([
+        { userId: 'user-1', dailyBudgetCents: 1000, autoSpawn: true },
+      ]);
+      mockPrisma.taskRun.aggregate.mockResolvedValue({ _sum: { cost: 2.0 } }); // 200 cents < 800 (80%)
+
+      await processSchedulerJob({ type: 'check-budget-exceeded' });
+
+      expect(mockPrisma.automationSetting.update).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
     });
   });
 });

@@ -12,7 +12,6 @@ import {
   Play,
   DollarSign,
   Settings,
-  User,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -32,7 +31,6 @@ const navItems = [
 
 const bottomItems = [
   { href: '/settings', label: 'Settings', icon: Settings },
-  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 interface AppSidebarProps {

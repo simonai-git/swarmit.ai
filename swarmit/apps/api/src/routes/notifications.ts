@@ -38,4 +38,16 @@ export async function notificationRoutes(app: FastifyInstance) {
     await notificationService.markAllAsRead(request.userId);
     return { success: true };
   });
+
+  // Delete single notification
+  app.delete<{ Params: { id: string } }>('/:id', { preHandler: [app.authenticate] }, async (request) => {
+    await notificationService.deleteNotification(request.params.id, request.userId);
+    return { success: true };
+  });
+
+  // Delete all notifications
+  app.delete('/', { preHandler: [app.authenticate] }, async (request) => {
+    await notificationService.deleteAllNotifications(request.userId);
+    return { success: true };
+  });
 }

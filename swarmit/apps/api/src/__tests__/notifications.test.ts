@@ -90,6 +90,38 @@ describe('notification routes', () => {
     expect(JSON.parse(res.body)).toEqual({ success: true });
   });
 
+  it('DELETE /notifications/:id deletes a notification', async () => {
+    prisma.notification.deleteMany.mockResolvedValue({ count: 1 });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/notifications/n1',
+      headers,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ success: true });
+    expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'n1', userId: 'test-user-id' },
+    });
+  });
+
+  it('DELETE /notifications deletes all notifications', async () => {
+    prisma.notification.deleteMany.mockResolvedValue({ count: 5 });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/notifications',
+      headers,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ success: true });
+    expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'test-user-id' },
+    });
+  });
+
   it('returns 401 without auth', async () => {
     const res = await app.inject({
       method: 'GET',

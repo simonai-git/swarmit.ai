@@ -54,7 +54,8 @@ export interface Task {
   updatedAt: string;
   assignee?: { id: string; name: string; specialization: { name: string } | null } | null;
   project?: { id: string; title: string } | null;
-  dependsOn?: Array<{ dependsOn: { id: string; title: string; status: string } }>;
+  dependsOn?: Array<{ id: string; dependsOn: { id: string; title: string; status: string } }>;
+  dependedOnBy?: Array<{ id: string; task: { id: string; title: string; status: string } }>;
   runs?: TaskRun[];
   comments?: TaskComment[];
   _count?: { comments: number; runs: number };
@@ -541,6 +542,12 @@ export const notifications = {
 
   markAllAsRead: () =>
     request<{ success: boolean }>('/notifications/read-all', { method: 'POST' }),
+
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/notifications/${id}`, { method: 'DELETE' }),
+
+  deleteAll: () =>
+    request<{ success: boolean }>('/notifications', { method: 'DELETE' }),
 };
 
 // ─── Export ────────────────────────────────────────────────
